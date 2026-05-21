@@ -1,0 +1,78 @@
+{
+  "name": "app",
+  "version": "2.99.0",
+  "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
+  "main": "scripts/server.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node node_modules/jest/bin/jest.js --config config/jest.config.cjs",
+    "test:smoke": "node tests/smoke-webcrypto.js",
+    "test:all": "npm test && npm run test:smoke",
+    "setup": "bash scripts/setup.sh",
+    "setup:linux": "bash scripts/setup-linux.sh",
+    "setup:macos": "bash scripts/setup-macos.sh",
+    "setup:windows": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
+    "setup:server:linux": "bash scripts/setup-server-linux.sh",
+    "native:build:wizard": "bash scripts/native-build-wizard.sh",
+    "tauri": "tauri",
+    "native:prepare": "node scripts/prepare-tauri-web.js",
+    "native:dev": "npm run native:prepare && tauri dev",
+    "native:build": "tauri build",
+    "native:build:mac:x86_64": "tauri build --target x86_64-apple-darwin --bundles app,dmg",
+    "native:build:mac:arm64": "tauri build --target aarch64-apple-darwin --bundles app,dmg",
+    "native:build:mac:universal": "tauri build --target universal-apple-darwin --bundles app,dmg",
+    "native:build:linux:x86_64": "tauri build --target x86_64-unknown-linux-gnu --bundles deb,rpm,appimage",
+    "native:build:linux:arm64": "tauri build --target aarch64-unknown-linux-gnu --bundles deb,rpm,appimage",
+    "native:build:linux": "tauri build --bundles deb,rpm,appimage",
+    "native:build:windows:x86_64": "tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi",
+    "native:build:windows:arm64": "tauri build --target aarch64-pc-windows-msvc --bundles nsis,msi",
+    "native:build:windows": "tauri build --bundles nsis,msi",
+    "monitor:prepare": "node scripts/prepare-monitor-tauri.js",
+    "monitor:dev": "npm run monitor:prepare && tauri dev --config src-tauri/tauri.monitor.conf.json",
+    "monitor:build": "tauri build --config src-tauri/tauri.monitor.conf.json",
+    "monitor:build:mac:x86_64": "tauri build --config src-tauri/tauri.monitor.conf.json --target x86_64-apple-darwin --bundles app,dmg",
+    "monitor:build:mac:arm64": "tauri build --config src-tauri/tauri.monitor.conf.json --target aarch64-apple-darwin --bundles app,dmg",
+    "monitor:build:mac:universal": "tauri build --config src-tauri/tauri.monitor.conf.json --target universal-apple-darwin --bundles app,dmg",
+    "monitor:build:linux:x86_64": "tauri build --config src-tauri/tauri.monitor.conf.json --target x86_64-unknown-linux-gnu --bundles deb,rpm,appimage",
+    "monitor:build:linux:arm64": "tauri build --config src-tauri/tauri.monitor.conf.json --target aarch64-unknown-linux-gnu --bundles deb,rpm,appimage",
+    "monitor:build:linux": "tauri build --config src-tauri/tauri.monitor.conf.json --bundles deb,rpm,appimage",
+    "monitor:build:windows:x86_64": "tauri build --config src-tauri/tauri.monitor.conf.json --target x86_64-pc-windows-msvc --bundles nsis,msi",
+    "monitor:build:windows:arm64": "tauri build --config src-tauri/tauri.monitor.conf.json --target aarch64-pc-windows-msvc --bundles nsis,msi",
+    "monitor:build:windows": "tauri build --config src-tauri/tauri.monitor.conf.json --bundles nsis,msi",
+    "docker:web:amd64": "docker buildx build --platform linux/amd64 -t poorija-cryptography:web-amd64 --load .",
+    "docker:web:arm64": "docker buildx build --platform linux/arm64 -t poorija-cryptography:web-arm64 --load ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Poorija/P00RIJA-Cryptography.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Poorija/P00RIJA-Cryptography/issues"
+  },
+  "homepage": "https://github.com/Poorija/P00RIJA-Cryptography#readme",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^3.4.17"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "express": "^5.2.1",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5",
+    "playwright": "^1.59.1",
+    "web-push": "^3.6.7",
+    "ws": "^8.20.0"
+  }
+}

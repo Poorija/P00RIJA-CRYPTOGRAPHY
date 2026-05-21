@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Main desktop window capability for P00RIJA Cryptography native integrations.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "notification:default",
+    "fs:default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPLOCALDATA/**/*" },
+        { "path": "$DOCUMENT/**/*" },
+        { "path": "$DESKTOP/**/*" },
+        { "path": "$DOWNLOAD/**/*" },
+        { "path": "$HOME/**/*" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Legacy optional Python-based Playwright harness.
+# The current automated checks live in package.json and run with:
+#   npm test
+#   npm run test:smoke
+
+playwright==1.42.0
+pytest-playwright==0.4.3

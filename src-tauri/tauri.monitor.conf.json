@@ -1,0 +1,88 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.11.1",
+  "productName": "P00RIJA Server Monitor",
+  "version": "2.99.0",
+  "identifier": "com.p00rija.servermonitor",
+  "build": {
+    "beforeBuildCommand": "npm run monitor:prepare",
+    "beforeDevCommand": "npm run monitor:prepare",
+    "frontendDist": "../dist/tauri-monitor",
+    "devUrl": "http://localhost:4174"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "P00RIJA Server Monitor",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "backgroundColor": "#101820"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "nsis", "msi", "app", "dmg"],
+    "category": "Utility",
+    "copyright": "Copyright P00RIJA",
+    "shortDescription": "Native monitor client for P00RIJA relay and TURN servers",
+    "longDescription": "P00RIJA Server Monitor is a native desktop client for connecting to a P00RIJA server monitor endpoint, viewing relay, TURN, peer, storage, memory, and system logs, and managing connected, suspended, and kicked users.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "xdg-desktop-portal",
+          "pipewire",
+          "wireplumber",
+          "fprintd",
+          "polkitd",
+          "pkexec"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libappindicator-gtk3",
+          "xdg-desktop-portal",
+          "pipewire",
+          "wireplumber",
+          "fprintd",
+          "polkit"
+        ]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "infoPlist": "Info.plist"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "app",
+  "version": "2.99.0",
+  "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
+  "main": "tmp_app.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node ../node_modules/jest/bin/jest.js --config ../config/jest.config.cjs",
+    "test:smoke": "node tests/smoke-webcrypto.js",
+    "test:all": "npm test && npm run test:smoke",
+    "setup": "bash scripts/setup.sh",
+    "docker:web:amd64": "docker buildx build --platform linux/amd64 -t poorija-cryptography:web-amd64 --load .",
+    "docker:web:arm64": "docker buildx build --platform linux/arm64 -t poorija-cryptography:web-arm64 --load ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Poorija/P00RIJA-Cryptography.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Poorija/P00RIJA-Cryptography/issues"
+  },
+  "homepage": "https://github.com/Poorija/P00RIJA-Cryptography#readme",
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "jsdom": "^22.1.0",
+    "tailwindcss": "^3.4.17"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5",
+    "playwright": "^1.59.1",
+    "web-push": "^3.6.7",
+    "ws": "^8.20.0"
+  }
+}

@@ -1,0 +1,375 @@
+:root {
+  color-scheme: dark;
+  --bg: #101820;
+  --panel: #17232b;
+  --panel-2: #1f2d35;
+  --text: #f4f7f8;
+  --muted: #a9b6bd;
+  --line: rgba(255, 255, 255, 0.12);
+  --accent: #3bc4a3;
+  --accent-2: #f2b84b;
+  --danger: #ff6b6b;
+  --info: #6ea8fe;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+  font-family: Vazirmatn, IRANSans, "Segoe UI", Tahoma, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #08120f;
+  background: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button.secondary {
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+button.warning {
+  color: #171000;
+  background: var(--accent-2);
+}
+
+button.danger {
+  color: #1b0505;
+  background: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  color: var(--text);
+  background: #0d151b;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 12px;
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 196, 163, 0.16);
+}
+
+label span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.monitor-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+.connect-panel,
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.connect-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(420px, 1.5fr) auto;
+  align-items: end;
+  gap: 18px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-block h1,
+.toolbar h2,
+.panel h3 {
+  margin: 0;
+}
+
+.brand-block h1 {
+  font-size: 1.15rem;
+}
+
+.brand-block p,
+.toolbar p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.connect-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.75fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.connection-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  min-width: 170px;
+}
+
+.badge {
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  color: #07110e;
+  background: var(--accent);
+}
+
+.badge.offline {
+  color: #1b0505;
+  background: var(--danger);
+}
+
+.hidden {
+  display: none;
+}
+
+.dashboard {
+  display: grid;
+  gap: 18px;
+}
+
+.dashboard.hidden {
+  display: none;
+}
+
+.toolbar,
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.toolbar {
+  min-height: 64px;
+}
+
+.toolbar-actions,
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-actions button {
+  width: 44px;
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.metric span,
+.system-grid span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 1.35rem;
+}
+
+.split-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+  gap: 18px;
+}
+
+.split-layout > .panel:first-child:not(.wide) {
+  min-width: 0;
+}
+
+.panel {
+  padding: 16px;
+  min-width: 0;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.table-wrap.compact {
+  max-height: 300px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.compact table {
+  min-width: 520px;
+}
+
+th,
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  vertical-align: middle;
+}
+
+th {
+  color: var(--muted);
+  background: #121d24;
+  position: sticky;
+  top: 0;
+}
+
+td.mono {
+  direction: ltr;
+  text-align: left;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.empty-row td {
+  color: var(--muted);
+  text-align: center;
+}
+
+.stack-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.system-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.system-grid div {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.system-grid strong {
+  display: block;
+  margin-top: 6px;
+  direction: ltr;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.logs {
+  margin: 14px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  background: #0a1116;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  color: #d7e4e6;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
+  .connect-panel,
+  .connect-form,
+  .split-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics-grid,
+  .system-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .monitor-shell {
+    padding: 10px;
+  }
+
+  .metrics-grid,
+  .system-grid,
+  .button-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+  }
+}

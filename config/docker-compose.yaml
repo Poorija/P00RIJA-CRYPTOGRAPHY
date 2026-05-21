@@ -1,0 +1,78 @@
+services:
+  poorija-cryptography:
+    image: poorija-crypto:v2.99
+    build:
+      context: ../
+      dockerfile: config/Dockerfile
+    container_name: Poorija-Cryptography_App
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8585
+    depends_on:
+      - chat-signal
+    ports:
+      - "8585:8585"
+    volumes:
+      - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/nginx/certs/fullchain.pem:ro
+      - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/nginx/certs/privkey.pem:ro
+    extra_hosts:
+      - "chat-signal:host-gateway"
+    networks:
+      - poorija_net
+    restart: unless-stopped
+
+  chat-signal:
+    build:
+      context: ../
+      dockerfile: config/Dockerfile.chat-signal
+    container_name: Poorija-Cryptography_ChatSignal
+    environment:
+      CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
+      CHAT_TURN_USERNAME: ${TURN_USER:-poorija}
+      CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      CHAT_PUBLIC_RELAY_ORIGIN: ${CHAT_PUBLIC_RELAY_ORIGIN:-}
+      CHAT_PUBLIC_PRESENCE_URL: ${CHAT_PUBLIC_PRESENCE_URL:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${DOMAIN:-localhost}}
+      CHAT_PUSH_STORE_PATH: /data/push-subscriptions.json
+      CHAT_OFFLINE_STORE_PATH: /data/offline-messages.json
+      CHAT_POLICY_STORE_PATH: /data/server-policy.json
+      CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
+    network_mode: host
+    volumes:
+      - ../data/chat-signal:/data
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: Poorija-Cryptography_Coturn
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --listening-ip=0.0.0.0
+      - --realm=${DOMAIN:-localhost}
+      - --server-name=${DOMAIN:-localhost}
+      - --cert=/etc/coturn/certs/cert.pem
+      - --pkey=/etc/coturn/certs/key.pem
+      - --user=${TURN_USER:-poorija}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      - --lt-cred-mech
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      - --min-port=49152
+      - --max-port=50152
+      - --external-ip=${EXTERNAL_IP:-127.0.0.1}
+      - --relay-ip=${EXTERNAL_IP:-127.0.0.1}
+    volumes:
+      - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/coturn/certs/cert.pem:ro
+      - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/coturn/certs/key.pem:ro
+    restart: unless-stopped
+
+networks:
+  poorija_net:
+    driver: bridge

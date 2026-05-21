@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>P00RIJA Cryptography uses the camera for secure chat video calls and supported device-authentication workflows.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>P00RIJA Cryptography uses the microphone for secure chat calls and voice messages.</string>
+  <key>NSFaceIDUsageDescription</key>
+  <string>P00RIJA Cryptography uses local authentication to unlock the app faster on supported devices.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>P00RIJA Cryptography needs user-selected file access to encrypt, decrypt, share, and securely delete files.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>P00RIJA Cryptography needs user-selected file access to save encrypted and decrypted output.</string>
+</dict>
+</plist>

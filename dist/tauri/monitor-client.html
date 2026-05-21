@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>P00RIJA Server Monitor</title>
+  <link rel="icon" href="./assets/icon-app.png">
+  <link rel="stylesheet" href="./vendor/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="./css/monitor-client.css">
+  <script defer src="./js/monitor-client.js"></script>
+</head>
+<body>
+  <main class="monitor-shell">
+    <section class="connect-panel" aria-label="Server connection">
+      <div class="brand-block">
+        <img src="./assets/icon-app.png" alt="" width="40" height="40">
+        <div>
+          <h1>P00RIJA Server Monitor</h1>
+          <p>مانیتورینگ نیتیو سرور، رله و TURN</p>
+        </div>
+      </div>
+      <form id="loginForm" class="connect-form" autocomplete="on">
+        <label>
+          <span>آدرس سرور</span>
+          <input id="serverUrlInput" name="serverUrl" type="text" dir="ltr" inputmode="url" placeholder="https://example.com:8585" required>
+        </label>
+        <label>
+          <span>رمز مانیتور</span>
+          <input id="passwordInput" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="loginButton" type="submit">
+          <i class="fa-solid fa-plug"></i>
+          اتصال
+        </button>
+      </form>
+      <div class="connection-line">
+        <span id="connectionBadge" class="badge offline">قطع</span>
+        <span id="statusText">آدرس سرور را وارد کنید.</span>
+      </div>
+    </section>
+
+    <section id="dashboard" class="dashboard hidden" aria-label="Monitor dashboard">
+      <header class="toolbar">
+        <div>
+          <h2 id="serverTitle">سرور</h2>
+          <p id="serverMeta">در انتظار اتصال</p>
+        </div>
+        <div class="toolbar-actions">
+          <button id="refreshButton" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+          <button id="logoutButton" type="button" title="Logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </header>
+
+      <section class="metrics-grid" aria-label="Metrics">
+        <article class="metric">
+          <span>کاربران آنلاین</span>
+          <strong id="metricPeers">0</strong>
+        </article>
+        <article class="metric">
+          <span>پیام‌های صف</span>
+          <strong id="metricQueue">0</strong>
+        </article>
+        <article class="metric">
+          <span>Relay</span>
+          <strong id="metricRelays">0</strong>
+        </article>
+        <article class="metric">
+          <span>TURN</span>
+          <strong id="metricTurn">خاموش</strong>
+        </article>
+        <article class="metric">
+          <span>RAM</span>
+          <strong id="metricMemory">0 MB</strong>
+        </article>
+        <article class="metric">
+          <span>CPU</span>
+          <strong id="metricCpu">0%</strong>
+        </article>
+      </section>
+
+      <div class="split-layout">
+        <section class="panel wide">
+          <div class="panel-head">
+            <h3>کاربران متصل</h3>
+            <span id="peersCount">0</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>کاربر</th>
+                  <th>شناسه</th>
+                  <th>Fingerprint</th>
+                  <th>آخرین حضور</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody id="peersTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>اعلان سیستمی</h3>
+            <span id="broadcastResult"></span>
+          </div>
+          <form id="broadcastForm" class="stack-form">
+            <label>
+              <span>گیرنده</span>
+              <select id="broadcastTarget">
+                <option value="">همه کاربران آنلاین</option>
+              </select>
+            </label>
+            <label>
+              <span>پیام</span>
+              <textarea id="broadcastMessage" rows="4" placeholder="متن پیام سیستمی"></textarea>
+            </label>
+            <label>
+              <span>فایل اختیاری</span>
+              <input id="broadcastFile" type="file">
+            </label>
+            <button type="submit">
+              <i class="fa-solid fa-paper-plane"></i>
+              ارسال
+            </button>
+          </form>
+        </section>
+      </div>
+
+      <div class="split-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>کاربران تعلیق‌شده</h3>
+            <span id="suspendedCount">0</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>کاربر</th>
+                  <th>تا زمان</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody id="suspendedTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>کاربران اخراج‌شده</h3>
+            <span id="kickedCount">0</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>کاربر</th>
+                  <th>مدت</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody id="kickedTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="split-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>نگه‌داری سرور</h3>
+            <span id="maintenanceResult"></span>
+          </div>
+          <div class="button-grid">
+            <button id="clearOfflineButton" type="button">
+              <i class="fa-solid fa-inbox"></i>
+              پاک کردن صف آفلاین
+            </button>
+            <button id="optimizeRamButton" type="button">
+              <i class="fa-solid fa-memory"></i>
+              بهینه‌سازی RAM
+            </button>
+            <button id="clearMemoryButton" type="button">
+              <i class="fa-solid fa-broom"></i>
+              پاک‌سازی نشست‌های مرده
+            </button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>رمز مانیتور</h3>
+            <span id="passwordResult"></span>
+          </div>
+          <form id="passwordForm" class="stack-form">
+            <label>
+              <span>رمز فعلی</span>
+              <input id="oldPasswordInput" type="password" autocomplete="current-password">
+            </label>
+            <label>
+              <span>رمز جدید</span>
+              <input id="newPasswordInput" type="password" autocomplete="new-password" minlength="6">
+            </label>
+            <button type="submit">
+              <i class="fa-solid fa-key"></i>
+              تغییر رمز
+            </button>
+          </form>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>وضعیت سیستم</h3>
+          <span id="lastUpdate">-</span>
+        </div>
+        <div class="system-grid">
+          <div><span>Node</span><strong id="sysNode">-</strong></div>
+          <div><span>Platform</span><strong id="sysPlatform">-</strong></div>
+          <div><span>Ports</span><strong id="sysPorts">-</strong></div>
+          <div><span>Storage</span><strong id="sysStorage">-</strong></div>
+          <div><span>Uptime</span><strong id="sysUptime">-</strong></div>
+          <div><span>Traffic</span><strong id="sysTraffic">-</strong></div>
+        </div>
+        <pre id="logsPanel" class="logs" dir="ltr"></pre>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

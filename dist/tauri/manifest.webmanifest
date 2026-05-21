@@ -1,0 +1,134 @@
+{
+  "name": "P00RIJA Cryptography",
+  "short_name": "P00RIJA Crypto",
+  "id": "./",
+  "description": "Client-side cryptography dashboard with modern Web Crypto workflows, install shortcuts, and offline-ready access.",
+  "start_url": "./",
+  "scope": "./",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "lang": "fa",
+  "dir": "rtl",
+  "categories": [
+    "security",
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "./assets/pwa-icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/pwa-icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/pwa-icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Encrypt File",
+      "short_name": "Encrypt",
+      "description": "Jump directly to the file encryption dashboard.",
+      "url": "./index.html#encrypt",
+      "icons": [
+        {
+          "src": "./assets/pwa-icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Decrypt File",
+      "short_name": "Decrypt",
+      "description": "Open the decrypt workspace immediately.",
+      "url": "./index.html#decrypt",
+      "icons": [
+        {
+          "src": "./assets/pwa-icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Keys",
+      "short_name": "Keys",
+      "description": "Open key management.",
+      "url": "./index.html#keys",
+      "icons": [
+        {
+          "src": "./assets/pwa-icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings",
+      "description": "Jump to themes, typography, and security settings.",
+      "url": "./index.html#settings",
+      "icons": [
+        {
+          "src": "./assets/pwa-icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "./index.html?share-target=1#share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "text/plain",
+            "application/json",
+            "application/octet-stream",
+            ".poorija",
+            ".poorija-backup",
+            ".poorija-share"
+          ]
+        }
+      ]
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "./index.html#decrypt",
+      "accept": {
+        "application/octet-stream": [
+          ".poorija"
+        ],
+        "application/json": [
+          ".poorija-backup"
+        ]
+      }
+    }
+  ]
+}

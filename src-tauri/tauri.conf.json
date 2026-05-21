@@ -1,0 +1,102 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.11.1",
+  "productName": "P00RIJA Cryptography",
+  "version": "2.99.0",
+  "identifier": "com.p00rija.cryptography",
+  "build": {
+    "beforeBuildCommand": "npm run native:prepare",
+    "beforeDevCommand": "npm run native:prepare",
+    "frontendDist": "../dist/tauri",
+    "devUrl": "http://localhost:4173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "P00RIJA Cryptography",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "backgroundColor": "#0f172a"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "nsis", "msi", "app", "dmg"],
+    "category": "Utility",
+    "copyright": "Copyright P00RIJA",
+    "shortDescription": "Native client-side encryption suite",
+    "longDescription": "P00RIJA Cryptography is a native desktop shell for the fully client-side encryption, decryption, secure sharing, passkey, notification, chat, and secure deletion workflows.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["poorija"],
+        "name": "P00RIJA encrypted file",
+        "description": "P00RIJA encrypted file",
+        "role": "Editor"
+      },
+      {
+        "ext": ["poorija-backup", "poorija-share"],
+        "name": "P00RIJA secure bundle",
+        "description": "P00RIJA secure backup or share bundle",
+        "role": "Editor"
+      }
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "xdg-desktop-portal",
+          "pipewire",
+          "wireplumber",
+          "fprintd",
+          "polkitd",
+          "pkexec"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libappindicator-gtk3",
+          "xdg-desktop-portal",
+          "pipewire",
+          "wireplumber",
+          "fprintd",
+          "polkit"
+        ]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "infoPlist": "Info.plist"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}

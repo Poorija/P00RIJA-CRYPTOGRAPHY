@@ -1,0 +1,10 @@
+# P00RIJA Standalone Relay
+# This Dockerfile only includes the signaling server.
+FROM node:20-alpine
+WORKDIR /app
+COPY standalone-relay/package.json .
+RUN npm install --production
+COPY standalone-relay/server.js .
+COPY vendor ./vendor
+EXPOSE 9000 9001
+CMD ["node", "--expose-gc", "server.js"]

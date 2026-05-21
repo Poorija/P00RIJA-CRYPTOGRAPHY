@@ -1,0 +1,7 @@
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install --omit=dev express@5.2.1 peer@1.0.2 web-push@3.6.7 ws@8.20.0
+COPY scripts/server.js ./scripts/server.js
+COPY vendor ./vendor
+EXPOSE 9000 9001
+CMD ["node", "--expose-gc", "scripts/server.js"]

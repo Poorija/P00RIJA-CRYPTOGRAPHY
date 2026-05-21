@@ -1,0 +1,49 @@
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: standalone-relay/Dockerfile.relay
+    container_name: Poorija-Standalone-Relay
+    environment:
+      CHAT_SIGNAL_PORT: 9000
+      CHAT_PRESENCE_PORT: 9001
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
+      CHAT_TURN_URL: ${CHAT_TURN_URL:-turns:${DOMAIN:-localhost}:5349?transport=tcp}
+      CHAT_TURN_USERNAME: ${TURN_USER:-poorija}
+      CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      CHAT_PUSH_STORE_PATH: /data/push-subscriptions.json
+      CHAT_OFFLINE_STORE_PATH: /data/offline-messages.json
+      CHAT_POLICY_STORE_PATH: /data/server-policy.json
+      CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
+    network_mode: host
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: Poorija-Standalone-Coturn
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --realm=${DOMAIN:-localhost}
+      - --server-name=${DOMAIN:-localhost}
+      - --cert=/etc/coturn/certs/cert.pem
+      - --pkey=/etc/coturn/certs/key.pem
+      - --user=${TURN_USER:-poorija}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      - --lt-cred-mech
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      - --min-port=49152
+      - --max-port=50152
+      - --external-ip=${EXTERNAL_IP:-127.0.0.1}
+    volumes:
+      - ${SSL_CERT_PATH:-./certs/cert.pem}:/etc/coturn/certs/cert.pem:ro
+      - ${SSL_KEY_PATH:-./certs/key.pem}:/etc/coturn/certs/key.pem:ro
+    restart: unless-stopped
