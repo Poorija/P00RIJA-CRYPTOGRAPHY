@@ -1,0 +1,8763 @@
+{
+ "decls": [
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_PROFILE_STORAGE_KEY"
+   ],
+   "start": 15,
+   "end": 71,
+   "line": 2
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_IDENTITY_STORAGE_KEY"
+   ],
+   "start": 72,
+   "end": 130,
+   "line": 3
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_HISTORY_STORAGE_KEY"
+   ],
+   "start": 131,
+   "end": 187,
+   "line": 4
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_SESSION_KEYS_STORAGE_KEY"
+   ],
+   "start": 188,
+   "end": 254,
+   "line": 5
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_SPACES_STORAGE_KEY"
+   ],
+   "start": 255,
+   "end": 309,
+   "line": 6
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_CALLS_STORAGE_KEY"
+   ],
+   "start": 310,
+   "end": 362,
+   "line": 7
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_CONTACTS_STORAGE_KEY"
+   ],
+   "start": 363,
+   "end": 421,
+   "line": 8
+  },
+  {
+   "kind": "const",
+   "names": [
+    "voiceWaveCache"
+   ],
+   "start": 852,
+   "end": 885,
+   "line": 15
+  },
+  {
+   "kind": "const",
+   "names": [
+    "VOICE_WAVE_BARS"
+   ],
+   "start": 886,
+   "end": 913,
+   "line": 16
+  },
+  {
+   "kind": "const",
+   "names": [
+    "FILE_CHUNK_BYTES"
+   ],
+   "start": 1715,
+   "end": 1750,
+   "line": 31
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MAX_FILE_BYTES"
+   ],
+   "start": 1751,
+   "end": 1792,
+   "line": 32
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MAX_OFFLINE_FILE_BYTES"
+   ],
+   "start": 2010,
+   "end": 2059,
+   "line": 36
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_VAULT_MAX_FILE_BYTES"
+   ],
+   "start": 2201,
+   "end": 2253,
+   "line": 39
+  },
+  {
+   "kind": "const",
+   "names": [
+    "DATA_CHANNEL_HIGH_WATER"
+   ],
+   "start": 2485,
+   "end": 2533,
+   "line": 43
+  },
+  {
+   "kind": "const",
+   "names": [
+    "DATA_CHANNEL_LOW_WATER"
+   ],
+   "start": 2534,
+   "end": 2581,
+   "line": 44
+  },
+  {
+   "kind": "const",
+   "names": [
+    "TRANSFER_STALL_TIMEOUT_MS"
+   ],
+   "start": 2731,
+   "end": 2771,
+   "line": 47
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MAX_PROFILE_AVATAR_BYTES"
+   ],
+   "start": 2772,
+   "end": 2821,
+   "line": 48
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SESSION_READY_TIMEOUT_MS"
+   ],
+   "start": 2822,
+   "end": 2860,
+   "line": 49
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_RING_TIMEOUT_MS"
+   ],
+   "start": 3124,
+   "end": 3159,
+   "line": 54
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_CONNECT_TIMEOUT_MS"
+   ],
+   "start": 3355,
+   "end": 3393,
+   "line": 58
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_RENDER_WINDOW_SIZE"
+   ],
+   "start": 3394,
+   "end": 3429,
+   "line": 59
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_REACTION_GROUPS"
+   ],
+   "start": 3430,
+   "end": 3763,
+   "line": 60
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_REACTION_EMOJIS"
+   ],
+   "start": 3764,
+   "end": 3847,
+   "line": 65
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_RINGTONE_OPTIONS"
+   ],
+   "start": 3848,
+   "end": 5436,
+   "line": 66
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_MESSAGE_TONE_OPTIONS"
+   ],
+   "start": 5437,
+   "end": 6478,
+   "line": 78
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_DB_NAME"
+   ],
+   "start": 8365,
+   "end": 8403,
+   "line": 119
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_DB_VERSION"
+   ],
+   "start": 8404,
+   "end": 8431,
+   "line": 120
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_STORE"
+   ],
+   "start": 8432,
+   "end": 8460,
+   "line": 121
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_KEY_STORAGE_KEY"
+   ],
+   "start": 8461,
+   "end": 8516,
+   "line": 122
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_BUDGET_BYTES"
+   ],
+   "start": 8517,
+   "end": 8562,
+   "line": 123
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MEDIA_TYPES"
+   ],
+   "start": 8563,
+   "end": 8636,
+   "line": 124
+  },
+  {
+   "kind": "let",
+   "names": [
+    "mediaDbPromise"
+   ],
+   "start": 8638,
+   "end": 8664,
+   "line": 126
+  },
+  {
+   "kind": "let",
+   "names": [
+    "mediaKeyPromise"
+   ],
+   "start": 8665,
+   "end": 8692,
+   "line": 127
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openMediaDb"
+   ],
+   "start": 8694,
+   "end": 9610,
+   "line": 129
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mediaTx"
+   ],
+   "start": 9612,
+   "end": 10139,
+   "line": 154
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureMediaKey"
+   ],
+   "start": 10141,
+   "end": 10950,
+   "line": 168
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bytesToBase64"
+   ],
+   "start": 10952,
+   "end": 11256,
+   "line": 187
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "base64ToBytes"
+   ],
+   "start": 11257,
+   "end": 11464,
+   "line": 196
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "missingMediaHtml"
+   ],
+   "start": 11466,
+   "end": 11631,
+   "line": 203
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isMediaEntry"
+   ],
+   "start": 11632,
+   "end": 11720,
+   "line": 206
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "persistMessageMedia"
+   ],
+   "start": 11865,
+   "end": 13254,
+   "line": 212
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "readMessageMedia"
+   ],
+   "start": 13256,
+   "end": 13926,
+   "line": 245
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "dropMessageMedia"
+   ],
+   "start": 13928,
+   "end": 14425,
+   "line": 259
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "dropConversationMedia"
+   ],
+   "start": 14427,
+   "end": 15241,
+   "line": 271
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hydrateConversationMedia"
+   ],
+   "start": 15459,
+   "end": 16761,
+   "line": 297
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mediaStorageStats"
+   ],
+   "start": 16763,
+   "end": 17669,
+   "line": 332
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "enforceMediaBudget"
+   ],
+   "start": 17807,
+   "end": 18736,
+   "line": 357
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearMediaVault"
+   ],
+   "start": 18738,
+   "end": 20158,
+   "line": 385
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_CHROME_IDLE_MS"
+   ],
+   "start": 20699,
+   "end": 20732,
+   "line": 432
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isCallTile"
+   ],
+   "start": 20889,
+   "end": 21214,
+   "line": 436
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callShellElement"
+   ],
+   "start": 21216,
+   "end": 21301,
+   "line": 443
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "revealCallChrome"
+   ],
+   "start": 21827,
+   "end": 21915,
+   "line": 454
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "noteCallActivity"
+   ],
+   "start": 21916,
+   "end": 22011,
+   "line": 457
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCallChromeWatcher"
+   ],
+   "start": 22012,
+   "end": 22918,
+   "line": 461
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopCallChromeWatcher"
+   ],
+   "start": 22919,
+   "end": 23127,
+   "line": 483
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallMoreSheet"
+   ],
+   "start": 23129,
+   "end": 23579,
+   "line": 489
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_FIT_TOLERANCE"
+   ],
+   "start": 24684,
+   "end": 24716,
+   "line": 518
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_REACTION_MS"
+   ],
+   "start": 24853,
+   "end": 24883,
+   "line": 521
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callBackdropStyle"
+   ],
+   "start": 25511,
+   "end": 25614,
+   "line": 531
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callStageElements"
+   ],
+   "start": 25616,
+   "end": 25773,
+   "line": 535
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stagePrimaryVideo"
+   ],
+   "start": 25774,
+   "end": 25885,
+   "line": 538
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncStageBackdrop"
+   ],
+   "start": 26112,
+   "end": 26925,
+   "line": 545
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyCallStageFit"
+   ],
+   "start": 26927,
+   "end": 28426,
+   "line": 572
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "refreshCallLayout"
+   ],
+   "start": 28428,
+   "end": 28510,
+   "line": 606
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "watchCallStageSize"
+   ],
+   "start": 28656,
+   "end": 28966,
+   "line": 612
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindCallSelfViewGestures"
+   ],
+   "start": 29103,
+   "end": 29440,
+   "line": 621
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindCallTileGestures"
+   ],
+   "start": 29441,
+   "end": 32378,
+   "line": 627
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCallLevelMeter"
+   ],
+   "start": 32539,
+   "end": 33765,
+   "line": 712
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopCallLevelMeter"
+   ],
+   "start": 33767,
+   "end": 34262,
+   "line": 742
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallHeroCopy"
+   ],
+   "start": 34414,
+   "end": 35004,
+   "line": 758
+  },
+  {
+   "kind": "const",
+   "names": [
+    "RICH_KINDS"
+   ],
+   "start": 35755,
+   "end": 35815,
+   "line": 779
+  },
+  {
+   "kind": "const",
+   "names": [
+    "POLL_MAX_OPTIONS"
+   ],
+   "start": 35816,
+   "end": 35844,
+   "line": 780
+  },
+  {
+   "kind": "const",
+   "names": [
+    "POLL_MIN_OPTIONS"
+   ],
+   "start": 35845,
+   "end": 35872,
+   "line": 781
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "richPayloadOf"
+   ],
+   "start": 35874,
+   "end": 36022,
+   "line": 783
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "safeJsonParse"
+   ],
+   "start": 36023,
+   "end": 36122,
+   "line": 787
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendRichMessage"
+   ],
+   "start": 36200,
+   "end": 42068,
+   "line": 792
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pollVoterId"
+   ],
+   "start": 42143,
+   "end": 42241,
+   "line": 912
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizePollVotes"
+   ],
+   "start": 42242,
+   "end": 42370,
+   "line": 915
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pollTally"
+   ],
+   "start": 42371,
+   "end": 42839,
+   "line": 919
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "castPollVote"
+   ],
+   "start": 42841,
+   "end": 44555,
+   "line": 934
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyIncomingVote"
+   ],
+   "start": 44557,
+   "end": 44983,
+   "line": 969
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "togglePollClosed"
+   ],
+   "start": 44985,
+   "end": 45375,
+   "line": 981
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shareCurrentLocation"
+   ],
+   "start": 45740,
+   "end": 46851,
+   "line": 997
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CONTACT_CARD_AVATAR_PX"
+   ],
+   "start": 47198,
+   "end": 47232,
+   "line": 1031
+  },
+  {
+   "kind": "const",
+   "names": [
+    "RICH_MESSAGE_MAX_BYTES"
+   ],
+   "start": 47233,
+   "end": 47274,
+   "line": 1032
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "thumbnailDataUrl"
+   ],
+   "start": 47276,
+   "end": 48051,
+   "line": 1034
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shareableContacts"
+   ],
+   "start": 48053,
+   "end": 48632,
+   "line": 1054
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openConversationWithFingerprint"
+   ],
+   "start": 48634,
+   "end": 49026,
+   "line": 1069
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "adoptSharedContact"
+   ],
+   "start": 49028,
+   "end": 50713,
+   "line": 1081
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spaceRoleOf"
+   ],
+   "start": 51593,
+   "end": 51928,
+   "line": 1137
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "localSpaceRole"
+   ],
+   "start": 51929,
+   "end": 52294,
+   "line": 1143
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "canManageSpace"
+   ],
+   "start": 52295,
+   "end": 52390,
+   "line": 1150
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spaceNoteId"
+   ],
+   "start": 52652,
+   "end": 52946,
+   "line": 1158
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "appendSpaceNote"
+   ],
+   "start": 52947,
+   "end": 53365,
+   "line": 1166
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "commitSpaceEdit"
+   ],
+   "start": 53525,
+   "end": 54367,
+   "line": 1183
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleSpaceRemoval"
+   ],
+   "start": 54369,
+   "end": 56806,
+   "line": 1202
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "purgeSpaceFromRelay"
+   ],
+   "start": 57121,
+   "end": 57951,
+   "line": 1262
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "directPeerFingerprintForBadge"
+   ],
+   "start": 57952,
+   "end": 58086,
+   "line": 1282
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activeGroupSpace"
+   ],
+   "start": 58087,
+   "end": 58229,
+   "line": 1286
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renameActiveSpace"
+   ],
+   "start": 58231,
+   "end": 58911,
+   "line": 1291
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "editActiveSpaceDescription"
+   ],
+   "start": 58913,
+   "end": 59420,
+   "line": 1306
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setActiveSpaceAvatar"
+   ],
+   "start": 59422,
+   "end": 60811,
+   "line": 1318
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spaceMemberRecords"
+   ],
+   "start": 60813,
+   "end": 62680,
+   "line": 1350
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "addMembersToActiveSpace"
+   ],
+   "start": 62682,
+   "end": 63574,
+   "line": 1396
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "removeMemberFromActiveSpace"
+   ],
+   "start": 63576,
+   "end": 64920,
+   "line": 1415
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleSpaceAdmin"
+   ],
+   "start": 64922,
+   "end": 65646,
+   "line": 1445
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "leaveActiveSpace"
+   ],
+   "start": 65648,
+   "end": 67875,
+   "line": 1462
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openSpaceInfoPanel"
+   ],
+   "start": 67951,
+   "end": 68173,
+   "line": 1510
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeSpaceInfoPanel"
+   ],
+   "start": 68174,
+   "end": 68299,
+   "line": 1517
+  },
+  {
+   "kind": "let",
+   "names": [
+    "permsDialogFor"
+   ],
+   "start": 68743,
+   "end": 68769,
+   "line": 1527
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closePermsDialog"
+   ],
+   "start": 68827,
+   "end": 68939,
+   "line": 1529
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openPermsDialog"
+   ],
+   "start": 68941,
+   "end": 69040,
+   "line": 1534
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderPermsDialog"
+   ],
+   "start": 69042,
+   "end": 72134,
+   "line": 1539
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderSpaceInfoPanel"
+   ],
+   "start": 72136,
+   "end": 78005,
+   "line": 1593
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderSpaceAddPicker"
+   ],
+   "start": 78007,
+   "end": 79253,
+   "line": 1681
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_LOCK_STORAGE_KEY"
+   ],
+   "start": 79835,
+   "end": 79885,
+   "line": 1713
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_LOCK_ITERATIONS"
+   ],
+   "start": 79886,
+   "end": 79922,
+   "line": 1714
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chatLockConfig"
+   ],
+   "start": 79924,
+   "end": 80091,
+   "line": 1716
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chatLockEnabled"
+   ],
+   "start": 80092,
+   "end": 80166,
+   "line": 1720
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizePinDigits"
+   ],
+   "start": 80545,
+   "end": 80775,
+   "line": 1728
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "derivePinDigest"
+   ],
+   "start": 80776,
+   "end": 81214,
+   "line": 1734
+  },
+  {
+   "kind": "const",
+   "names": [
+    "VAULT_LOCK_STORAGE_KEY"
+   ],
+   "start": 81709,
+   "end": 81761,
+   "line": 1751
+  },
+  {
+   "kind": "let",
+   "names": [
+    "vaultUnlocked"
+   ],
+   "start": 81762,
+   "end": 81788,
+   "line": 1752
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "vaultLockConfig"
+   ],
+   "start": 81790,
+   "end": 81932,
+   "line": 1754
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "vaultLockState"
+   ],
+   "start": 81933,
+   "end": 82098,
+   "line": 1757
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "enableVaultLock"
+   ],
+   "start": 82099,
+   "end": 82777,
+   "line": 1761
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "disableVaultLock"
+   ],
+   "start": 82778,
+   "end": 82932,
+   "line": 1779
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "tryUnlockVault"
+   ],
+   "start": 82933,
+   "end": 83247,
+   "line": 1784
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "lockVaultNow"
+   ],
+   "start": 83248,
+   "end": 83298,
+   "line": 1792
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CONVO_LOCK_STORAGE_KEY"
+   ],
+   "start": 84684,
+   "end": 84737,
+   "line": 1822
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CONVO_AUTOLOCK_CHOICES"
+   ],
+   "start": 84738,
+   "end": 84787,
+   "line": 1823
+  },
+  {
+   "kind": "const",
+   "names": [
+    "convoLockOpenUntil"
+   ],
+   "start": 84928,
+   "end": 84965,
+   "line": 1826
+  },
+  {
+   "kind": "let",
+   "names": [
+    "convoLockTicker"
+   ],
+   "start": 84966,
+   "end": 84990,
+   "line": 1827
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "convoLocks"
+   ],
+   "start": 84992,
+   "end": 85075,
+   "line": 1829
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveConvoLocks"
+   ],
+   "start": 85076,
+   "end": 85162,
+   "line": 1832
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationHasLock"
+   ],
+   "start": 85163,
+   "end": 85259,
+   "line": 1835
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationLocked"
+   ],
+   "start": 85324,
+   "end": 85652,
+   "line": 1839
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "touchConversationLock"
+   ],
+   "start": 85798,
+   "end": 86125,
+   "line": 1850
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setConversationLock"
+   ],
+   "start": 86126,
+   "end": 87121,
+   "line": 1857
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "unlockConversation"
+   ],
+   "start": 87122,
+   "end": 87629,
+   "line": 1881
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "removeConversationLock"
+   ],
+   "start": 87630,
+   "end": 88583,
+   "line": 1892
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "lockConversationNow"
+   ],
+   "start": 88584,
+   "end": 88714,
+   "line": 1915
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startConvoLockTicker"
+   ],
+   "start": 88866,
+   "end": 89386,
+   "line": 1922
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "lockAllConversationsNow"
+   ],
+   "start": 89433,
+   "end": 89578,
+   "line": 1941
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "askForConversationLock"
+   ],
+   "start": 89812,
+   "end": 91281,
+   "line": 1951
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "promptUnlockConversation"
+   ],
+   "start": 91302,
+   "end": 91762,
+   "line": 1981
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "enableChatLock"
+   ],
+   "start": 93470,
+   "end": 94095,
+   "line": 2030
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "disableChatLock"
+   ],
+   "start": 94096,
+   "end": 94306,
+   "line": 2048
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "digestMatches"
+   ],
+   "start": 94441,
+   "end": 94702,
+   "line": 2056
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "tryUnlockChat"
+   ],
+   "start": 94703,
+   "end": 95273,
+   "line": 2063
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "lockChatNow"
+   ],
+   "start": 95274,
+   "end": 95406,
+   "line": 2074
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "refreshChatLockState"
+   ],
+   "start": 95648,
+   "end": 95880,
+   "line": 2083
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncChatLockUi"
+   ],
+   "start": 95881,
+   "end": 96511,
+   "line": 2091
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "noteChatActivity"
+   ],
+   "start": 96662,
+   "end": 96734,
+   "line": 2105
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startChatLockWatcher"
+   ],
+   "start": 96735,
+   "end": 97262,
+   "line": 2108
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "globalSearch"
+   ],
+   "start": 97339,
+   "end": 99659,
+   "line": 2124
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildSearchSnippet"
+   ],
+   "start": 99660,
+   "end": 100030,
+   "line": 2178
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderGlobalSearch"
+   ],
+   "start": 100031,
+   "end": 103231,
+   "line": 2185
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "highlightNeedle"
+   ],
+   "start": 103232,
+   "end": 103529,
+   "line": 2235
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "jumpToSearchHit"
+   ],
+   "start": 103530,
+   "end": 104515,
+   "line": 2241
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeGlobalSearch"
+   ],
+   "start": 104516,
+   "end": 104776,
+   "line": 2263
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SAFETY_WORDS"
+   ],
+   "start": 105117,
+   "end": 105424,
+   "line": 2276
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "safetyNumber"
+   ],
+   "start": 105425,
+   "end": 106068,
+   "line": 2282
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SAS_EMOJI"
+   ],
+   "start": 107080,
+   "end": 109700,
+   "line": 2311
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SAS_DOMAIN"
+   ],
+   "start": 109701,
+   "end": 109745,
+   "line": 2345
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SAS_LENGTH"
+   ],
+   "start": 109746,
+   "end": 109767,
+   "line": 2346
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "verificationEmoji"
+   ],
+   "start": 109769,
+   "end": 110418,
+   "line": 2348
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallVerification"
+   ],
+   "start": 110562,
+   "end": 112778,
+   "line": 2362
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "verifiedPeers"
+   ],
+   "start": 112780,
+   "end": 112932,
+   "line": 2404
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isPeerVerified"
+   ],
+   "start": 112933,
+   "end": 113036,
+   "line": 2408
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setPeerVerified"
+   ],
+   "start": 113037,
+   "end": 113304,
+   "line": 2411
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderSafetyPanel"
+   ],
+   "start": 113305,
+   "end": 115801,
+   "line": 2419
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "portalToBody"
+   ],
+   "start": 116077,
+   "end": 116250,
+   "line": 2456
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openSafetyPanel"
+   ],
+   "start": 116251,
+   "end": 116527,
+   "line": 2461
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeSafetyPanel"
+   ],
+   "start": 116528,
+   "end": 116630,
+   "line": 2469
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "capturePointerSafely"
+   ],
+   "start": 117362,
+   "end": 117505,
+   "line": 2482
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "releasePointerSafely"
+   ],
+   "start": 117506,
+   "end": 117651,
+   "line": 2485
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SWIPE_TRIGGER_PX"
+   ],
+   "start": 117652,
+   "end": 117680,
+   "line": 2488
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SWIPE_MAX_PX"
+   ],
+   "start": 117681,
+   "end": 117705,
+   "line": 2489
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindSwipeToReply"
+   ],
+   "start": 117949,
+   "end": 120432,
+   "line": 2494
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectionCount"
+   ],
+   "start": 120508,
+   "end": 120579,
+   "line": 2557
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "enterSelectionMode"
+   ],
+   "start": 120809,
+   "end": 121019,
+   "line": 2563
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "exitSelectionMode"
+   ],
+   "start": 121020,
+   "end": 121167,
+   "line": 2570
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleMessageSelected"
+   ],
+   "start": 121168,
+   "end": 121495,
+   "line": 2576
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncSelectionBar"
+   ],
+   "start": 121496,
+   "end": 121788,
+   "line": 2587
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectedEntriesInOrder"
+   ],
+   "start": 121789,
+   "end": 121979,
+   "line": 2594
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "forwardSelectionTo"
+   ],
+   "start": 121981,
+   "end": 122757,
+   "line": 2599
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteSelection"
+   ],
+   "start": 122759,
+   "end": 123253,
+   "line": 2618
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "copySelection"
+   ],
+   "start": 123255,
+   "end": 123866,
+   "line": 2630
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SPACE_PERMISSIONS"
+   ],
+   "start": 125382,
+   "end": 125590,
+   "line": 2670
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SPACE_PERMISSION_LABELS"
+   ],
+   "start": 125591,
+   "end": 126198,
+   "line": 2675
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spacePermissions"
+   ],
+   "start": 126199,
+   "end": 126592,
+   "line": 2689
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "memberOverrides"
+   ],
+   "start": 126760,
+   "end": 127009,
+   "line": 2701
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "permissionsForMember"
+   ],
+   "start": 127132,
+   "end": 127423,
+   "line": 2707
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "localMemberOverrideKey"
+   ],
+   "start": 127424,
+   "end": 127684,
+   "line": 2715
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "memberMay"
+   ],
+   "start": 127685,
+   "end": 127996,
+   "line": 2720
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleMemberPermission"
+   ],
+   "start": 128171,
+   "end": 129652,
+   "line": 2730
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "resetMemberPermissions"
+   ],
+   "start": 129886,
+   "end": 130500,
+   "line": 2762
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleSpacePermission"
+   ],
+   "start": 130501,
+   "end": 131427,
+   "line": 2775
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "guardGroupSend"
+   ],
+   "start": 131487,
+   "end": 132597,
+   "line": 2793
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mentionCandidates"
+   ],
+   "start": 132674,
+   "end": 132991,
+   "line": 2816
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mentionTokenFor"
+   ],
+   "start": 132992,
+   "end": 133221,
+   "line": 2825
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "currentMentionQuery"
+   ],
+   "start": 133222,
+   "end": 133500,
+   "line": 2830
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderMentionPicker"
+   ],
+   "start": 133501,
+   "end": 134640,
+   "line": 2835
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyMention"
+   ],
+   "start": 134641,
+   "end": 135272,
+   "line": 2860
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "decorateMentions"
+   ],
+   "start": 135419,
+   "end": 135829,
+   "line": 2877
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "messageMentionsLocalUser"
+   ],
+   "start": 135830,
+   "end": 136062,
+   "line": 2886
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildGroupInvite"
+   ],
+   "start": 136418,
+   "end": 137293,
+   "line": 2897
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "redeemGroupInvite"
+   ],
+   "start": 137294,
+   "end": 140435,
+   "line": 2921
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteSpaceForEveryone"
+   ],
+   "start": 140513,
+   "end": 142633,
+   "line": 2998
+  },
+  {
+   "kind": "const",
+   "names": [
+    "GROUP_CALL_MAX"
+   ],
+   "start": 143579,
+   "end": 143604,
+   "line": 3058
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallActive"
+   ],
+   "start": 143606,
+   "end": 143683,
+   "line": 3060
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallParticipantKey"
+   ],
+   "start": 143684,
+   "end": 143794,
+   "line": 3063
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "myCallIdentity"
+   ],
+   "start": 143795,
+   "end": 143892,
+   "line": 3066
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shouldPlaceCallTo"
+   ],
+   "start": 143997,
+   "end": 144162,
+   "line": 3071
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "resetGroupCallState"
+   ],
+   "start": 144164,
+   "end": 144515,
+   "line": 3077
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupPresence"
+   ],
+   "start": 144886,
+   "end": 145650,
+   "line": 3102
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallMembers"
+   ],
+   "start": 145652,
+   "end": 145825,
+   "line": 3125
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callTargets"
+   ],
+   "start": 146008,
+   "end": 146203,
+   "line": 3134
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "signalGroupCall"
+   ],
+   "start": 146204,
+   "end": 146403,
+   "line": 3140
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallAudience"
+   ],
+   "start": 146933,
+   "end": 147557,
+   "line": 3154
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callRosterOf"
+   ],
+   "start": 147558,
+   "end": 147712,
+   "line": 3167
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "acquireGroupCallStream"
+   ],
+   "start": 147714,
+   "end": 147976,
+   "line": 3173
+  },
+  {
+   "kind": "let",
+   "names": [
+    "callPickerIntent"
+   ],
+   "start": 148639,
+   "end": 148667,
+   "line": 3189
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "addPeopleToLiveCall"
+   ],
+   "start": 148961,
+   "end": 152556,
+   "line": 3196
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "peopleAlreadyOnTheCall"
+   ],
+   "start": 152750,
+   "end": 153356,
+   "line": 3276
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderCallPickerList"
+   ],
+   "start": 153357,
+   "end": 154653,
+   "line": 3294
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallPickerCount"
+   ],
+   "start": 154654,
+   "end": 154984,
+   "line": 3317
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openCallPicker"
+   ],
+   "start": 154985,
+   "end": 155297,
+   "line": 3323
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeCallPicker"
+   ],
+   "start": 155298,
+   "end": 155425,
+   "line": 3332
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectedCallPeers"
+   ],
+   "start": 155426,
+   "end": 155628,
+   "line": 3336
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startAdhocGroupCall"
+   ],
+   "start": 155630,
+   "end": 156546,
+   "line": 3342
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startGroupCall"
+   ],
+   "start": 156548,
+   "end": 159866,
+   "line": 3362
+  },
+  {
+   "kind": "const",
+   "names": [
+    "PENDING_GROUP_SIGNAL_MS"
+   ],
+   "start": 160844,
+   "end": 160882,
+   "line": 3455
+  },
+  {
+   "kind": "const",
+   "names": [
+    "PENDING_GROUP_SIGNAL_MAX"
+   ],
+   "start": 160883,
+   "end": 160919,
+   "line": 3456
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "holdGroupCallSignal"
+   ],
+   "start": 160920,
+   "end": 161322,
+   "line": 3457
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "replayHeldGroupCallSignals"
+   ],
+   "start": 161323,
+   "end": 161846,
+   "line": 3466
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "joinGroupCall"
+   ],
+   "start": 161848,
+   "end": 163718,
+   "line": 3481
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "connectGroupCallPeer"
+   ],
+   "start": 163792,
+   "end": 164889,
+   "line": 3530
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "attachGroupCallLeg"
+   ],
+   "start": 164891,
+   "end": 165454,
+   "line": 3562
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "dropGroupCallPeer"
+   ],
+   "start": 165456,
+   "end": 165721,
+   "line": 3579
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "leaveGroupCall"
+   ],
+   "start": 165723,
+   "end": 166733,
+   "line": 3587
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleGroupCallMute"
+   ],
+   "start": 166735,
+   "end": 167045,
+   "line": 3613
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleGroupCallVideo"
+   ],
+   "start": 167046,
+   "end": 167366,
+   "line": 3622
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_REACTIONS"
+   ],
+   "start": 168144,
+   "end": 168216,
+   "line": 3645
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "screenCaptureSupported"
+   ],
+   "start": 168525,
+   "end": 168634,
+   "line": 3651
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "replaceOutgoingVideoTrack"
+   ],
+   "start": 168636,
+   "end": 169031,
+   "line": 3655
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "swapLocalStreamVideo"
+   ],
+   "start": 169191,
+   "end": 169457,
+   "line": 3669
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pictureTrackFromFile"
+   ],
+   "start": 169744,
+   "end": 170760,
+   "line": 3681
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallLegs"
+   ],
+   "start": 170762,
+   "end": 170900,
+   "line": 3708
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startGroupPresentation"
+   ],
+   "start": 170902,
+   "end": 172600,
+   "line": 3712
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopGroupPresentation"
+   ],
+   "start": 172602,
+   "end": 173308,
+   "line": 3755
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleGroupCallPin"
+   ],
+   "start": 173310,
+   "end": 173490,
+   "line": 3772
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "broadcastGroupCallState"
+   ],
+   "start": 173633,
+   "end": 174100,
+   "line": 3780
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderPresentSheet"
+   ],
+   "start": 174312,
+   "end": 175356,
+   "line": 3798
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pickImageFile"
+   ],
+   "start": 175358,
+   "end": 175688,
+   "line": 3819
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "floatCallReaction"
+   ],
+   "start": 175992,
+   "end": 176975,
+   "line": 3836
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callReactionSurface"
+   ],
+   "start": 176977,
+   "end": 177139,
+   "line": 3856
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendCallReaction"
+   ],
+   "start": 177141,
+   "end": 177767,
+   "line": 3861
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallReactionBar"
+   ],
+   "start": 177769,
+   "end": 178240,
+   "line": 3882
+  },
+  {
+   "kind": "let",
+   "names": [
+    "groupCallTicker"
+   ],
+   "start": 178242,
+   "end": 178266,
+   "line": 3895
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startGroupCallTicker"
+   ],
+   "start": 178267,
+   "end": 178584,
+   "line": 3896
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopGroupCallTicker"
+   ],
+   "start": 178585,
+   "end": 178704,
+   "line": 3904
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openGroupCallStage"
+   ],
+   "start": 178781,
+   "end": 178954,
+   "line": 3910
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeGroupCallStage"
+   ],
+   "start": 178955,
+   "end": 179129,
+   "line": 3914
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallColumns"
+   ],
+   "start": 179131,
+   "end": 179496,
+   "line": 3919
+  },
+  {
+   "kind": "const",
+   "names": [
+    "GROUP_SPEAKING_THRESHOLD"
+   ],
+   "start": 180149,
+   "end": 180188,
+   "line": 3940
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupMeterContext"
+   ],
+   "start": 180190,
+   "end": 180568,
+   "line": 3942
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "attachGroupMeter"
+   ],
+   "start": 180570,
+   "end": 181141,
+   "line": 3951
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "readGroupMeter"
+   ],
+   "start": 181143,
+   "end": 181432,
+   "line": 3967
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startGroupLevelMeters"
+   ],
+   "start": 181646,
+   "end": 182251,
+   "line": 3979
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopGroupLevelMeters"
+   ],
+   "start": 182252,
+   "end": 182402,
+   "line": 3994
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markTileSpeaking"
+   ],
+   "start": 182403,
+   "end": 182606,
+   "line": 3998
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleGroupCallHand"
+   ],
+   "start": 182608,
+   "end": 182963,
+   "line": 4003
+  },
+  {
+   "kind": "const",
+   "names": [
+    "GCALL_LAYOUT_KEY"
+   ],
+   "start": 183151,
+   "end": 183199,
+   "line": 4016
+  },
+  {
+   "kind": "const",
+   "names": [
+    "GCALL_LAYOUTS"
+   ],
+   "start": 183200,
+   "end": 183251,
+   "line": 4017
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallLayoutChoice"
+   ],
+   "start": 183252,
+   "end": 183475,
+   "line": 4018
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setGroupCallLayout"
+   ],
+   "start": 183476,
+   "end": 183726,
+   "line": 4023
+  },
+  {
+   "kind": "const",
+   "names": [
+    "GCALL_GAP"
+   ],
+   "start": 184679,
+   "end": 184700,
+   "line": 4047
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "fitGroupCallGrid"
+   ],
+   "start": 184701,
+   "end": 186672,
+   "line": 4048
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "centreShortLastRow"
+   ],
+   "start": 187425,
+   "end": 188227,
+   "line": 4098
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncGroupCallColumns"
+   ],
+   "start": 188437,
+   "end": 190503,
+   "line": 4118
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderGroupCallLayoutSheet"
+   ],
+   "start": 190505,
+   "end": 191281,
+   "line": 4160
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "watchGroupCallSize"
+   ],
+   "start": 191282,
+   "end": 191570,
+   "line": 4174
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupCallRows"
+   ],
+   "start": 192425,
+   "end": 193263,
+   "line": 4195
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildGroupCallTile"
+   ],
+   "start": 193265,
+   "end": 194003,
+   "line": 4224
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "patchGroupCallTile"
+   ],
+   "start": 194005,
+   "end": 196833,
+   "line": 4239
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderGroupCallStage"
+   ],
+   "start": 196835,
+   "end": 200951,
+   "line": 4292
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "showGroupCallInvite"
+   ],
+   "start": 201029,
+   "end": 203533,
+   "line": 4371
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hideGroupCallInvite"
+   ],
+   "start": 203534,
+   "end": 203836,
+   "line": 4418
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleGroupCallSignal"
+   ],
+   "start": 203914,
+   "end": 209759,
+   "line": 4430
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleIncomingGroupCallLeg"
+   ],
+   "start": 209915,
+   "end": 210727,
+   "line": 4550
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_ACTIVE_PACK_KEY"
+   ],
+   "start": 210728,
+   "end": 210790,
+   "line": 4574
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_DB_NAME"
+   ],
+   "start": 210791,
+   "end": 210834,
+   "line": 4575
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_DB_VERSION"
+   ],
+   "start": 210835,
+   "end": 210864,
+   "line": 4576
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_PACK_STORE"
+   ],
+   "start": 210865,
+   "end": 210900,
+   "line": 4577
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_SOUND_STORE"
+   ],
+   "start": 210901,
+   "end": 210938,
+   "line": 4578
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_MAX_PACKS"
+   ],
+   "start": 210939,
+   "end": 210968,
+   "line": 4579
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_MAX_PER_PACK"
+   ],
+   "start": 210969,
+   "end": 211002,
+   "line": 4580
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_MAX_BYTES"
+   ],
+   "start": 211003,
+   "end": 211045,
+   "line": 4581
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_TARGET_EDGE"
+   ],
+   "start": 211046,
+   "end": 211078,
+   "line": 4582
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_RECOMPRESS_OVER"
+   ],
+   "start": 211079,
+   "end": 211122,
+   "line": 4583
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_IMAGE_EXT"
+   ],
+   "start": 211123,
+   "end": 211185,
+   "line": 4584
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_VIDEO_EXT"
+   ],
+   "start": 211186,
+   "end": 211229,
+   "line": 4585
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_LOTTIE_EXT"
+   ],
+   "start": 211230,
+   "end": 211274,
+   "line": 4586
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_ARCHIVE_EXT"
+   ],
+   "start": 211275,
+   "end": 211326,
+   "line": 4587
+  },
+  {
+   "kind": "const",
+   "names": [
+    "LOTTIE_SCRIPT_URL"
+   ],
+   "start": 211327,
+   "end": 211389,
+   "line": 4588
+  },
+  {
+   "kind": "let",
+   "names": [
+    "stickerDbPromise"
+   ],
+   "start": 211391,
+   "end": 211419,
+   "line": 4590
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openStickerDb"
+   ],
+   "start": 211421,
+   "end": 212450,
+   "line": 4592
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerDbRequest"
+   ],
+   "start": 212452,
+   "end": 213001,
+   "line": 4616
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbGetAllPacks"
+   ],
+   "start": 213003,
+   "end": 213114,
+   "line": 4630
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbPutPack"
+   ],
+   "start": 213115,
+   "end": 213228,
+   "line": 4631
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbDeletePack"
+   ],
+   "start": 213229,
+   "end": 213344,
+   "line": 4632
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbGetAllSounds"
+   ],
+   "start": 213345,
+   "end": 213458,
+   "line": 4633
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbPutSound"
+   ],
+   "start": 213459,
+   "end": 213576,
+   "line": 4634
+  },
+  {
+   "kind": "const",
+   "names": [
+    "stickerDbDeleteSound"
+   ],
+   "start": 213577,
+   "end": 213694,
+   "line": 4635
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "incomingBlobType"
+   ],
+   "start": 213850,
+   "end": 214038,
+   "line": 4639
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "richEntryLabel"
+   ],
+   "start": 214158,
+   "end": 214551,
+   "line": 4647
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mediaEntryLabel"
+   ],
+   "start": 214552,
+   "end": 215103,
+   "line": 4655
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "transferBannerLabel"
+   ],
+   "start": 215104,
+   "end": 215476,
+   "line": 4664
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerKindForName"
+   ],
+   "start": 215477,
+   "end": 215704,
+   "line": 4670
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerObjectUrl"
+   ],
+   "start": 215904,
+   "end": 216164,
+   "line": 4679
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "releaseStickerUrls"
+   ],
+   "start": 216166,
+   "end": 216407,
+   "line": 4688
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadStickerPacks"
+   ],
+   "start": 216409,
+   "end": 217108,
+   "line": 4697
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "readTgsAnimation"
+   ],
+   "start": 217326,
+   "end": 217907,
+   "line": 4717
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isLottieJson"
+   ],
+   "start": 218046,
+   "end": 218243,
+   "line": 4734
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "makeStickerId"
+   ],
+   "start": 218245,
+   "end": 218359,
+   "line": 4743
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizeStickerImage"
+   ],
+   "start": 218669,
+   "end": 219742,
+   "line": 4751
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildStickerRecord"
+   ],
+   "start": 219743,
+   "end": 220558,
+   "line": 4773
+  },
+  {
+   "kind": "const",
+   "names": [
+    "STICKER_MANIFEST_NAME"
+   ],
+   "start": 220560,
+   "end": 220636,
+   "line": 4800
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerEntryIsUsable"
+   ],
+   "start": 220637,
+   "end": 221121,
+   "line": 4801
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "readStickerArchive"
+   ],
+   "start": 221497,
+   "end": 223456,
+   "line": 4816
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importStickerFiles"
+   ],
+   "start": 223458,
+   "end": 226812,
+   "line": 4858
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteStickerPack"
+   ],
+   "start": 226814,
+   "end": 227351,
+   "line": 4940
+  },
+  {
+   "kind": "let",
+   "names": [
+    "lottieScriptPromise"
+   ],
+   "start": 227560,
+   "end": 227591,
+   "line": 4956
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureLottie"
+   ],
+   "start": 227592,
+   "end": 228243,
+   "line": 4957
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hydrateLottieNodes"
+   ],
+   "start": 228476,
+   "end": 229398,
+   "line": 4977
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerMediaHtml"
+   ],
+   "start": 229400,
+   "end": 229811,
+   "line": 5008
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderStickerPanel"
+   ],
+   "start": 229813,
+   "end": 233179,
+   "line": 5015
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setStickerPanelVisible"
+   ],
+   "start": 233181,
+   "end": 234091,
+   "line": 5069
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findStickerRecord"
+   ],
+   "start": 234093,
+   "end": 234287,
+   "line": 5090
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendStickerRecord"
+   ],
+   "start": 234289,
+   "end": 234812,
+   "line": 5095
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildStickerPackArchive"
+   ],
+   "start": 235075,
+   "end": 236130,
+   "line": 5110
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shareStickerPack"
+   ],
+   "start": 236132,
+   "end": 237277,
+   "line": 5133
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "adoptSharedStickerPack"
+   ],
+   "start": 237433,
+   "end": 238839,
+   "line": 5165
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatVaultBytes"
+   ],
+   "start": 238841,
+   "end": 238957,
+   "line": 5198
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderStorageCard"
+   ],
+   "start": 238959,
+   "end": 240822,
+   "line": 5202
+  },
+  {
+   "kind": "const",
+   "names": [
+    "FILE_CATEGORIES"
+   ],
+   "start": 241662,
+   "end": 242252,
+   "line": 5249
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "fileCategoryOf"
+   ],
+   "start": 242254,
+   "end": 242626,
+   "line": 5258
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mediaVaultIndex"
+   ],
+   "start": 242841,
+   "end": 243899,
+   "line": 5270
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stickerPackEntries"
+   ],
+   "start": 243901,
+   "end": 244353,
+   "line": 5303
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "customSoundEntries"
+   ],
+   "start": 244354,
+   "end": 244736,
+   "line": 5317
+  },
+  {
+   "kind": "let",
+   "names": [
+    "vaultSourcesReady"
+   ],
+   "start": 244815,
+   "end": 244845,
+   "line": 5332
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureVaultSources"
+   ],
+   "start": 244846,
+   "end": 245135,
+   "line": 5333
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "collectLocalFiles"
+   ],
+   "start": 245137,
+   "end": 245287,
+   "line": 5342
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationLabelFor"
+   ],
+   "start": 245289,
+   "end": 245746,
+   "line": 5347
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "usageDonut"
+   ],
+   "start": 245872,
+   "end": 247115,
+   "line": 5359
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "fileManagerState"
+   ],
+   "start": 247117,
+   "end": 247279,
+   "line": 5381
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderFileManager"
+   ],
+   "start": 247510,
+   "end": 254111,
+   "line": 5389
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findLocalFile"
+   ],
+   "start": 254113,
+   "end": 254227,
+   "line": 5492
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "downloadBlob"
+   ],
+   "start": 254229,
+   "end": 254531,
+   "line": 5496
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveLocalFile"
+   ],
+   "start": 254533,
+   "end": 255449,
+   "line": 5507
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openLocalFile"
+   ],
+   "start": 255451,
+   "end": 255831,
+   "line": 5530
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteLocalFile"
+   ],
+   "start": 255833,
+   "end": 256258,
+   "line": 5541
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearFileCategory"
+   ],
+   "start": 256260,
+   "end": 257393,
+   "line": 5553
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadCustomSounds"
+   ],
+   "start": 257395,
+   "end": 257681,
+   "line": 5577
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importCustomSound"
+   ],
+   "start": 257683,
+   "end": 258980,
+   "line": 5588
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findCustomSound"
+   ],
+   "start": 258982,
+   "end": 259088,
+   "line": 5623
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "customSoundUrl"
+   ],
+   "start": 259090,
+   "end": 259348,
+   "line": 5627
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteCustomSound"
+   ],
+   "start": 259350,
+   "end": 260191,
+   "line": 5636
+  },
+  {
+   "kind": "const",
+   "names": [
+    "chatState"
+   ],
+   "start": 260192,
+   "end": 264419,
+   "line": 5655
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "app"
+   ],
+   "start": 264420,
+   "end": 264464,
+   "line": 5830
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "appState"
+   ],
+   "start": 264465,
+   "end": 264509,
+   "line": 5833
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isUnlocked"
+   ],
+   "start": 264510,
+   "end": 264616,
+   "line": 5836
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "language"
+   ],
+   "start": 264617,
+   "end": 264677,
+   "line": 5839
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "notify"
+   ],
+   "start": 264678,
+   "end": 265017,
+   "line": 5842
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "t"
+   ],
+   "start": 265018,
+   "end": 265078,
+   "line": 5850
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveEncrypted"
+   ],
+   "start": 265079,
+   "end": 265296,
+   "line": 5853
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadEncrypted"
+   ],
+   "start": 265297,
+   "end": 265627,
+   "line": 5863
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chatServerOrigin"
+   ],
+   "start": 265628,
+   "end": 265931,
+   "line": 5877
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isInternalShellOrigin"
+   ],
+   "start": 266451,
+   "end": 266717,
+   "line": 5891
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "defaultRelayFallbackOrigin"
+   ],
+   "start": 266718,
+   "end": 267262,
+   "line": 5900
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isLocalRelayHostname"
+   ],
+   "start": 267263,
+   "end": 267517,
+   "line": 5914
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "relayHostnameFromInput"
+   ],
+   "start": 267518,
+   "end": 267751,
+   "line": 5918
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizeRelayOrigin"
+   ],
+   "start": 267752,
+   "end": 268552,
+   "line": 5923
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "relayHintOrigins"
+   ],
+   "start": 268553,
+   "end": 269067,
+   "line": 5940
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "defaultRelayOriginForShell"
+   ],
+   "start": 269926,
+   "end": 270375,
+   "line": 5973
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionText"
+   ],
+   "start": 270376,
+   "end": 270826,
+   "line": 5981
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionStatusLabel"
+   ],
+   "start": 270827,
+   "end": 271140,
+   "line": 5990
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "notifyRestrictionOnce"
+   ],
+   "start": 271141,
+   "end": 271802,
+   "line": 5996
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionUntilMs"
+   ],
+   "start": 271803,
+   "end": 272113,
+   "line": 6013
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionLocalUntilText"
+   ],
+   "start": 272114,
+   "end": 272892,
+   "line": 6019
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionRemainingText"
+   ],
+   "start": 272893,
+   "end": 273857,
+   "line": 6038
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearRestrictionTimers"
+   ],
+   "start": 273858,
+   "end": 274201,
+   "line": 6053
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderRestrictionStatus"
+   ],
+   "start": 274202,
+   "end": 275056,
+   "line": 6063
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "probeServerRestrictionLifted"
+   ],
+   "start": 275057,
+   "end": 275924,
+   "line": 6086
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startRestrictionWatchers"
+   ],
+   "start": 275925,
+   "end": 276554,
+   "line": 6109
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hasActiveServerRestriction"
+   ],
+   "start": 276555,
+   "end": 276872,
+   "line": 6129
+  },
+  {
+   "kind": "let",
+   "names": [
+    "_serverRestrictionTimer"
+   ],
+   "start": 276873,
+   "end": 276908,
+   "line": 6139
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setServerRestriction"
+   ],
+   "start": 276909,
+   "end": 277849,
+   "line": 6140
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isStaticDevAppOrigin"
+   ],
+   "start": 277850,
+   "end": 278308,
+   "line": 6173
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictionHeaders"
+   ],
+   "start": 278309,
+   "end": 278872,
+   "line": 6186
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restrictedResponseToState"
+   ],
+   "start": 278873,
+   "end": 279552,
+   "line": 6204
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "wsUrl"
+   ],
+   "start": 279553,
+   "end": 280441,
+   "line": 6218
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "peerTransportOrigin"
+   ],
+   "start": 280442,
+   "end": 280690,
+   "line": 6240
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizeIceServerUrls"
+   ],
+   "start": 280691,
+   "end": 280935,
+   "line": 6251
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatIceServerUrlsForInput"
+   ],
+   "start": 280936,
+   "end": 281036,
+   "line": 6260
+  },
+  {
+   "kind": "const",
+   "names": [
+    "PUBLIC_STUN_SERVERS"
+   ],
+   "start": 281675,
+   "end": 281795,
+   "line": 6273
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shouldUsePublicStun"
+   ],
+   "start": 281796,
+   "end": 281986,
+   "line": 6277
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "peerOptions"
+   ],
+   "start": 281987,
+   "end": 283623,
+   "line": 6282
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isPrivateIpv4"
+   ],
+   "start": 283624,
+   "end": 283956,
+   "line": 6318
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "fetchRelayJson"
+   ],
+   "start": 283957,
+   "end": 285171,
+   "line": 6326
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "probeRelayOriginNatively"
+   ],
+   "start": 286016,
+   "end": 286550,
+   "line": 6374
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "probeRelayOrigin"
+   ],
+   "start": 286551,
+   "end": 288350,
+   "line": 6391
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "localDiscoveryCandidates"
+   ],
+   "start": 288351,
+   "end": 289881,
+   "line": 6433
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "discoverLocalRelayServer"
+   ],
+   "start": 289882,
+   "end": 291121,
+   "line": 6494
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hydrateRelayTurnConfig"
+   ],
+   "start": 291122,
+   "end": 291754,
+   "line": 6523
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyRelayDiscoveryResult"
+   ],
+   "start": 291755,
+   "end": 292849,
+   "line": 6539
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureRelayTransportReady"
+   ],
+   "start": 292850,
+   "end": 293748,
+   "line": 6562
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "registerChatPush"
+   ],
+   "start": 293749,
+   "end": 294096,
+   "line": 6585
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "identityPayload"
+   ],
+   "start": 294097,
+   "end": 294512,
+   "line": 6591
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "utf8_to_b64"
+   ],
+   "start": 294513,
+   "end": 294597,
+   "line": 6603
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "b64_to_utf8"
+   ],
+   "start": 294598,
+   "end": 294680,
+   "line": 6606
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "identityText"
+   ],
+   "start": 294681,
+   "end": 294784,
+   "line": 6609
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "parseIdentityText"
+   ],
+   "start": 294785,
+   "end": 295667,
+   "line": 6612
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "generateId"
+   ],
+   "start": 295668,
+   "end": 295799,
+   "line": 6636
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "getConversationKey"
+   ],
+   "start": 295800,
+   "end": 295989,
+   "line": 6640
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isSelfPeerRecord"
+   ],
+   "start": 295990,
+   "end": 296306,
+   "line": 6645
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "getPeerHistoryKey"
+   ],
+   "start": 296307,
+   "end": 296507,
+   "line": 6653
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findPeerByConversationKey"
+   ],
+   "start": 296508,
+   "end": 296801,
+   "line": 6657
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildProfileDraft"
+   ],
+   "start": 296802,
+   "end": 298553,
+   "line": 6666
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncProfileDraftFromInputs"
+   ],
+   "start": 298554,
+   "end": 298865,
+   "line": 6691
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncChatToggleStates"
+   ],
+   "start": 298866,
+   "end": 300237,
+   "line": 6702
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleConnectionToggleChange"
+   ],
+   "start": 300238,
+   "end": 300979,
+   "line": 6724
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizePeerRecord"
+   ],
+   "start": 300980,
+   "end": 303011,
+   "line": 6744
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isStoredContact"
+   ],
+   "start": 303747,
+   "end": 304107,
+   "line": 6798
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "discoveredPeers"
+   ],
+   "start": 304217,
+   "end": 304424,
+   "line": 6808
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveContacts"
+   ],
+   "start": 304425,
+   "end": 304811,
+   "line": 6814
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "withVerifiedFingerprint"
+   ],
+   "start": 305550,
+   "end": 306193,
+   "line": 6833
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "noteKeyChangeInThread"
+   ],
+   "start": 306195,
+   "end": 306775,
+   "line": 6849
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "resolveKeyChange"
+   ],
+   "start": 307040,
+   "end": 308404,
+   "line": 6868
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearSessionKeysFor"
+   ],
+   "start": 308406,
+   "end": 308789,
+   "line": 6900
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mergePeerRecord"
+   ],
+   "start": 308791,
+   "end": 312908,
+   "line": 6909
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findPeerRecordByPeerId"
+   ],
+   "start": 312909,
+   "end": 313049,
+   "line": 6987
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findPeerBySession"
+   ],
+   "start": 313050,
+   "end": 313304,
+   "line": 6991
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "dropStaleSessionChannels"
+   ],
+   "start": 313920,
+   "end": 314587,
+   "line": 7007
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markPeerUnavailable"
+   ],
+   "start": 314588,
+   "end": 315126,
+   "line": 7026
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "getActiveConversation"
+   ],
+   "start": 315127,
+   "end": 315184,
+   "line": 7042
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "localMembershipKeys"
+   ],
+   "start": 315185,
+   "end": 315359,
+   "line": 7045
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spaceIncludesLocalUser"
+   ],
+   "start": 315360,
+   "end": 315897,
+   "line": 7053
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectedSpaceMembers"
+   ],
+   "start": 315898,
+   "end": 316190,
+   "line": 7063
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizeSpaceMembers"
+   ],
+   "start": 316831,
+   "end": 317011,
+   "line": 7081
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupDeliveryMemberKeys"
+   ],
+   "start": 317012,
+   "end": 317717,
+   "line": 7086
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findPeerByAnyKey"
+   ],
+   "start": 317718,
+   "end": 317936,
+   "line": 7108
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderSpaceMemberPickers"
+   ],
+   "start": 317937,
+   "end": 319039,
+   "line": 7117
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "memberDisplayName"
+   ],
+   "start": 319040,
+   "end": 319189,
+   "line": 7144
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "messageSenderLabel"
+   ],
+   "start": 319190,
+   "end": 319485,
+   "line": 7148
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "messageSenderAvatar"
+   ],
+   "start": 319802,
+   "end": 320338,
+   "line": 7158
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderSpaceMemberManager"
+   ],
+   "start": 320339,
+   "end": 324676,
+   "line": 7168
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "notifyTyping"
+   ],
+   "start": 324677,
+   "end": 324999,
+   "line": 7257
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleRemoteTyping"
+   ],
+   "start": 325000,
+   "end": 325421,
+   "line": 7265
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "initials"
+   ],
+   "start": 325422,
+   "end": 325538,
+   "line": 7279
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatTime"
+   ],
+   "start": 325539,
+   "end": 325708,
+   "line": 7283
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatCountdown"
+   ],
+   "start": 325709,
+   "end": 326272,
+   "line": 7290
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatDuration"
+   ],
+   "start": 326273,
+   "end": 326517,
+   "line": 7303
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatTimerLabel"
+   ],
+   "start": 326518,
+   "end": 326850,
+   "line": 7309
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatTimerBadge"
+   ],
+   "start": 326851,
+   "end": 327054,
+   "line": 7315
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "currentReactorId"
+   ],
+   "start": 327055,
+   "end": 327184,
+   "line": 7321
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "currentReactorCandidates"
+   ],
+   "start": 327185,
+   "end": 327332,
+   "line": 7324
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "resolveRemoteReactorId"
+   ],
+   "start": 327333,
+   "end": 327769,
+   "line": 7331
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "normalizeMessageReactions"
+   ],
+   "start": 327770,
+   "end": 328038,
+   "line": 7343
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "summarizeMessageReactions"
+   ],
+   "start": 328039,
+   "end": 328358,
+   "line": 7353
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyMessageReaction"
+   ],
+   "start": 328359,
+   "end": 328661,
+   "line": 7362
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncTimerUi"
+   ],
+   "start": 328662,
+   "end": 329612,
+   "line": 7370
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleTimerPopover"
+   ],
+   "start": 329613,
+   "end": 329761,
+   "line": 7395
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setTimerSeconds"
+   ],
+   "start": 329762,
+   "end": 329897,
+   "line": 7399
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "detectComposerDirection"
+   ],
+   "start": 329898,
+   "end": 330489,
+   "line": 7404
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "positionTimerPopover"
+   ],
+   "start": 330490,
+   "end": 332366,
+   "line": 7417
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "statusMeta"
+   ],
+   "start": 332602,
+   "end": 333373,
+   "line": 7461
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "statusLabel"
+   ],
+   "start": 333374,
+   "end": 333439,
+   "line": 7480
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pruneExpiredHistory"
+   ],
+   "start": 333440,
+   "end": 334152,
+   "line": 7483
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scheduleExpirySweep"
+   ],
+   "start": 334153,
+   "end": 334798,
+   "line": 7505
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveSessionKeys"
+   ],
+   "start": 334799,
+   "end": 334898,
+   "line": 7526
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "persistSessionKey"
+   ],
+   "start": 334899,
+   "end": 335697,
+   "line": 7529
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "forgetSessionKey"
+   ],
+   "start": 335698,
+   "end": 335906,
+   "line": 7547
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sessionKeyOwner"
+   ],
+   "start": 336218,
+   "end": 336436,
+   "line": 7557
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "requestSessionKey"
+   ],
+   "start": 336437,
+   "end": 336672,
+   "line": 7563
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renegotiateSessionKey"
+   ],
+   "start": 336673,
+   "end": 337108,
+   "line": 7570
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hydrateSessionKey"
+   ],
+   "start": 337109,
+   "end": 338381,
+   "line": 7587
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sha256Hex"
+   ],
+   "start": 338382,
+   "end": 338578,
+   "line": 7617
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_PREKEY_STORAGE_KEY"
+   ],
+   "start": 339927,
+   "end": 339982,
+   "line": 7644
+  },
+  {
+   "kind": "const",
+   "names": [
+    "PREKEY_LIFETIME_MS"
+   ],
+   "start": 340051,
+   "end": 340103,
+   "line": 7646
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SESSION_KEY_LIFETIME_MS"
+   ],
+   "start": 340261,
+   "end": 340317,
+   "line": 7649
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "exportEcdhPublic"
+   ],
+   "start": 340319,
+   "end": 340457,
+   "line": 7651
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importEcdhPublic"
+   ],
+   "start": 340458,
+   "end": 340631,
+   "line": 7654
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importEcdhPrivate"
+   ],
+   "start": 340632,
+   "end": 340819,
+   "line": 7658
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "generateEcdhPair"
+   ],
+   "start": 340820,
+   "end": 341154,
+   "line": 7662
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deriveSharedAesKey"
+   ],
+   "start": 341311,
+   "end": 341791,
+   "line": 7672
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadPrekeys"
+   ],
+   "start": 341873,
+   "end": 342008,
+   "line": 7682
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "savePrekeys"
+   ],
+   "start": 342009,
+   "end": 342087,
+   "line": 7686
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "prunePrekeys"
+   ],
+   "start": 342167,
+   "end": 342297,
+   "line": 7690
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensurePrekey"
+   ],
+   "start": 342298,
+   "end": 343161,
+   "line": 7694
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "findPrekey"
+   ],
+   "start": 343162,
+   "end": 343268,
+   "line": 7719
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureIdentity"
+   ],
+   "start": 343270,
+   "end": 344429,
+   "line": 7723
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importIdentityPublicKey"
+   ],
+   "start": 344430,
+   "end": 344630,
+   "line": 7755
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importIdentityPrivateKey"
+   ],
+   "start": 344631,
+   "end": 344871,
+   "line": 7764
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activePeer"
+   ],
+   "start": 344872,
+   "end": 345833,
+   "line": 7774
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activeSession"
+   ],
+   "start": 345834,
+   "end": 345995,
+   "line": 7792
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isCompactChatLayout"
+   ],
+   "start": 345996,
+   "end": 346098,
+   "line": 7797
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "updateChatShellMode"
+   ],
+   "start": 346099,
+   "end": 346688,
+   "line": 7800
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "refreshComposerFocusFlag"
+   ],
+   "start": 347215,
+   "end": 347463,
+   "line": 7820
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationHistory"
+   ],
+   "start": 347464,
+   "end": 347594,
+   "line": 7827
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveSpaces"
+   ],
+   "start": 347595,
+   "end": 347744,
+   "line": 7831
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "upsertSharedSpace"
+   ],
+   "start": 347745,
+   "end": 349837,
+   "line": 7838
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "broadcastSpaceRecord"
+   ],
+   "start": 349838,
+   "end": 350425,
+   "line": 7890
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_LOG_LIMIT"
+   ],
+   "start": 350477,
+   "end": 350503,
+   "line": 7909
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveCalls"
+   ],
+   "start": 350504,
+   "end": 350757,
+   "line": 7910
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_FINAL_STATUSES"
+   ],
+   "start": 351601,
+   "end": 351713,
+   "line": 7930
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_MERGE_WINDOW_MS"
+   ],
+   "start": 351860,
+   "end": 351895,
+   "line": 7933
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callsViewVisible"
+   ],
+   "start": 351897,
+   "end": 352257,
+   "line": 7935
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markCallsRead"
+   ],
+   "start": 352396,
+   "end": 352631,
+   "line": 7945
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isFinalCallStatus"
+   ],
+   "start": 352632,
+   "end": 352724,
+   "line": 7952
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callLogKey"
+   ],
+   "start": 352725,
+   "end": 352835,
+   "line": 7955
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeActiveCallLog"
+   ],
+   "start": 352836,
+   "end": 352901,
+   "line": 7958
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "appendCall"
+   ],
+   "start": 352903,
+   "end": 356657,
+   "line": 7962
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatCallStatus"
+   ],
+   "start": 356658,
+   "end": 357135,
+   "line": 8048
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isMissedCallStatus"
+   ],
+   "start": 357136,
+   "end": 357261,
+   "line": 8070
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callHistoryText"
+   ],
+   "start": 357262,
+   "end": 358059,
+   "line": 8073
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "appendCallHistory"
+   ],
+   "start": 358060,
+   "end": 359075,
+   "line": 8088
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shortSecurityValue"
+   ],
+   "start": 359076,
+   "end": 359321,
+   "line": 8107
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "flushHistoryStore"
+   ],
+   "start": 359322,
+   "end": 359527,
+   "line": 8113
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "storeHistory"
+   ],
+   "start": 359528,
+   "end": 359775,
+   "line": 8120
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pruneStoredSessionKeys"
+   ],
+   "start": 359971,
+   "end": 360393,
+   "line": 8132
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadPersistedChatState"
+   ],
+   "start": 360395,
+   "end": 364316,
+   "line": 8146
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveProfile"
+   ],
+   "start": 364317,
+   "end": 364683,
+   "line": 8240
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sessionSecurityText"
+   ],
+   "start": 364684,
+   "end": 364914,
+   "line": 8252
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CONNECTING_LABEL"
+   ],
+   "start": 365224,
+   "end": 365299,
+   "line": 8262
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setConnectionState"
+   ],
+   "start": 365300,
+   "end": 366414,
+   "line": 8263
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncComposerDirection"
+   ],
+   "start": 366415,
+   "end": 367043,
+   "line": 8286
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncComposerViewportFocus"
+   ],
+   "start": 367044,
+   "end": 367978,
+   "line": 8298
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindComposerDrafts"
+   ],
+   "start": 367979,
+   "end": 368603,
+   "line": 8324
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "focusComposerWithoutPageJump"
+   ],
+   "start": 368605,
+   "end": 369000,
+   "line": 8339
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderStaticUi"
+   ],
+   "start": 369001,
+   "end": 373823,
+   "line": 8354
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "orphanedHistoryRecords"
+   ],
+   "start": 374250,
+   "end": 375213,
+   "line": 8446
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "allConversationRecords"
+   ],
+   "start": 375214,
+   "end": 375903,
+   "line": 8475
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationRecordById"
+   ],
+   "start": 375904,
+   "end": 376060,
+   "line": 8499
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_LIST_FILTERS"
+   ],
+   "start": 376231,
+   "end": 376452,
+   "line": 8505
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "currentChatListFilter"
+   ],
+   "start": 376453,
+   "end": 376623,
+   "line": 8511
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chatListFilterPredicate"
+   ],
+   "start": 376624,
+   "end": 376920,
+   "line": 8515
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyChatListFilter"
+   ],
+   "start": 376921,
+   "end": 377468,
+   "line": 8521
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chatListFilterChipsHtml"
+   ],
+   "start": 377469,
+   "end": 379361,
+   "line": 8535
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setChatListFilter"
+   ],
+   "start": 379362,
+   "end": 379507,
+   "line": 8558
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_DRAFTS_STORAGE_KEY"
+   ],
+   "start": 379979,
+   "end": 380033,
+   "line": 8570
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_UNREAD_FLAGS_STORAGE_KEY"
+   ],
+   "start": 380034,
+   "end": 380100,
+   "line": 8571
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadChatDrafts"
+   ],
+   "start": 380102,
+   "end": 381211,
+   "line": 8573
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveChatDrafts"
+   ],
+   "start": 381890,
+   "end": 382063,
+   "line": 8605
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "draftFor"
+   ],
+   "start": 382065,
+   "end": 382161,
+   "line": 8610
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setDraft"
+   ],
+   "start": 382163,
+   "end": 382403,
+   "line": 8614
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyDraftToComposer"
+   ],
+   "start": 382520,
+   "end": 382981,
+   "line": 8624
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markConversationUnread"
+   ],
+   "start": 382983,
+   "end": 383176,
+   "line": 8634
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearManualUnread"
+   ],
+   "start": 383178,
+   "end": 383369,
+   "line": 8642
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "firstUnreadEntryId"
+   ],
+   "start": 383516,
+   "end": 383728,
+   "line": 8650
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "jumpToFirstUnread"
+   ],
+   "start": 383730,
+   "end": 384201,
+   "line": 8656
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_EXPORT_TYPE"
+   ],
+   "start": 385119,
+   "end": 385167,
+   "line": 8682
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_EXPORT_KDF_ITERATIONS"
+   ],
+   "start": 385168,
+   "end": 385210,
+   "line": 8683
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deriveExportKey"
+   ],
+   "start": 385212,
+   "end": 385617,
+   "line": 8685
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "askExportPassword"
+   ],
+   "start": 385773,
+   "end": 386617,
+   "line": 8698
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "conversationExportPayload"
+   ],
+   "start": 386619,
+   "end": 387534,
+   "line": 8719
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "exportChatArchive"
+   ],
+   "start": 387536,
+   "end": 389695,
+   "line": 8743
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importChatArchive"
+   ],
+   "start": 389697,
+   "end": 393437,
+   "line": 8797
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearAllChatHistory"
+   ],
+   "start": 393439,
+   "end": 394160,
+   "line": 8882
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openExportPicker"
+   ],
+   "start": 394293,
+   "end": 396775,
+   "line": 8903
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pickArchiveFile"
+   ],
+   "start": 396777,
+   "end": 397280,
+   "line": 8963
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "exportConversation"
+   ],
+   "start": 397282,
+   "end": 399221,
+   "line": 8981
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "unreadConversationCount"
+   ],
+   "start": 399223,
+   "end": 399563,
+   "line": 9027
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "rawUnreadCount"
+   ],
+   "start": 399564,
+   "end": 399894,
+   "line": 9033
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isConversationCurrentlyVisible"
+   ],
+   "start": 399895,
+   "end": 400156,
+   "line": 9040
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markConversationRead"
+   ],
+   "start": 400157,
+   "end": 400999,
+   "line": 9049
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pinnedRecords"
+   ],
+   "start": 401000,
+   "end": 401164,
+   "line": 9075
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shouldShowConversation"
+   ],
+   "start": 401165,
+   "end": 401539,
+   "line": 9081
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "nextPinOrder"
+   ],
+   "start": 401540,
+   "end": 401683,
+   "line": 9087
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleConversationPin"
+   ],
+   "start": 401684,
+   "end": 402115,
+   "line": 9091
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isConversationBlocked"
+   ],
+   "start": 402563,
+   "end": 402638,
+   "line": 9110
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isPeerKeyBlocked"
+   ],
+   "start": 402639,
+   "end": 402804,
+   "line": 9113
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleConversationBlock"
+   ],
+   "start": 402805,
+   "end": 403389,
+   "line": 9118
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleConversationMute"
+   ],
+   "start": 403390,
+   "end": 403727,
+   "line": 9134
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleConversationArchive"
+   ],
+   "start": 403728,
+   "end": 404311,
+   "line": 9145
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "archivedConversationCount"
+   ],
+   "start": 404312,
+   "end": 404462,
+   "line": 9165
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleArchivedView"
+   ],
+   "start": 404463,
+   "end": 404561,
+   "line": 9168
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "movePinnedConversation"
+   ],
+   "start": 404563,
+   "end": 405070,
+   "line": 9173
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "searchableMessageText"
+   ],
+   "start": 405071,
+   "end": 405455,
+   "line": 9187
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "notificationMessageLabel"
+   ],
+   "start": 405456,
+   "end": 405898,
+   "line": 9198
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "messageMatchesSearch"
+   ],
+   "start": 405899,
+   "end": 406110,
+   "line": 9206
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activateFirstSearchResult"
+   ],
+   "start": 406111,
+   "end": 406930,
+   "line": 9211
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_SETTINGS_TAB_KEY"
+   ],
+   "start": 407621,
+   "end": 407679,
+   "line": 9242
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_SETTINGS_TABS"
+   ],
+   "start": 407680,
+   "end": 408099,
+   "line": 9243
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildChatSettingsTabs"
+   ],
+   "start": 408101,
+   "end": 412369,
+   "line": 9251
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openDefaultSettingsPane"
+   ],
+   "start": 412635,
+   "end": 412965,
+   "line": 9326
+  },
+  {
+   "kind": "const",
+   "names": [
+    "settingsPaneHomes"
+   ],
+   "start": 413227,
+   "end": 413263,
+   "line": 9340
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "settingsStage"
+   ],
+   "start": 413265,
+   "end": 414000,
+   "line": 9342
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "settingsPaneTitle"
+   ],
+   "start": 414002,
+   "end": 414164,
+   "line": 9362
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setChatSettingsTab"
+   ],
+   "start": 414166,
+   "end": 416766,
+   "line": 9367
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restoreSettingsPane"
+   ],
+   "start": 416768,
+   "end": 417012,
+   "line": 9425
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeChatSettingsPane"
+   ],
+   "start": 417014,
+   "end": 417823,
+   "line": 9432
+  },
+  {
+   "kind": "let",
+   "names": [
+    "settingsRestageTimer"
+   ],
+   "start": 418287,
+   "end": 418316,
+   "line": 9456
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "makeCollapsible"
+   ],
+   "start": 418988,
+   "end": 419717,
+   "line": 9471
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildChatGroupCollapsibles"
+   ],
+   "start": 419719,
+   "end": 419993,
+   "line": 9487
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderPeers"
+   ],
+   "start": 419995,
+   "end": 435768,
+   "line": 9493
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "copyChatFullIdentity"
+   ],
+   "start": 435769,
+   "end": 436254,
+   "line": 9765
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureIdentityQrModal"
+   ],
+   "start": 436307,
+   "end": 437223,
+   "line": 9779
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "showChatIdentityQr"
+   ],
+   "start": 437224,
+   "end": 438125,
+   "line": 9799
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "addIdentityAsConversation"
+   ],
+   "start": 438126,
+   "end": 439736,
+   "line": 9830
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "reserveOfflineSession"
+   ],
+   "start": 440014,
+   "end": 440574,
+   "line": 9877
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureStartChatModal"
+   ],
+   "start": 440575,
+   "end": 443934,
+   "line": 9894
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeStartChatModal"
+   ],
+   "start": 443935,
+   "end": 444079,
+   "line": 9951
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openStartChatModal"
+   ],
+   "start": 444080,
+   "end": 444164,
+   "line": 9956
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "importChatIdentityFromClipboard"
+   ],
+   "start": 444165,
+   "end": 445077,
+   "line": 9959
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleScannedIdentity"
+   ],
+   "start": 445078,
+   "end": 445291,
+   "line": 9980
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopQrScanner"
+   ],
+   "start": 445292,
+   "end": 445707,
+   "line": 9987
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "decodeQrFromImageData"
+   ],
+   "start": 446295,
+   "end": 446664,
+   "line": 10006
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "qrImageDataFromSource"
+   ],
+   "start": 446666,
+   "end": 447636,
+   "line": 10017
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "decodeQrWithNativeDetector"
+   ],
+   "start": 447638,
+   "end": 447972,
+   "line": 10043
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "decodeQrFromSource"
+   ],
+   "start": 447974,
+   "end": 448282,
+   "line": 10054
+  },
+  {
+   "kind": "const",
+   "names": [
+    "QR_LIVE_PASSES"
+   ],
+   "start": 448485,
+   "end": 448569,
+   "line": 10067
+  },
+  {
+   "kind": "const",
+   "names": [
+    "QR_FILE_PASSES"
+   ],
+   "start": 448645,
+   "end": 448844,
+   "line": 10072
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyQrCameraTuning"
+   ],
+   "start": 448846,
+   "end": 449774,
+   "line": 10081
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleQrTorch"
+   ],
+   "start": 449776,
+   "end": 450262,
+   "line": 10101
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scanChatIdentityQr"
+   ],
+   "start": 450264,
+   "end": 452132,
+   "line": 10116
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadQrImageSource"
+   ],
+   "start": 452134,
+   "end": 453188,
+   "line": 10167
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scanQrImageFile"
+   ],
+   "start": 453190,
+   "end": 454719,
+   "line": 10194
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CALL_FILTERS"
+   ],
+   "start": 455506,
+   "end": 455963,
+   "line": 10245
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activeCallFilter"
+   ],
+   "start": 455965,
+   "end": 456091,
+   "line": 10252
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "callGroupKey"
+   ],
+   "start": 456092,
+   "end": 456171,
+   "line": 10255
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "visibleCallRecords"
+   ],
+   "start": 456374,
+   "end": 456704,
+   "line": 10261
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteCallRecords"
+   ],
+   "start": 456706,
+   "end": 457124,
+   "line": 10270
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "confirmAndDeleteCalls"
+   ],
+   "start": 457126,
+   "end": 457447,
+   "line": 10283
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteCallGroup"
+   ],
+   "start": 457449,
+   "end": 457837,
+   "line": 10291
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearCallSection"
+   ],
+   "start": 457839,
+   "end": 458140,
+   "line": 10300
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearAllCalls"
+   ],
+   "start": 458142,
+   "end": 458429,
+   "line": 10309
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pruneOldCalls"
+   ],
+   "start": 458431,
+   "end": 458939,
+   "line": 10316
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setCallSelectMode"
+   ],
+   "start": 458941,
+   "end": 459100,
+   "line": 10331
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallSelected"
+   ],
+   "start": 459101,
+   "end": 459268,
+   "line": 10336
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallGroupSelected"
+   ],
+   "start": 459269,
+   "end": 459622,
+   "line": 10341
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleAllCallsSelected"
+   ],
+   "start": 459623,
+   "end": 459953,
+   "line": 10350
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteSelectedCalls"
+   ],
+   "start": 459954,
+   "end": 460223,
+   "line": 10357
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "contactBookRecords"
+   ],
+   "start": 461155,
+   "end": 461963,
+   "line": 10381
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "contactShareText"
+   ],
+   "start": 461965,
+   "end": 462267,
+   "line": 10398
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderAddressBook"
+   ],
+   "start": 462269,
+   "end": 468404,
+   "line": 10408
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "contactByPeerId"
+   ],
+   "start": 468406,
+   "end": 468523,
+   "line": 10512
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openContactConversation"
+   ],
+   "start": 468525,
+   "end": 469105,
+   "line": 10516
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "adoptDiscoveredPeer"
+   ],
+   "start": 469498,
+   "end": 469741,
+   "line": 10536
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "removeContactRecord"
+   ],
+   "start": 469743,
+   "end": 470326,
+   "line": 10545
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "contactShareShapes"
+   ],
+   "start": 470627,
+   "end": 471164,
+   "line": 10564
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shareContactRecord"
+   ],
+   "start": 471165,
+   "end": 472529,
+   "line": 10579
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "addContactFromPrompt"
+   ],
+   "start": 472531,
+   "end": 473586,
+   "line": 10614
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindAddressBook"
+   ],
+   "start": 473742,
+   "end": 476934,
+   "line": 10650
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyCallsThreadHeader"
+   ],
+   "start": 477264,
+   "end": 479203,
+   "line": 10723
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallsHeading"
+   ],
+   "start": 479400,
+   "end": 480087,
+   "line": 10764
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderCalls"
+   ],
+   "start": 480089,
+   "end": 491020,
+   "line": 10777
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderRecentCallsColumn"
+   ],
+   "start": 491170,
+   "end": 494184,
+   "line": 10951
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindCallLogActions"
+   ],
+   "start": 494313,
+   "end": 497915,
+   "line": 10998
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensurePinnedPanel"
+   ],
+   "start": 497917,
+   "end": 498244,
+   "line": 11087
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderPinnedPanel"
+   ],
+   "start": 498245,
+   "end": 499471,
+   "line": 11098
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "placeMessageToolbar"
+   ],
+   "start": 499775,
+   "end": 500282,
+   "line": 11140
+  },
+  {
+   "kind": "const",
+   "names": [
+    "THREAD_BOTTOM_SLACK_PX"
+   ],
+   "start": 500993,
+   "end": 501027,
+   "line": 11164
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "captureThreadAnchor"
+   ],
+   "start": 501537,
+   "end": 501862,
+   "line": 11173
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restoreThreadAnchor"
+   ],
+   "start": 501864,
+   "end": 502221,
+   "line": 11184
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scrollThreadTo"
+   ],
+   "start": 502617,
+   "end": 502800,
+   "line": 11198
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderMessages"
+   ],
+   "start": 502802,
+   "end": 541624,
+   "line": 11205
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "positionMessageOverlays"
+   ],
+   "start": 541625,
+   "end": 543390,
+   "line": 12078
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "revealedMessageSet"
+   ],
+   "start": 544055,
+   "end": 544196,
+   "line": 12125
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isMessageHidden"
+   ],
+   "start": 544197,
+   "end": 544302,
+   "line": 12129
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "revealHiddenMessage"
+   ],
+   "start": 544303,
+   "end": 544491,
+   "line": 12132
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isMediaConsumed"
+   ],
+   "start": 544873,
+   "end": 544968,
+   "line": 12145
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "consumeViewOnceMedia"
+   ],
+   "start": 544969,
+   "end": 545677,
+   "line": 12148
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openViewOnceMedia"
+   ],
+   "start": 545678,
+   "end": 546081,
+   "line": 12165
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isHiddenComposeActive"
+   ],
+   "start": 546083,
+   "end": 546157,
+   "line": 12175
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncHiddenToggleUi"
+   ],
+   "start": 546158,
+   "end": 546821,
+   "line": 12178
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleHiddenCompose"
+   ],
+   "start": 546822,
+   "end": 547171,
+   "line": 12196
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindSwipeReply"
+   ],
+   "start": 547173,
+   "end": 548364,
+   "line": 12204
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderActivePeer"
+   ],
+   "start": 548365,
+   "end": 557532,
+   "line": 12239
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scheduleSessionWarmup"
+   ],
+   "start": 557533,
+   "end": 558511,
+   "line": 12412
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "appendHistory"
+   ],
+   "start": 558512,
+   "end": 560635,
+   "line": 12432
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "noteExpiredEnvelope"
+   ],
+   "start": 562614,
+   "end": 563525,
+   "line": 12522
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sealWithPrekey"
+   ],
+   "start": 563527,
+   "end": 564486,
+   "line": 12546
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openPrekeySeal"
+   ],
+   "start": 564611,
+   "end": 565249,
+   "line": 12571
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sealSessionKeyFor"
+   ],
+   "start": 565251,
+   "end": 565738,
+   "line": 12583
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openOfflineSeal"
+   ],
+   "start": 565739,
+   "end": 566059,
+   "line": 12592
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "offlineEnvelope"
+   ],
+   "start": 567275,
+   "end": 570076,
+   "line": 12617
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "encryptForSession"
+   ],
+   "start": 570077,
+   "end": 570357,
+   "line": 12668
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "decryptForSession"
+   ],
+   "start": 570358,
+   "end": 570600,
+   "line": 12676
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "chunkCipherBytes"
+   ],
+   "start": 571693,
+   "end": 572086,
+   "line": 12704
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "awaitChannelDrain"
+   ],
+   "start": 572856,
+   "end": 574052,
+   "line": 12726
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "createTransferMeter"
+   ],
+   "start": 574286,
+   "end": 576043,
+   "line": 12759
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatTransferEta"
+   ],
+   "start": 576045,
+   "end": 576552,
+   "line": 12794
+  },
+  {
+   "kind": "const",
+   "names": [
+    "transferWatchdogs"
+   ],
+   "start": 576850,
+   "end": 576886,
+   "line": 12807
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearTransferWatchdog"
+   ],
+   "start": 576887,
+   "end": 577065,
+   "line": 12808
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "armTransferWatchdog"
+   ],
+   "start": 577066,
+   "end": 577267,
+   "line": 12813
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "onTransferStalled"
+   ],
+   "start": 577268,
+   "end": 578259,
+   "line": 12817
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendBlobChunks"
+   ],
+   "start": 578619,
+   "end": 580881,
+   "line": 12844
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "statusRank"
+   ],
+   "start": 581178,
+   "end": 581299,
+   "line": 12893
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "markMessageStatus"
+   ],
+   "start": 581300,
+   "end": 582505,
+   "line": 12896
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteMessageEntry"
+   ],
+   "start": 582506,
+   "end": 583148,
+   "line": 12922
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "deleteActiveConversation"
+   ],
+   "start": 583149,
+   "end": 584577,
+   "line": 12941
+  },
+  {
+   "kind": "let",
+   "names": [
+    "lastSeenFlushAt"
+   ],
+   "start": 585120,
+   "end": 585144,
+   "line": 12984
+  },
+  {
+   "kind": "const",
+   "names": [
+    "SEEN_RECEIPT_BURST_LIMIT"
+   ],
+   "start": 585145,
+   "end": 585181,
+   "line": 12985
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "flushSeenReceipts"
+   ],
+   "start": 585182,
+   "end": 586552,
+   "line": 12986
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendDeliveryAck"
+   ],
+   "start": 586553,
+   "end": 586953,
+   "line": 13023
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "safeConnectionSend"
+   ],
+   "start": 586954,
+   "end": 587193,
+   "line": 13040
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendSealedRelay"
+   ],
+   "start": 587466,
+   "end": 591312,
+   "line": 13054
+  },
+  {
+   "kind": "const",
+   "names": [
+    "EPHEMERAL_RELAY_TYPES"
+   ],
+   "start": 591675,
+   "end": 591800,
+   "line": 13141
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendRelayEnvelope"
+   ],
+   "start": 591801,
+   "end": 592554,
+   "line": 13144
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "relaySessionEvent"
+   ],
+   "start": 592555,
+   "end": 593074,
+   "line": 13163
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "waitForSessionReady"
+   ],
+   "start": 593075,
+   "end": 593492,
+   "line": 13175
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "waitForDirectConnection"
+   ],
+   "start": 593493,
+   "end": 593921,
+   "line": 13193
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureStoredSession"
+   ],
+   "start": 593922,
+   "end": 594804,
+   "line": 13211
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureDirectSession"
+   ],
+   "start": 594805,
+   "end": 595751,
+   "line": 13233
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleOfflineRelayMessage"
+   ],
+   "start": 595752,
+   "end": 600639,
+   "line": 13255
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearSessionKeyFallback"
+   ],
+   "start": 600640,
+   "end": 600793,
+   "line": 13382
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scheduleSessionKeyFallback"
+   ],
+   "start": 601086,
+   "end": 601577,
+   "line": 13392
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "prepareOfflineSession"
+   ],
+   "start": 601850,
+   "end": 602406,
+   "line": 13406
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mintSessionKey"
+   ],
+   "start": 603138,
+   "end": 605966,
+   "line": 13428
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mintSessionKeyLegacy"
+   ],
+   "start": 606048,
+   "end": 607011,
+   "line": 13484
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openKexContribution"
+   ],
+   "start": 607077,
+   "end": 607342,
+   "line": 13508
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "completeKex"
+   ],
+   "start": 607419,
+   "end": 608207,
+   "line": 13514
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureSessionKey"
+   ],
+   "start": 608208,
+   "end": 609157,
+   "line": 13531
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleSessionMessage"
+   ],
+   "start": 609158,
+   "end": 628417,
+   "line": 13550
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sessionForPeer"
+   ],
+   "start": 628418,
+   "end": 628943,
+   "line": 14030
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindDataConnection"
+   ],
+   "start": 628944,
+   "end": 631221,
+   "line": 14045
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "onPeerDiscovered"
+   ],
+   "start": 631222,
+   "end": 632181,
+   "line": 14103
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "broadcastHello"
+   ],
+   "start": 632182,
+   "end": 633568,
+   "line": 14131
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ackRelayMessage"
+   ],
+   "start": 633569,
+   "end": 633749,
+   "line": 14158
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearReconnectTimer"
+   ],
+   "start": 633750,
+   "end": 633891,
+   "line": 14162
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "backoffDelay"
+   ],
+   "start": 634122,
+   "end": 634307,
+   "line": 14171
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "notifyTransportTrouble"
+   ],
+   "start": 634460,
+   "end": 634661,
+   "line": 14177
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearPeerHealTimers"
+   ],
+   "start": 634662,
+   "end": 634910,
+   "line": 14183
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "rebuildPeerTransport"
+   ],
+   "start": 634911,
+   "end": 635394,
+   "line": 14193
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "healPeerTransport"
+   ],
+   "start": 635737,
+   "end": 637339,
+   "line": 14212
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "scheduleReconnect"
+   ],
+   "start": 637340,
+   "end": 638003,
+   "line": 14261
+  },
+  {
+   "kind": "const",
+   "names": [
+    "setObscured"
+   ],
+   "start": 640680,
+   "end": 640770,
+   "line": 14349
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopTransportWatchdog"
+   ],
+   "start": 640972,
+   "end": 641119,
+   "line": 14353
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startTransportWatchdog"
+   ],
+   "start": 641473,
+   "end": 643123,
+   "line": 14364
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startHeartbeat"
+   ],
+   "start": 643124,
+   "end": 643686,
+   "line": 14404
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "connectPresence"
+   ],
+   "start": 643687,
+   "end": 659411,
+   "line": 14421
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "connectChatTransport"
+   ],
+   "start": 659599,
+   "end": 660344,
+   "line": 14863
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "buildChatTransport"
+   ],
+   "start": 660345,
+   "end": 667228,
+   "line": 14883
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startSecureSession"
+   ],
+   "start": 667229,
+   "end": 668660,
+   "line": 15046
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendMessage"
+   ],
+   "start": 668661,
+   "end": 675719,
+   "line": 15087
+  },
+  {
+   "kind": "let",
+   "names": [
+    "transferBannerOwner"
+   ],
+   "start": 676094,
+   "end": 676123,
+   "line": 15272
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setTransferBanner"
+   ],
+   "start": 676124,
+   "end": 677172,
+   "line": 15273
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearTransferBanner"
+   ],
+   "start": 677173,
+   "end": 677417,
+   "line": 15293
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendFile"
+   ],
+   "start": 677418,
+   "end": 677494,
+   "line": 15300
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "canDecodeImage"
+   ],
+   "start": 678912,
+   "end": 679085,
+   "line": 15327
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "convertImageToJpeg"
+   ],
+   "start": 679086,
+   "end": 679729,
+   "line": 15334
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "offerJpegConversion"
+   ],
+   "start": 679798,
+   "end": 681423,
+   "line": 15348
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stripFileMetadataForSend"
+   ],
+   "start": 681489,
+   "end": 684596,
+   "line": 15380
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendEncryptedBlob"
+   ],
+   "start": 684671,
+   "end": 696415,
+   "line": 15437
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "playMediaElement"
+   ],
+   "start": 696416,
+   "end": 696564,
+   "line": 15709
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "streamHasLiveVideo"
+   ],
+   "start": 696565,
+   "end": 696693,
+   "line": 15717
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "prepareVideoElement"
+   ],
+   "start": 696694,
+   "end": 697175,
+   "line": 15720
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncVideoElementFit"
+   ],
+   "start": 697176,
+   "end": 698208,
+   "line": 15736
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopStream"
+   ],
+   "start": 698209,
+   "end": 698357,
+   "line": 15761
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearMediaElement"
+   ],
+   "start": 698358,
+   "end": 698536,
+   "line": 15771
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activeCallPeerRecord"
+   ],
+   "start": 698537,
+   "end": 698744,
+   "line": 15778
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncFloatingCallPeerIdentity"
+   ],
+   "start": 698745,
+   "end": 699806,
+   "line": 15781
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "mountChatPortals"
+   ],
+   "start": 699807,
+   "end": 701589,
+   "line": 15802
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyFloatingCallPosition"
+   ],
+   "start": 701590,
+   "end": 701921,
+   "line": 15834
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallChromeState"
+   ],
+   "start": 701922,
+   "end": 702471,
+   "line": 15840
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallOverlayBounds"
+   ],
+   "start": 702472,
+   "end": 703837,
+   "line": 15852
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setCallDisplayMode"
+   ],
+   "start": 703838,
+   "end": 704738,
+   "line": 15885
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallDisplayMode"
+   ],
+   "start": 704739,
+   "end": 704903,
+   "line": 15905
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "beginFloatingCallDrag"
+   ],
+   "start": 704904,
+   "end": 705298,
+   "line": 15909
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "moveFloatingCallDrag"
+   ],
+   "start": 705299,
+   "end": 705902,
+   "line": 15921
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "endFloatingCallDrag"
+   ],
+   "start": 705903,
+   "end": 706089,
+   "line": 15935
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isCallBusy"
+   ],
+   "start": 706090,
+   "end": 706222,
+   "line": 15940
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearCallTimers"
+   ],
+   "start": 706223,
+   "end": 706485,
+   "line": 15943
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "requestCallMedia"
+   ],
+   "start": 706486,
+   "end": 707123,
+   "line": 15953
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "attachLocalStream"
+   ],
+   "start": 707124,
+   "end": 708226,
+   "line": 15982
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "attachRemoteStream"
+   ],
+   "start": 708227,
+   "end": 709142,
+   "line": 16012
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncCallStageState"
+   ],
+   "start": 709143,
+   "end": 710991,
+   "line": 16039
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleScreenShare"
+   ],
+   "start": 711469,
+   "end": 713178,
+   "line": 16082
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopDirectPresentation"
+   ],
+   "start": 713180,
+   "end": 714137,
+   "line": 16132
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "refreshLocalPreview"
+   ],
+   "start": 714347,
+   "end": 714697,
+   "line": 16159
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "spawnReactionAnimation"
+   ],
+   "start": 714699,
+   "end": 715215,
+   "line": 16172
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setCallControlState"
+   ],
+   "start": 715216,
+   "end": 715432,
+   "line": 16185
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "refreshCallControls"
+   ],
+   "start": 715433,
+   "end": 717954,
+   "line": 16191
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "getRingtoneOption"
+   ],
+   "start": 717955,
+   "end": 718113,
+   "line": 16219
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "getMessageToneOption"
+   ],
+   "start": 718114,
+   "end": 718286,
+   "line": 16222
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectedSoundFile"
+   ],
+   "start": 718421,
+   "end": 718650,
+   "line": 16227
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "soundSelectMarkup"
+   ],
+   "start": 718651,
+   "end": 719213,
+   "line": 16232
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderRingtoneSettings"
+   ],
+   "start": 719214,
+   "end": 720331,
+   "line": 16242
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureRingtoneContext"
+   ],
+   "start": 720332,
+   "end": 720672,
+   "line": 16262
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "primeRingtoneAudio"
+   ],
+   "start": 720673,
+   "end": 720826,
+   "line": 16270
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "playRingtonePattern"
+   ],
+   "start": 720827,
+   "end": 721807,
+   "line": 16276
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCustomRingtone"
+   ],
+   "start": 722044,
+   "end": 722343,
+   "line": 16304
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopCustomRingtone"
+   ],
+   "start": 722344,
+   "end": 722587,
+   "line": 16312
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startRingtoneLoop"
+   ],
+   "start": 722588,
+   "end": 723013,
+   "line": 16321
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopRingtoneLoop"
+   ],
+   "start": 723014,
+   "end": 723311,
+   "line": 16331
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "testRingtone"
+   ],
+   "start": 723312,
+   "end": 723645,
+   "line": 16342
+  },
+  {
+   "kind": "const",
+   "names": [
+    "sounds"
+   ],
+   "start": 723646,
+   "end": 723941,
+   "line": 16354
+  },
+  {
+   "kind": "const",
+   "names": [
+    "audioPlayers"
+   ],
+   "start": 723983,
+   "end": 724014,
+   "line": 16373
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "createModernAudioPlayer"
+   ],
+   "start": 724015,
+   "end": 724203,
+   "line": 16374
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "playSound"
+   ],
+   "start": 724204,
+   "end": 724643,
+   "line": 16383
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "playMessageChime"
+   ],
+   "start": 724644,
+   "end": 725989,
+   "line": 16402
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "testMessageTone"
+   ],
+   "start": 725990,
+   "end": 726069,
+   "line": 16436
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopSound"
+   ],
+   "start": 726070,
+   "end": 726212,
+   "line": 16440
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "showIncomingCall"
+   ],
+   "start": 726213,
+   "end": 730688,
+   "line": 16449
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "hideIncomingCall"
+   ],
+   "start": 730689,
+   "end": 730822,
+   "line": 16559
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearIncomingCall"
+   ],
+   "start": 731293,
+   "end": 731622,
+   "line": 16571
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "acceptIncomingCall"
+   ],
+   "start": 731623,
+   "end": 733342,
+   "line": 16582
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "rejectIncomingCall"
+   ],
+   "start": 733343,
+   "end": 734096,
+   "line": 16633
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCallDurationTimer"
+   ],
+   "start": 734097,
+   "end": 734487,
+   "line": 16668
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopCallDurationTimer"
+   ],
+   "start": 734488,
+   "end": 734790,
+   "line": 16678
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setCallQuality"
+   ],
+   "start": 734791,
+   "end": 735319,
+   "line": 16689
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "isCallSignalFromActivePeer"
+   ],
+   "start": 735320,
+   "end": 735589,
+   "line": 16703
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleCallRenegotiateOffer"
+   ],
+   "start": 735590,
+   "end": 736441,
+   "line": 16708
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleCallRenegotiateAnswer"
+   ],
+   "start": 736442,
+   "end": 736807,
+   "line": 16731
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleCallRemoteCandidate"
+   ],
+   "start": 736808,
+   "end": 737168,
+   "line": 16741
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearIceRecoveryTimer"
+   ],
+   "start": 737169,
+   "end": 737318,
+   "line": 16751
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setCallStatusText"
+   ],
+   "start": 737319,
+   "end": 737448,
+   "line": 16757
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendIceRestartOffer"
+   ],
+   "start": 737814,
+   "end": 738267,
+   "line": 16766
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "attemptCallRecovery"
+   ],
+   "start": 738268,
+   "end": 739922,
+   "line": 16782
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindCallIceRecovery"
+   ],
+   "start": 739923,
+   "end": 742243,
+   "line": 16816
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCallQualityMonitor"
+   ],
+   "start": 742244,
+   "end": 743355,
+   "line": 16873
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopCallQualityMonitor"
+   ],
+   "start": 743356,
+   "end": 743534,
+   "line": 16903
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "broadcastCallState"
+   ],
+   "start": 743535,
+   "end": 744319,
+   "line": 16910
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyRemoteCallState"
+   ],
+   "start": 744320,
+   "end": 745101,
+   "line": 16930
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleMirrorVideo"
+   ],
+   "start": 745102,
+   "end": 745797,
+   "line": 16951
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyRemoteMirrorView"
+   ],
+   "start": 746007,
+   "end": 746340,
+   "line": 16971
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncMirrorSelfView"
+   ],
+   "start": 746341,
+   "end": 746662,
+   "line": 16979
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "activeCallPrimaryVideoElement"
+   ],
+   "start": 746663,
+   "end": 747162,
+   "line": 16986
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "captureCallScreenshot"
+   ],
+   "start": 747163,
+   "end": 749010,
+   "line": 16997
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "showScreenshotWarning"
+   ],
+   "start": 749011,
+   "end": 749497,
+   "line": 17044
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallPiP"
+   ],
+   "start": 749498,
+   "end": 750012,
+   "line": 17053
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleCallFullscreen"
+   ],
+   "start": 750013,
+   "end": 750409,
+   "line": 17069
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "listCallDevices"
+   ],
+   "start": 750410,
+   "end": 750598,
+   "line": 17082
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeCallSettingsPanel"
+   ],
+   "start": 750599,
+   "end": 750711,
+   "line": 17090
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openCallDeviceSettings"
+   ],
+   "start": 750712,
+   "end": 752772,
+   "line": 17093
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "switchCallMediaDevice"
+   ],
+   "start": 752773,
+   "end": 754544,
+   "line": 17124
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyCallSink"
+   ],
+   "start": 754545,
+   "end": 755114,
+   "line": 17162
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleSpeakerCall"
+   ],
+   "start": 755115,
+   "end": 755632,
+   "line": 17174
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "redialCall"
+   ],
+   "start": 755633,
+   "end": 756155,
+   "line": 17186
+  },
+  {
+   "kind": "const",
+   "names": [
+    "OFFLINE_RING_MS"
+   ],
+   "start": 756461,
+   "end": 756491,
+   "line": 17207
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startOfflineRing"
+   ],
+   "start": 756492,
+   "end": 758126,
+   "line": 17208
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearOfflineRing"
+   ],
+   "start": 758127,
+   "end": 758541,
+   "line": 17248
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "offlineRingPeerArrived"
+   ],
+   "start": 758605,
+   "end": 758975,
+   "line": 17258
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearOutgoingRingTimer"
+   ],
+   "start": 759244,
+   "end": 759409,
+   "line": 17271
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startOutgoingRingTimer"
+   ],
+   "start": 759410,
+   "end": 759822,
+   "line": 17277
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindMediaCall"
+   ],
+   "start": 759824,
+   "end": 762298,
+   "line": 17289
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startCall"
+   ],
+   "start": 762299,
+   "end": 765992,
+   "line": 17352
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleMuteCall"
+   ],
+   "start": 765993,
+   "end": 766249,
+   "line": 17469
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleHoldCall"
+   ],
+   "start": 766250,
+   "end": 766795,
+   "line": 17478
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleVideoCall"
+   ],
+   "start": 766796,
+   "end": 767137,
+   "line": 17490
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "flipCameraCall"
+   ],
+   "start": 767138,
+   "end": 768341,
+   "line": 17499
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "endCurrentCall"
+   ],
+   "start": 768650,
+   "end": 775230,
+   "line": 17531
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "disconnectChat"
+   ],
+   "start": 775231,
+   "end": 775973,
+   "line": 17712
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "rotateIdentity"
+   ],
+   "start": 775974,
+   "end": 776605,
+   "line": 17740
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "retryQueuedMessages"
+   ],
+   "start": 776606,
+   "end": 778148,
+   "line": 17755
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncRailChrome"
+   ],
+   "start": 779341,
+   "end": 782647,
+   "line": 17811
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_RAIL_WIDTH_KEY"
+   ],
+   "start": 782649,
+   "end": 782703,
+   "line": 17867
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_RAIL_MIN_PX"
+   ],
+   "start": 782704,
+   "end": 782733,
+   "line": 17868
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_RAIL_MAX_PX"
+   ],
+   "start": 782784,
+   "end": 782813,
+   "line": 17869
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "storedRailWidth"
+   ],
+   "start": 782849,
+   "end": 783096,
+   "line": 17871
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyRailWidth"
+   ],
+   "start": 783098,
+   "end": 783534,
+   "line": 17879
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindChatRailResizer"
+   ],
+   "start": 783690,
+   "end": 787066,
+   "line": 17892
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_CLOCKS_KEY"
+   ],
+   "start": 788080,
+   "end": 788126,
+   "line": 17984
+  },
+  {
+   "kind": "let",
+   "names": [
+    "clockTimer"
+   ],
+   "start": 788127,
+   "end": 788146,
+   "line": 17985
+  },
+  {
+   "kind": "let",
+   "names": [
+    "fullSheetReturn"
+   ],
+   "start": 788147,
+   "end": 788174,
+   "line": 17986
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "restoreNode"
+   ],
+   "start": 788246,
+   "end": 788433,
+   "line": 17989
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureFullSheet"
+   ],
+   "start": 788435,
+   "end": 789911,
+   "line": 17995
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openFullSheet"
+   ],
+   "start": 789913,
+   "end": 790881,
+   "line": 18026
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeFullSheet"
+   ],
+   "start": 790883,
+   "end": 791828,
+   "line": 18050
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openIdentitySheet"
+   ],
+   "start": 791910,
+   "end": 794084,
+   "line": 18073
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openProfileSettingsSheet"
+   ],
+   "start": 794166,
+   "end": 798115,
+   "line": 18113
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_MAX_CLOCKS"
+   ],
+   "start": 798299,
+   "end": 798325,
+   "line": 18193
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "loadClocks"
+   ],
+   "start": 798327,
+   "end": 798605,
+   "line": 18195
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "saveClocks"
+   ],
+   "start": 798607,
+   "end": 798827,
+   "line": 18203
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clockLabelFor"
+   ],
+   "start": 798829,
+   "end": 798922,
+   "line": 18209
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatZoneTime"
+   ],
+   "start": 798924,
+   "end": 799162,
+   "line": 18213
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatDateIn"
+   ],
+   "start": 799299,
+   "end": 799702,
+   "line": 18222
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "formatLocalDate"
+   ],
+   "start": 799704,
+   "end": 799779,
+   "line": 18232
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "zoneOffsetLabel"
+   ],
+   "start": 799985,
+   "end": 801033,
+   "line": 18239
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toLocaleDigits"
+   ],
+   "start": 801173,
+   "end": 801333,
+   "line": 18266
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderProfileClocks"
+   ],
+   "start": 801622,
+   "end": 803307,
+   "line": 18276
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "knownTimeZones"
+   ],
+   "start": 803309,
+   "end": 803749,
+   "line": 18310
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openClockSheet"
+   ],
+   "start": 803751,
+   "end": 807039,
+   "line": 18319
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderProfileSummary"
+   ],
+   "start": 807121,
+   "end": 807958,
+   "line": 18390
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindThreadMenu"
+   ],
+   "start": 808293,
+   "end": 809781,
+   "line": 18413
+  },
+  {
+   "kind": "const",
+   "names": [
+    "MOOD_PRESETS"
+   ],
+   "start": 809862,
+   "end": 810131,
+   "line": 18457
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderMoodChip"
+   ],
+   "start": 810133,
+   "end": 810527,
+   "line": 18466
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "editMood"
+   ],
+   "start": 810529,
+   "end": 811294,
+   "line": 18476
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindProfileCard"
+   ],
+   "start": 811296,
+   "end": 812184,
+   "line": 18492
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_PET_KEY"
+   ],
+   "start": 812808,
+   "end": 812848,
+   "line": 18526
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "petFrameSvg"
+   ],
+   "start": 812955,
+   "end": 813395,
+   "line": 18530
+  },
+  {
+   "kind": "const",
+   "names": [
+    "CHAT_PETS"
+   ],
+   "start": 813397,
+   "end": 819741,
+   "line": 18546
+  },
+  {
+   "kind": "const",
+   "names": [
+    "PET_OFF"
+   ],
+   "start": 819971,
+   "end": 819993,
+   "line": 18812
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "currentPetId"
+   ],
+   "start": 819995,
+   "end": 820249,
+   "line": 18814
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "petsAreOff"
+   ],
+   "start": 820251,
+   "end": 820313,
+   "line": 18821
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setPet"
+   ],
+   "start": 820315,
+   "end": 820658,
+   "line": 18825
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "shortSelfId"
+   ],
+   "start": 820660,
+   "end": 820815,
+   "line": 18835
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderPet"
+   ],
+   "start": 820817,
+   "end": 821949,
+   "line": 18840
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "cyclePet"
+   ],
+   "start": 822179,
+   "end": 822606,
+   "line": 18871
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "copySelfId"
+   ],
+   "start": 822608,
+   "end": 822924,
+   "line": 18885
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "togglePets"
+   ],
+   "start": 822926,
+   "end": 823003,
+   "line": 18893
+  },
+  {
+   "kind": "const",
+   "names": [
+    "RAIL_CONDENSE_AT"
+   ],
+   "start": 823005,
+   "end": 823033,
+   "line": 18897
+  },
+  {
+   "kind": "const",
+   "names": [
+    "RAIL_EXPAND_AT"
+   ],
+   "start": 823034,
+   "end": 823060,
+   "line": 18898
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindRailCondense"
+   ],
+   "start": 823061,
+   "end": 827247,
+   "line": 18899
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleRailSearch"
+   ],
+   "start": 827871,
+   "end": 828629,
+   "line": 18987
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeRailSearch"
+   ],
+   "start": 828630,
+   "end": 828687,
+   "line": 19001
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderChatNavBadges"
+   ],
+   "start": 828882,
+   "end": 830136,
+   "line": 19008
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setChatView"
+   ],
+   "start": 830138,
+   "end": 834567,
+   "line": 19035
+  },
+  {
+   "kind": "let",
+   "names": [
+    "groupMakerAvatar"
+   ],
+   "start": 834796,
+   "end": 834822,
+   "line": 19113
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupMakerDefaults"
+   ],
+   "start": 834823,
+   "end": 834943,
+   "line": 19114
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderGroupMakerPerms"
+   ],
+   "start": 834944,
+   "end": 835382,
+   "line": 19117
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openGroupMaker"
+   ],
+   "start": 835383,
+   "end": 835985,
+   "line": 19126
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeGroupMaker"
+   ],
+   "start": 835986,
+   "end": 836086,
+   "line": 19141
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "groupMakerPermissions"
+   ],
+   "start": 836087,
+   "end": 836407,
+   "line": 19144
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "createSpace"
+   ],
+   "start": 836409,
+   "end": 837519,
+   "line": 19155
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "updateProfileAvatar"
+   ],
+   "start": 837520,
+   "end": 837938,
+   "line": 19188
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setAvatarEditorVisible"
+   ],
+   "start": 837939,
+   "end": 838196,
+   "line": 19200
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openAvatarEditor"
+   ],
+   "start": 838197,
+   "end": 838985,
+   "line": 19205
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "drawAvatarEditor"
+   ],
+   "start": 838986,
+   "end": 840021,
+   "line": 19238
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "canvasToAvatarDataUrl"
+   ],
+   "start": 840022,
+   "end": 840192,
+   "line": 19265
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setPendingAvatarData"
+   ],
+   "start": 840193,
+   "end": 840614,
+   "line": 19273
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "savePendingAvatar"
+   ],
+   "start": 840615,
+   "end": 840895,
+   "line": 19282
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "rotateAvatarEditor"
+   ],
+   "start": 840896,
+   "end": 841080,
+   "line": 19290
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setAvatarEditorZoom"
+   ],
+   "start": 841081,
+   "end": 841255,
+   "line": 19295
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setAvatarEditorAxis"
+   ],
+   "start": 841256,
+   "end": 841897,
+   "line": 19300
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setAvatarEditorFilter"
+   ],
+   "start": 841898,
+   "end": 842053,
+   "line": 19309
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "applyAvatarEditor"
+   ],
+   "start": 842054,
+   "end": 842616,
+   "line": 19314
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "cancelAvatarEditor"
+   ],
+   "start": 842617,
+   "end": 842712,
+   "line": 19328
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setProfileAvatarData"
+   ],
+   "start": 842713,
+   "end": 842942,
+   "line": 19332
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "updateGroupAvatar"
+   ],
+   "start": 842943,
+   "end": 843615,
+   "line": 19342
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleAvatarChooser"
+   ],
+   "start": 843616,
+   "end": 844133,
+   "line": 19362
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "selectPresetAvatar"
+   ],
+   "start": 844134,
+   "end": 844726,
+   "line": 19378
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "generatedAvatarData"
+   ],
+   "start": 844727,
+   "end": 845837,
+   "line": 19398
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "supportedAudioMimeType"
+   ],
+   "start": 845838,
+   "end": 846092,
+   "line": 19422
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "setRecordingOverlayVisible"
+   ],
+   "start": 846093,
+   "end": 846919,
+   "line": 19432
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startRecordingTimer"
+   ],
+   "start": 846920,
+   "end": 847601,
+   "line": 19453
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopRecordingTimer"
+   ],
+   "start": 847602,
+   "end": 847926,
+   "line": 19471
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "updateVoiceRecordingStatus"
+   ],
+   "start": 847927,
+   "end": 848360,
+   "line": 19481
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "renderVoicePreviewWaveform"
+   ],
+   "start": 848361,
+   "end": 849326,
+   "line": 19489
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "startVoicePlayback"
+   ],
+   "start": 849327,
+   "end": 850283,
+   "line": 19519
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "seekVoicePlayback"
+   ],
+   "start": 850284,
+   "end": 851004,
+   "line": 19545
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "stopVoicePlayback"
+   ],
+   "start": 851005,
+   "end": 851646,
+   "line": 19559
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleVoicePreviewPlayback"
+   ],
+   "start": 851647,
+   "end": 852079,
+   "line": 19577
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearVoiceDraft"
+   ],
+   "start": 852080,
+   "end": 853109,
+   "line": 19592
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "cleanupVoiceRecorder"
+   ],
+   "start": 853110,
+   "end": 853720,
+   "line": 19614
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "cancelVoiceRecording"
+   ],
+   "start": 853721,
+   "end": 853951,
+   "line": 19632
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "pauseOrResumeVoiceRecording"
+   ],
+   "start": 853952,
+   "end": 854401,
+   "line": 19640
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "finishVoiceRecording"
+   ],
+   "start": 854402,
+   "end": 854552,
+   "line": 19653
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendVoiceDraft"
+   ],
+   "start": 854947,
+   "end": 855978,
+   "line": 19664
+  },
+  {
+   "kind": "const",
+   "names": [
+    "VOICE_DISGUISE_HINTS"
+   ],
+   "start": 856408,
+   "end": 856873,
+   "line": 19695
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "sendDisguisedVoiceDraft"
+   ],
+   "start": 856874,
+   "end": 857638,
+   "line": 19702
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "toggleVoiceRecording"
+   ],
+   "start": 857748,
+   "end": 862902,
+   "line": 19723
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "bindDomEvents"
+   ],
+   "start": 862903,
+   "end": 933826,
+   "line": 19848
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "syncComposerHeight"
+   ],
+   "start": 933827,
+   "end": 934072,
+   "line": 21284
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "clearMessageContext"
+   ],
+   "start": 934073,
+   "end": 934409,
+   "line": 21292
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleReplyMessage"
+   ],
+   "start": 934410,
+   "end": 935343,
+   "line": 21302
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleEditMessage"
+   ],
+   "start": 935344,
+   "end": 936302,
+   "line": 21324
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "finalizeMessageEdit"
+   ],
+   "start": 936303,
+   "end": 937736,
+   "line": 21351
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handlePinMessage"
+   ],
+   "start": 937737,
+   "end": 938188,
+   "line": 21390
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "forwardEntryLabel"
+   ],
+   "start": 938189,
+   "end": 938617,
+   "line": 21402
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "forwardDestinations"
+   ],
+   "start": 938618,
+   "end": 939838,
+   "line": 21412
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "ensureForwardModal"
+   ],
+   "start": 939839,
+   "end": 940119,
+   "line": 21443
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "closeForwardModal"
+   ],
+   "start": 940120,
+   "end": 940282,
+   "line": 21452
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "forwardEntryToDestination"
+   ],
+   "start": 940283,
+   "end": 942732,
+   "line": 21457
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "openForwardModal"
+   ],
+   "start": 942733,
+   "end": 944636,
+   "line": 21508
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "handleForwardMessage"
+   ],
+   "start": 944637,
+   "end": 944957,
+   "line": 21558
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "initChatModule"
+   ],
+   "start": 944958,
+   "end": 947332,
+   "line": 21567
+  },
+  {
+   "kind": "let",
+   "names": [
+    "isChatInitialized"
+   ],
+   "start": 947333,
+   "end": 947363,
+   "line": 21626
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "lazyInitChatModule"
+   ],
+   "start": 947364,
+   "end": 947484,
+   "line": 21627
+  },
+  {
+   "kind": "FunctionDeclaration",
+   "names": [
+    "emergencyWipeChat"
+   ],
+   "start": 960400,
+   "end": 964002,
+   "line": 21923
+  }
+ ],
+ "bodyStart": 15,
+ "bodyEnd": 966618
+}

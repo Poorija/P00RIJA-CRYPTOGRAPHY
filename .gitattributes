@@ -1,0 +1,28 @@
+# Normalise line endings so a Windows checkout does not rewrite every file.
+* text=auto eol=lf
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary assets — never diffed, never merged.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.icns binary
+*.ttf  binary
+*.woff binary
+*.woff2 binary
+*.wav  binary
+*.mp3  binary
+*.zip  binary
+*.tgs  binary
+*.wastickers binary
+
+# Vendored libraries and generated CSS: keep them out of language stats and
+# out of diffs, but still shipped — the app is offline-first and cannot fetch
+# them at runtime.
+vendor/** linguist-vendored
+css/styles.css linguist-generated=false

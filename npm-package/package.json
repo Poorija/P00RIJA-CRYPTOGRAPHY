@@ -1,0 +1,36 @@
+{
+  "name": "p00rija-cryptography",
+  "version": "2.26.95",
+  "buildTag": "chat-v50",
+  "description": "P00RIJA Cryptography — offline-first encryption suite and end-to-end encrypted messenger. Quick installer: downloads the native app for your platform or serves the PWA locally.",
+  "license": "AGPL-3.0-only",
+  "author": "Poorija",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Poorija/P00RIJA-Cryptography.git"
+  },
+  "homepage": "https://github.com/Poorija/P00RIJA-Cryptography#readme",
+  "bugs": "https://github.com/Poorija/P00RIJA-Cryptography/issues",
+  "type": "module",
+  "bin": {
+    "p00rija": "cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "app/"
+  ],
+  "keywords": [
+    "encryption",
+    "cryptography",
+    "e2ee",
+    "messenger",
+    "steganography",
+    "privacy",
+    "offline-first",
+    "pwa"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "private": false
+}

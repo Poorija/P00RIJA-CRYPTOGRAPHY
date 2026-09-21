@@ -1,0 +1,10 @@
+{
+  "_comment": [
+    "Optional relay origins baked into native installers. INTENTIONALLY EMPTY:",
+    "the suite is open source and self-hostable, so a fresh native install must",
+    "not silently point at the developer's server. The app asks instead: an",
+    "address typed by hand, a config file, or a QR. A private distribution that",
+    "really wants a convenience default can fill this list and rebuild."
+  ],
+  "origins": []
+}

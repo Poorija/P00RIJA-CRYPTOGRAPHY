@@ -1,0 +1,34 @@
+{
+  "name": "poorija-relay",
+  "version": "2.26.95",
+  "buildTag": "chat-v50",
+  "description": "Standalone signalling relay for P00RIJA Cryptography: presence, WebRTC signalling, sealed offline mailboxes and Web Push. Carries no plaintext and holds no keys.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --expose-gc server.js",
+    "setup": "bash setup.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY.git",
+    "directory": "standalone-relay"
+  },
+  "bugs": {
+    "url": "https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY/issues"
+  },
+  "homepage": "https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY#readme",
+  "license": "AGPL-3.0-only",
+  "overrides": {
+    "qs": "^6.16.0"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "peer": "1.0.2",
+    "web-push": "3.6.7",
+    "ws": "8.21.3"
+  }
+}

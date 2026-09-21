@@ -1,0 +1,50 @@
+# Build host for the Linux client: .deb, .rpm and AppImage.
+#
+# Ubuntu 22.04 on purpose — it is the oldest base that carries WebKitGTK 4.1,
+# and the glibc floor of the build host becomes the glibc floor of everything
+# it produces.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    build-essential \
+    pkg-config \
+    # aws-lc-sys (rustls' crypto provider, pulled in through reqwest) builds
+    # its C sources with cmake. Without it the Rust build dies at link time
+    # with a message that names neither cmake nor aws-lc.
+    cmake \
+    perl \
+    libssl-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    libasound2-dev \
+    libgtk-3-dev \
+    ca-certificates \
+    # AppImage tooling
+    libfuse2 \
+    file \
+    desktop-file-utils \
+    squashfs-tools \
+    zsync \
+    zstd \
+    # .rpm and archive tooling
+    rpm \
+    binutils \
+    libarchive-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+ENTRYPOINT ["/bin/bash", "-c"]

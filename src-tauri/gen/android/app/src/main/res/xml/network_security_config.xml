@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is permitted, and that is a deliberate decision rather than an
+  oversight.
+
+  The relay this app talks to is usually a machine on the user's own network
+  or a self-hosted box reached by IP, and neither has a certificate a phone
+  would accept. Refusing cleartext would not make those deployments safer, it
+  would make them impossible, and the user would be pushed towards a public
+  relay instead of their own.
+
+  What makes that acceptable here is that the relay never sees plaintext. Every
+  message is sealed with AES-256-GCM under an RSA-OAEP-wrapped session key
+  before it reaches the transport, so TLS would be protecting an envelope that
+  is already opaque. The one thing cleartext does expose is metadata — who is
+  talking to which relay — which is why a relay behind HTTPS is still the
+  better configuration and the app prefers it whenever one is reachable.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- Lets a self-hosted relay use a certificate the user installed
+                 on the device, which is the middle ground between plain http
+                 and buying a public certificate. -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

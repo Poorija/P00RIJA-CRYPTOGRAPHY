@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <!-- Both keys, deliberately.
+
+       com.apple.security.device.microphone is the App Sandbox spelling. The
+       HARDENED RUNTIME — which bundle.macOS.hardenedRuntime turns on, and this
+       app builds with — wants com.apple.security.device.audio-input instead,
+       and only that one was missing.
+
+       The effect was not a prompt the user could say no to: the runtime denies
+       the microphone before TCC is ever consulted, so getUserMedia rejects
+       immediately. And because every call path asks for { audio: true, video },
+       one blocked microphone took the camera down with it — which is why this
+       was reported as "the mic AND the camera do not work" rather than as a
+       microphone problem.
+
+       com.apple.security.device.camera is spelled the same for both, which is
+       why the camera alone was never the issue. -->
+  <key>com.apple.security.device.microphone</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>
