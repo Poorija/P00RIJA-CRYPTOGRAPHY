@@ -1,0 +1,13 @@
+/*
+ * P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
+ * Copyright (C) 2026 Poorija <p00rija@tutamail.com>
+ * https://github.com/Poorija/P00RIJA-Cryptography
+ *
+ * Licensed under the GNU Affero General Public License, version 3 only.
+ * See LICENSE for the full text. Section 13 matters here: run a modified
+ * version as a network service and its users are entitled to your source.
+ */
+
+(function () {
+  window.__POORIJA_RELAY_HINTS__ = window.__POORIJA_RELAY_HINTS__ || [];
+})();

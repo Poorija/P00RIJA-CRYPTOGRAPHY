@@ -1,0 +1,484 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1433599EF139DA58206E4EA6 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 1F94E205395A78EAACB2523A /* assets */; };
+		1E0EDB6736BC7A3CFC54FD2F /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E8951220B495900B3E82465D /* UIKit.framework */; };
+		20E01B509CF667E65E0E6D1D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F3984314FEE96075BBE19498 /* Metal.framework */; };
+		2EB63902B340C3DEAB147939 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 734EB2FCB4FE6F305BA115FE /* main.mm */; };
+		3DBBEFF4256A1D95FA0D2DC7 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A5D4BF643F5D2A57D145735 /* MetalKit.framework */; };
+		5CFC37CFEA1EDAF28750233F /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 075776D37658454934D26AFC /* WebKit.framework */; };
+		67191B24694D8F630FCB1EC6 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F1702FFB5C1FF4DF93F0FB90 /* libapp.a */; };
+		69C05839E9D6A7C8114F29AE /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3682918C61DE734FB01DB6C7 /* Security.framework */; };
+		79ACDC117AAB6B8487DED2C1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2DC7152EE7FB19538910B2D0 /* Assets.xcassets */; };
+		CE39ACA09516ABBDB130DE35 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D78511A03C6886571E2A6841 /* QuartzCore.framework */; };
+		ECAC83A0F2165C0C02EE97B7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 207E6791810ACFCEF7971F63 /* LaunchScreen.storyboard */; };
+		F6BB1D10ADF8B1301A0108B6 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 60114D55C269481442B9D24D /* CoreGraphics.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		075776D37658454934D26AFC /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		0A5D4BF643F5D2A57D145735 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		1F94E205395A78EAACB2523A /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		207E6791810ACFCEF7971F63 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		22E9DCED98D98ADC88BE65E7 /* P00RIJA Cryptography.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "P00RIJA Cryptography.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2DC7152EE7FB19538910B2D0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		3682918C61DE734FB01DB6C7 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		51567CF04ADB3AD22930B5CC /* lib.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = lib.rs; sourceTree = "<group>"; };
+		60114D55C269481442B9D24D /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		6B13A156737F2AC482D1294D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		734EB2FCB4FE6F305BA115FE /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		93000CAB875EFFBB476F629A /* p00rija-cryptography_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "p00rija-cryptography_iOS.entitlements"; sourceTree = "<group>"; };
+		95DF8E0FBC28D098DF0DEE95 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		AF3CA319FF89DA60AFBD7112 /* main.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = main.rs; sourceTree = "<group>"; };
+		D78511A03C6886571E2A6841 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		E8951220B495900B3E82465D /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		F1702FFB5C1FF4DF93F0FB90 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		F3984314FEE96075BBE19498 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		30C995C654D3E23FE2F713E0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				67191B24694D8F630FCB1EC6 /* libapp.a in Frameworks */,
+				F6BB1D10ADF8B1301A0108B6 /* CoreGraphics.framework in Frameworks */,
+				20E01B509CF667E65E0E6D1D /* Metal.framework in Frameworks */,
+				3DBBEFF4256A1D95FA0D2DC7 /* MetalKit.framework in Frameworks */,
+				CE39ACA09516ABBDB130DE35 /* QuartzCore.framework in Frameworks */,
+				69C05839E9D6A7C8114F29AE /* Security.framework in Frameworks */,
+				1E0EDB6736BC7A3CFC54FD2F /* UIKit.framework in Frameworks */,
+				5CFC37CFEA1EDAF28750233F /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1B12E994C60FD64A08FC7A8D /* src */ = {
+			isa = PBXGroup;
+			children = (
+				51567CF04ADB3AD22930B5CC /* lib.rs */,
+				AF3CA319FF89DA60AFBD7112 /* main.rs */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		52517CD6FFB6401B235A2B6B /* p00rija-cryptography_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				6B13A156737F2AC482D1294D /* Info.plist */,
+				93000CAB875EFFBB476F629A /* p00rija-cryptography_iOS.entitlements */,
+			);
+			path = "p00rija-cryptography_iOS";
+			sourceTree = "<group>";
+		};
+		719FBB10E3BE5A7ACF9C562A /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				95DF8E0FBC28D098DF0DEE95 /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		7C8FA24F40028C001C0E7698 /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		884BCBEAF9B4054CA5DDEC79 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				60114D55C269481442B9D24D /* CoreGraphics.framework */,
+				F1702FFB5C1FF4DF93F0FB90 /* libapp.a */,
+				F3984314FEE96075BBE19498 /* Metal.framework */,
+				0A5D4BF643F5D2A57D145735 /* MetalKit.framework */,
+				D78511A03C6886571E2A6841 /* QuartzCore.framework */,
+				3682918C61DE734FB01DB6C7 /* Security.framework */,
+				E8951220B495900B3E82465D /* UIKit.framework */,
+				075776D37658454934D26AFC /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		8FD05D8567F0CB9F39A21069 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				B83A41007345A4ED4D0ACCC1 /* p00rija-cryptography */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		9F65FEF1B3F260486C980505 = {
+			isa = PBXGroup;
+			children = (
+				1F94E205395A78EAACB2523A /* assets */,
+				2DC7152EE7FB19538910B2D0 /* Assets.xcassets */,
+				207E6791810ACFCEF7971F63 /* LaunchScreen.storyboard */,
+				7C8FA24F40028C001C0E7698 /* Externals */,
+				52517CD6FFB6401B235A2B6B /* p00rija-cryptography_iOS */,
+				8FD05D8567F0CB9F39A21069 /* Sources */,
+				1B12E994C60FD64A08FC7A8D /* src */,
+				884BCBEAF9B4054CA5DDEC79 /* Frameworks */,
+				DF19890EA5DEB88B6C1A971A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B83A41007345A4ED4D0ACCC1 /* p00rija-cryptography */ = {
+			isa = PBXGroup;
+			children = (
+				734EB2FCB4FE6F305BA115FE /* main.mm */,
+				719FBB10E3BE5A7ACF9C562A /* bindings */,
+			);
+			path = "p00rija-cryptography";
+			sourceTree = "<group>";
+		};
+		DF19890EA5DEB88B6C1A971A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				22E9DCED98D98ADC88BE65E7 /* P00RIJA Cryptography.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7F73EFC7DA5CBD899E1153F2 /* p00rija-cryptography_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9EDBDCF1449740CC1C021028 /* Build configuration list for PBXNativeTarget "p00rija-cryptography_iOS" */;
+			buildPhases = (
+				6FBFF3181025BD63734E1A6D /* Build Rust Code */,
+				06268171680195AC0F20C9CB /* Sources */,
+				8FDF2ED9047D8EA3B9D45DBD /* Resources */,
+				30C995C654D3E23FE2F713E0 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "p00rija-cryptography_iOS";
+			packageProductDependencies = (
+			);
+			productName = "p00rija-cryptography_iOS";
+			productReference = 22E9DCED98D98ADC88BE65E7 /* P00RIJA Cryptography.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EA649A65EDC9A832E770D5A5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2660;
+			};
+			buildConfigurationList = 8F9E2F994D23197D2C6616C5 /* Build configuration list for PBXProject "p00rija-cryptography" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9F65FEF1B3F260486C980505;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DF19890EA5DEB88B6C1A971A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7F73EFC7DA5CBD899E1153F2 /* p00rija-cryptography_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8FDF2ED9047D8EA3B9D45DBD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				79ACDC117AAB6B8487DED2C1 /* Assets.xcassets in Resources */,
+				ECAC83A0F2165C0C02EE97B7 /* LaunchScreen.storyboard in Resources */,
+				1433599EF139DA58206E4EA6 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6FBFF3181025BD63734E1A6D /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "export PATH=\"/opt/homebrew/bin:$HOME/.cargo/bin:$PATH\"\nnpm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		06268171680195AC0F20C9CB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2EB63902B340C3DEAB147939 /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		162FB1BDF6CFC8611E43C558 /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = N2YKFM2N7W;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+		A05744F5A6CE5F7734BC519A /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "p00rija-cryptography_iOS/p00rija-cryptography_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = N2YKFM2N7W;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "p00rija-cryptography_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.p00rija.cryptography;
+				PRODUCT_NAME = "P00RIJA Cryptography";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		A61D4F82D3190B5AD56C58FC /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = N2YKFM2N7W;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+		ACE124F9D2AB08120B244850 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "p00rija-cryptography_iOS/p00rija-cryptography_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = N2YKFM2N7W;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "p00rija-cryptography_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.p00rija.cryptography;
+				PRODUCT_NAME = "P00RIJA Cryptography";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8F9E2F994D23197D2C6616C5 /* Build configuration list for PBXProject "p00rija-cryptography" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A61D4F82D3190B5AD56C58FC /* debug */,
+				162FB1BDF6CFC8611E43C558 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		9EDBDCF1449740CC1C021028 /* Build configuration list for PBXNativeTarget "p00rija-cryptography_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ACE124F9D2AB08120B244850 /* debug */,
+				A05744F5A6CE5F7734BC519A /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = EA649A65EDC9A832E770D5A5 /* Project object */;
+}

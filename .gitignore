@@ -1,0 +1,93 @@
+# ---------------------------------------------------------------------------
+# Secrets and live state — never commit these.
+# certs/ holds TLS private keys; data/ holds the relay's offline mailboxes,
+# which contain other people's queued ciphertext.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+certs/
+data/
+*.pem
+*.key
+*.p12
+*.keystore
+*.jks
+key.properties
+src-tauri/gen/android/keystore.properties
+
+# ---------------------------------------------------------------------------
+# Build output. Export/ alone is over a gigabyte; src-tauri/target/ is several.
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+Export/
+src-tauri/target/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/local.properties
+# Kotlin's compiler daemon keeps its session files beside the build it
+# serves; they name the running process and are dead the moment it exits.
+src-tauri/gen/android/buildSrc/.kotlin/
+src-tauri/gen/apple/build/
+# Xcode's own caches for the simulator build. They are regenerated on demand
+# and 14 of them, including a 1.5 MB sdkstatcache, were being committed.
+src-tauri/gen/apple/build-sim/
+src-tauri/gen/apple/Externals/
+*.app/
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.exe
+*.msi
+*.apk
+*.aab
+*.ipa
+*.pkg.tar.zst
+
+# ---------------------------------------------------------------------------
+# Test and tooling artefacts
+# ---------------------------------------------------------------------------
+tests/e2e/screenshots/
+tests/e2e/tmp/
+graphify-out/
+coverage/
+*.log
+npm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Editor and OS noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.bak
+*.orig
+*.rej
+docs-plan-sunday.md
+.mimosa/
+
+# Build output that is generated, not authored
+npm-package/app/
+npm-package/*.tgz
+release-logs/
+
+# The publishable copy of this tree, built by scripts/build-github-folder.sh.
+# Generated, and it would otherwise nest a copy of the repository inside itself.
+GitHub/
+
+# The maintainer's own deployment script and the strings it is scrubbed for.
+# scripts/deploy.sh is the one that ships: it asks each user for their own
+# server and keeps the answers outside this repository.
+scripts/deploy-remote.sh
+tools/private-strings.txt
+GitHub.zip
+GitHub.provenance.txt
+tools/forbidden-strings.txt
+tools/forbidden-paths.txt
+
+# Local workspace directories of whatever editor or tooling is in use.
+*/worktrees/

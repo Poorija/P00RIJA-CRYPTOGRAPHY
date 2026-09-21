@@ -1,0 +1,39 @@
+# Build host for the Windows client, from a macOS or Linux machine.
+#
+# Windows normally needs MSVC, which only runs on Windows. cargo-xwin gets
+# around that by fetching the Windows SDK and CRT and driving clang-cl and
+# lld-link. The installer is then produced by NSIS.
+#
+# NSIS is the reason this image exists rather than doing everything on the host:
+# Homebrew's makensis 3.12 aborts with std::bad_alloc inside `Exch` while
+# parsing Tauri's template, long before it reaches any compression. Debian's
+# build handles the same script without complaint.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git build-essential pkg-config \
+    clang lld llvm \
+    nsis nsis-pluginapi \
+    file xz-utils unzip zip \
+    # Not used by anything in the Windows binary. The Tauri CLI probes the
+    # *host* for an appindicator library before bundling and aborts with
+    # "Can't detect any appindicator library" when it is absent, even though
+    # the target here is Windows. Installing it satisfies that check.
+    libayatana-appindicator3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc \
+    && cargo install --locked cargo-xwin \
+    && rm -rf /root/.cargo/registry
+
+WORKDIR /app
+ENTRYPOINT ["/bin/bash", "-c"]

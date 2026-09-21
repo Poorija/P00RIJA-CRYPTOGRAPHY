@@ -1,0 +1,6 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="124" fill="#EEF2F6"/>
+  <circle cx="256" cy="256" r="58" fill="#94A3B8"/>
+  <circle cx="256" cy="256" r="28" fill="#F8FAFC"/>
+  <path d="M256 116L282 90L318 112L322 147L358 162L392 144L420 176L404 212L422 248L456 260V304L422 316L404 352L420 388L392 420L358 402L322 417L318 452L282 474L256 448L230 474L194 452L190 417L154 402L120 420L92 388L108 352L90 316L56 304V260L90 248L108 212L92 176L120 144L154 162L190 147L194 112L230 90L256 116Z" fill="none" stroke="#64748B" stroke-width="18" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,31 @@
+FROM node:20-alpine
+WORKDIR /app
+# Versions are pinned here rather than read from package.json, so this line is
+# the ONLY thing that decides what the relay actually runs. An audit found the
+# consequence: `npm audit fix` in the repository upgraded ws to 8.21.3 and this
+# file kept installing 8.20.0, which carries a HIGH advisory — uninitialised
+# memory disclosure (GHSA-58qx-3vcg-4xpx) and a memory-exhaustion DoS from tiny
+# fragments (GHSA-96hv-2xvq-fx4p). Both are reached through exactly what this
+# process does all day: WebSocket frames from clients it does not trust.
+#
+# If you bump a dependency in package.json, bump it here too, or the fix stops
+# at the repository and never reaches a running server.
+#
+# The overrides file is here for the same reason. peer@1.0.2 is the newest
+# release there is, and it pulls express 4, which pulls body-parser, which
+# pulls a qs carrying two moderate advisories — an array-limit bypass and a
+# denial of service through an attacker-controlled isBuffer. Neither is fixed
+# by any version of peer, because the problem is three levels below it. An
+# override pins the patched qs everywhere in the tree without moving peer or
+# express, and npm only reads overrides from a package.json, which is why one
+# exists in an image that otherwise installs by name.
+COPY config/relay-overrides.json ./package.json
+RUN npm install --omit=dev express@5.2.1 peer@1.0.2 web-push@3.6.7 ws@8.21.3 \
+ && npm audit --omit=dev --audit-level=high
+COPY scripts/server.js ./scripts/server.js
+# Anything server.js requires has to come with it. Copying the one file
+# and nothing beside it is why adding a module took the relay down.
+COPY scripts/lib ./scripts/lib
+COPY vendor ./vendor
+EXPOSE 9000 9001
+CMD ["node", "--expose-gc", "scripts/server.js"]

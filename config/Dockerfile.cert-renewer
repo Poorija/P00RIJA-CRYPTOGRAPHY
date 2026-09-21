@@ -1,0 +1,6 @@
+FROM docker:27-cli
+RUN apk add --no-cache python3 py3-pip openssl bash \
+  && pip3 install --break-system-packages certbot
+COPY scripts/cert-renewer.sh /usr/local/bin/cert-renewer.sh
+RUN chmod +x /usr/local/bin/cert-renewer.sh
+ENTRYPOINT ["/usr/local/bin/cert-renewer.sh"]

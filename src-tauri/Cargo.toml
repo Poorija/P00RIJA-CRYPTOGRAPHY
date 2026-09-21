@@ -1,0 +1,81 @@
+[package]
+name = "p00rija-cryptography"
+version = "2.26.95"
+description = "P00RIJA Cryptography native desktop shell"
+authors = ["P00RIJA"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/Poorija/P00RIJA-Cryptography"
+edition = "2021"
+rust-version = "1.89"
+
+[lib]
+name = "p00rija_cryptography_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.1", features = [] }
+
+[dependencies]
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "=2.11.1", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-notification = "2.3.3"
+thiserror = "2"
+url = "2"
+
+# Desktop only, and not by preference: keyring 4 selects its backing store with
+# a cfg chain that has no arm for iOS or Android, so on those targets the
+# `store` binding is never defined and the crate fails to compile. Quick unlock
+# on mobile belongs to the platform biometric APIs, not to this crate.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+keyring = "4.0.1"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2.4.3"
+# Only the relay probe uses this, and only as the fallback for when the
+# webview's own fetch is blocked as mixed content from tauri://localhost —
+# a desktop-only problem. It also drags in aws-lc-sys, whose build script
+# does not survive the Android NDK, so keeping it off mobile removes an
+# entire TLS stack from the APK for a command mobile does not need.
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "default-tls", "charset"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
+objc2-local-authentication = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+robius-authentication = "0.1.1"
+
+# The Linux webview hands permission decisions (microphone, camera) to the
+# embedder through WebKitGTK's permission-request signal, and denies when
+# nobody answers. wry never connects one, so the shell must — and to reach the
+# signal it needs the same webkit2gtk crate instance wry itself is built on
+# (same version, therefore the same WebView type).
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0.2"
+
+# The webview is the whole UI; an unoptimised release build is visibly slower
+# to start and roughly a third larger.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+# Proc macros and build scripts run on the build host and are never shipped, so
+# the size-oriented settings above buy nothing there and only slow the build
+# down. They also actively break it on macOS 27: a single codegen unit at
+# opt-level "s" can produce an odd number of indirect symbols, which leaves the
+# Mach-O string pool on a 4-byte boundary. dyld requires 8 and refuses to load
+# the result -- "mis-aligned LINKEDIT string pool". rustc loads proc-macro
+# dylibs in order to expand macros, so that refusal surfaces much later as an
+# unrelated-looking "could not compile" error in whichever crate used the macro.
+# Host tooling is built with plain defaults.
+[profile.release.build-override]
+opt-level = 0
+codegen-units = 16
+strip = false

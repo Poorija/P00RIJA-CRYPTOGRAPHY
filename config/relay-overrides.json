@@ -1,0 +1,9 @@
+{
+  "name": "poorija-chat-signal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Present only so npm reads the overrides below. The relay's own dependencies are installed by name in Dockerfile.chat-signal, which stays the single place that decides what version runs.",
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

@@ -1,0 +1,14 @@
+# P00RIJA Standalone Relay
+# This Dockerfile only includes the signaling server.
+FROM node:20-alpine
+WORKDIR /app
+COPY standalone-relay/package.json .
+RUN npm install --production
+COPY standalone-relay/server.js .
+# What a notification is allowed to say, shared with scripts/server.js rather
+# than written twice. The copy that used to live inside this server had drifted
+# to one call verb, no group, no voice-or-video and English only.
+COPY scripts/lib/push-wording.js ./lib/push-wording.js
+COPY vendor ./vendor
+EXPOSE 9000 9001
+CMD ["node", "--expose-gc", "server.js"]

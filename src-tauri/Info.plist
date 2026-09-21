@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>P00RIJA Cryptography uses the camera for secure chat video calls and supported device-authentication workflows.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>P00RIJA Cryptography uses the microphone for secure chat calls and voice messages.</string>
+  <key>NSFaceIDUsageDescription</key>
+  <string>P00RIJA Cryptography uses local authentication to unlock the app faster on supported devices.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>P00RIJA Cryptography needs user-selected file access to encrypt, decrypt, share, and securely delete files.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>P00RIJA Cryptography needs user-selected file access to save encrypted and decrypted output.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>P00RIJA Cryptography needs user-selected file access to encrypt, decrypt, and securely delete files you pick from the Desktop.</string>
+
+  <!-- App Nap throttles timers and network callbacks of an application whose
+       windows are all hidden. This app is expected to sit in the tray with a
+       live relay connection and deliver messages and calls while it is not
+       frontmost, which is exactly the state App Nap targets: measured here,
+       a hidden window pushed setTimeout callbacks and IPC replies out past a
+       minute. Opting out costs some battery and is the price of the feature. -->
+  <key>NSAppSleepDisabled</key>
+  <true/>
+
+  <!-- Closing the window hides it rather than quitting, so macOS must not
+       decide the process is idle and reclaim it. -->
+  <key>NSSupportsAutomaticTermination</key>
+  <false/>
+  <key>NSSupportsSuddenTermination</key>
+  <false/>
+</dict>
+</plist>

@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # Cheap and decisive: every one of these has caught a real break before.
+      - name: Syntax
+        run: |
+          for f in js/*.js js/chat/*.js scripts/*.js sw.js; do node --check "$f"; done
+          for f in scripts/*.sh; do bash -n "$f"; done
+
+      # This used to grep for a hard-coded '2.99.x-offline-vN'. The suffix has
+      # changed twice since (it is '-nocam-v1' now) and the numbering has
+      # passed 2.100, so the pattern matched nothing, the count came out 0
+      # instead of 1, and the check failed on every run — a guard that fails
+      # for a reason unrelated to what it guards is worse than no guard,
+      # because the next person deletes it.
+      #
+      # tools/check-versions.cjs already reads the tag out of index.html and
+      # compares it against sw.js and js/app.js, and compares the semver across
+      # all five declarations besides. Call that instead of restating half of
+      # it in a regex that goes stale on the next release.
+      - name: Every file agrees on the version and the cache tag
+        run: npm run check:versions
+
+      - name: Nothing private is tracked
+        run: |
+          ! git ls-files | grep -E '^(\.env$|certs/|data/)' || { echo "A private file is tracked"; exit 1; }
+
+      # cargo test on src-tauri compiles the whole dependency tree, and on Linux
+      # that tree reaches GTK3 and WebKitGTK through glib-sys, gobject-sys and
+      # gio-sys. Those crates resolve their system libraries with pkg-config, so
+      # on a runner that has none of the -dev packages they fail in the build
+      # script with "Package gobject-2.0 was not found in the pkg-config search
+      # path" — which reads like a Rust problem and is not one.
+      #
+      # The list is the Debian branch of scripts/setup-linux.sh, minus what the
+      # runner already provides (node, cargo, docker). Keep the two together:
+      # if a Tauri upgrade needs another library, a self-hoster following the
+      # installer hits it at the same time CI does.
+      - name: Linux libraries the native shell links against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+          pkg-config --modversion glib-2.0 gobject-2.0 gio-2.0 webkit2gtk-4.1
+
+      # tauri.conf.json sets frontendDist to ../dist/tauri, and dist/ is
+      # generated, not committed. generate_context!() resolves that path at
+      # COMPILE time, so on a fresh checkout the proc macro panics with "this
+      # path doesn't exist" and the crate never builds. Tauri runs
+      # beforeBuildCommand for `tauri build`; a bare cargo test never does, so
+      # this step has to.
+      - name: Build the web payload the native shell embeds
+        run: npm run native:prepare
+
+      # The step above compiles the whole Tauri dependency tree, about five
+      # hundred crates, which is minutes every run for a tree that changes
+      # rarely. This caches ~/.cargo and src-tauri/target keyed on the
+      # lockfile, so only a dependency change pays that again.
+      #
+      # workspaces is not optional here: the Cargo project is in src-tauri/,
+      # not at the repository root, and the default would cache the wrong
+      # target directory and quietly save nothing.
+      #
+      # Pinned to a commit rather than a tag. It is the one third-party action
+      # in this workflow, a tag can be moved to point at different code, and
+      # this action runs with access to the build. 6323deb is v2.9.2, which is
+      # also where v2 currently points.
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+
+      - name: Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # The relay refuses to start without a monitor password of at least
+      # twelve characters, because the monitor can control it. That password
+      # lives in .env, which is not committed and does not exist on a runner,
+      # so `npm run relay` exited 1 and every suite after it failed waiting for
+      # a /chat-health that was never going to answer.
+      #
+      # A throwaway value rather than ALLOW_INSECURE_DEFAULTS=1: the flag is a
+      # blanket "accept the risk" switch, and this runner is public. The value
+      # exists for the life of one job, on a relay reachable only from
+      # localhost, and nothing is served from it afterwards.
+      - name: End-to-end
+        env:
+          MONITOR_PASSWORD: ci-ephemeral-not-a-secret
+        run: |
+          npx playwright install --with-deps chromium
+          npm run relay &
+          PORT=8123 npm run dev &
+
+          # Wait for a listening socket rather than sleeping. A fixed sleep is a
+          # race on a cold runner, and when it loses, the failure surfaces ten
+          # minutes later as an unrelated test error.
+          wait_for() {
+            for _ in $(seq 1 60); do
+              curl -sf -o /dev/null "$1" && return 0
+              sleep 1
+            done
+            echo "$1 never came up"; exit 1
+          }
+          wait_for http://localhost:9000/chat-health
+          wait_for http://localhost:8123/index.html
+
+          npm run test:offline
+          npm run test:retention
+          npm run test:security
+          npm run test:release37
+          npm run test:keytrust
+          npm run test:fs
+          npm run test:wipe
+          npm run test:push
+          npm run test:contacts
+          npm run test:files
+          # Cheap and specific: between them these three take about half a
+          # minute and cover the QR encoder, the language switch, and the
+          # settings panes and drawer — all places where a regression is
+          # invisible until somebody types Persian or presses the language
+          # button.
+          npm run test:qrtext
+          npm run test:lang
+          npm run test:langpanels
+          npm run audit
+          npm run test:perf
+          npm run native:prepare
+          npm run test:native
+          PKG_URL=http://localhost:8123 npm run test:smoke
