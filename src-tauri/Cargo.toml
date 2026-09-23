@@ -1,6 +1,6 @@
 [package]
 name = "p00rija-cryptography"
-version = "2.26.95"
+version = "2.35.0"
 description = "P00RIJA Cryptography native desktop shell"
 authors = ["P00RIJA"]
 license = "AGPL-3.0-only"
@@ -40,6 +40,30 @@ tauri-plugin-single-instance = "2.4.3"
 # does not survive the Android NDK, so keeping it off mobile removes an
 # entire TLS stack from the APK for a command mobile does not need.
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "default-tls", "charset"] }
+
+# Face ID, Touch ID and the Android keystore's prompt. The crate is mobile
+# only, which is why it sits here rather than in the shared table: on the
+# desktop the same question is answered by objc2-local-authentication,
+# robius-authentication and the Linux check below, none of which exist on a
+# phone. Quick unlock needs it -- without it biometric_available() answers no
+# on both mobile platforms and the unlock button has nothing behind it.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-biometric = "2.3.3"
+
+# Quick unlock on Android keeps the master password under a key that lives in
+# the Android Keystore, and the Keystore is a Java API -- so reaching it means
+# JNI. The virtual machine and the Activity are handed over by MainActivity at
+# startup rather than looked up: ndk-context is the usual way to find them and
+# panics in a Tauri app, because nothing populates it. iOS needs no bridge at
+# all; its Keychain is reached through the Security framework directly.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
+# The iOS Keychain, reached the same way the macOS code already reaches
+# LocalAuthentication. No Swift is involved: SecItemAdd and friends are plain C
+# entry points, and objc2-core-foundation carries the dictionaries they take.
+[target.'cfg(target_os = "ios")'.dependencies]
+security-framework = "3.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"

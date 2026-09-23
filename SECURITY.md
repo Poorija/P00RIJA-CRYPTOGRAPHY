@@ -1,3 +1,5 @@
+<img src="assets/pwa-icons/icon-192.png" alt="P00RIJÃ Cryptography" width="72" align="right">
+
 # Security Policy
 
 [🇬🇧 English](#english) · [🇮🇷 فارسی](#فارسی)

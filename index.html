@@ -153,8 +153,8 @@ font-display: swap;
 <script defer src="vendor/otpauth/otpauth.umd.min.js"></script>
 <script defer src="vendor/hash-wasm/argon2.umd.min.js"></script>
 <script defer src="vendor/jszip/jszip.min.js"></script>
-<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.26.95-chat-v50">
-<link rel="stylesheet" href="css/styles.css?v=2.26.95-chat-v50">
+<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.35.0-chat-v66">
+<link rel="stylesheet" href="css/styles.css?v=2.35.0-chat-v66">
 <script>
     (function() {
         window.loadDeferredFonts = function() {
@@ -4652,7 +4652,21 @@ FA / EN
      here used to be a version number, and a stale one: a build serving 2.26.95
      said "Version 2.99.90" whenever the script did not win the race to
      overwrite it. A placeholder cannot be stale. -->
-<p id="aboutVersion" class="text-brand-500 dark:text-brand-400 mb-8 font-mono text-sm font-bold">Version&nbsp;…</p>
+<p id="aboutVersion" class="text-brand-500 dark:text-brand-400 mb-2 font-mono text-sm font-bold">Version&nbsp;…</p>
+
+<!-- Native builds only. The browser and Home Screen builds already update
+     themselves through the service worker, so this block stays hidden there
+     rather than offering a download of the page you are already on. -->
+<div id="aboutUpdateRow" class="hidden mb-8 flex flex-col items-center gap-2">
+  <button id="aboutUpdateBtn" type="button" onclick="checkForUpdatesNow()"
+          class="px-4 py-2 rounded-xl text-sm font-bold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-gray-700 transition-all"
+          data-i18n="updateCheckNow">بررسی به‌روزرسانی</button>
+  <label class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+    <input id="aboutUpdateAuto" type="checkbox" onchange="setUpdateAutoCheck(this.checked)" class="accent-brand-500">
+    <span data-i18n="updateCheckAuto">بررسی خودکار هنگام اجرا</span>
+  </label>
+  <p class="text-[11px] text-gray-400 max-w-sm leading-relaxed" data-i18n="updateCheckNote">این تنها درخواستی است که برنامه بدون خواست شما به اینترنت می‌زند. فقط شمارهٔ آخرین نسخه را از گیت‌هاب می‌پرسد و هیچ چیزی دربارهٔ شما نمی‌فرستد.</p>
+</div>
 <div class="flex flex-col gap-4 max-w-xl mx-auto">
 <a href="https://github.com/Poorija" target="_blank" rel="noopener" class="p-4 bg-gray-50 dark:bg-slate-800 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 transition-all border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-3 group about-link">
 <i class="fab fa-github text-2xl text-gray-700 dark:text-gray-300 group-hover:text-black dark:group-hover:text-white transition-colors"></i>
@@ -5092,65 +5106,66 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 </div>
 </div>
 </div>
-<script defer src="vendor/peerjs/peerjs.min.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/crypto-core.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/vault-profiles.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/stego.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/qr-kit.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/tools-extra.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/local-link.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/local-mesh.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/local-room.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/crypto-config.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/dialogs.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/desktop-bridge.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/metadata.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/voice-changer.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/help-content.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/games.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/relay-hints.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/app.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/ssh-keys.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/advanced-crypto.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/backup.js?v=2.26.95-chat-v50"></script>
+<script defer src="vendor/peerjs/peerjs.min.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/crypto-core.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/vault-profiles.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/stego.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/qr-kit.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/tools-extra.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/local-link.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/local-mesh.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/local-room.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/crypto-config.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/dialogs.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/desktop-bridge.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/metadata.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/voice-changer.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/help-content.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/games.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/relay-hints.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/update-check.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/app.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/ssh-keys.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/advanced-crypto.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/backup.js?v=2.35.0-chat-v66"></script>
 <!-- Secure Chat: one file split into ordered parts. `defer` keeps them in
      document order, which is the order they depend on. See js/chat/README.md. -->
-<script defer src="js/chat/01-constants.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/02-media-vault.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/03-call-screen.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/04-call-layout.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/05-structured-messages.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/06-groups.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/07-conversation-lock.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/08-global-search.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/09-the-emoji-key.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/10-selection.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/11-group-permissions.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/12-group-call-mesh.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/13-group-call-stage.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/14-group-call-roster.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/15-group-call-render.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/16-group-call-signalling.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/17-file-manager.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/18-file-manager-2.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/19-forward-secrecy.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/20-call-rows.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/21-chat-list-filters.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/22-drafts.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/23-export-import.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/24-settings-panels.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/25-call-log.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/26-contacts.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/27-message-render.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/28-offline-envelopes.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/29-file-transfer.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/30-file-transfer-2.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/31-file-transfer-3.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/32-file-transfer-4.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/33-rail-header.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.26.95-chat-v50"></script>
-<script defer src="js/chat/37-chat-tools.js?v=2.26.95-chat-v50"></script>
+<script defer src="js/chat/01-constants.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/02-media-vault.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/03-call-screen.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/04-call-layout.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/05-structured-messages.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/06-groups.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/07-conversation-lock.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/08-global-search.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/09-the-emoji-key.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/10-selection.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/11-group-permissions.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/12-group-call-mesh.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/13-group-call-stage.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/14-group-call-roster.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/15-group-call-render.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/16-group-call-signalling.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/17-file-manager.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/18-file-manager-2.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/19-forward-secrecy.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/20-call-rows.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/21-chat-list-filters.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/22-drafts.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/23-export-import.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/24-settings-panels.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/25-call-log.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/26-contacts.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/27-message-render.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/28-offline-envelopes.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/29-file-transfer.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/30-file-transfer-2.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/31-file-transfer-3.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/32-file-transfer-4.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/33-rail-header.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.35.0-chat-v66"></script>
+<script defer src="js/chat/37-chat-tools.js?v=2.35.0-chat-v66"></script>
 </body>
 </html>

@@ -1,3 +1,5 @@
+<img src="assets/pwa-icons/icon-192.png" alt="P00RIJÃ Cryptography" width="72" align="right">
+
 # Android and iOS
 
 The mobile clients are the same web app, wrapped by **Tauri 2**, which has

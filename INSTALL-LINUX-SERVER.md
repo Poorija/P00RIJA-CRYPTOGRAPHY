@@ -1,6 +1,8 @@
+<img src="assets/pwa-icons/icon-192.png" alt="P00RIJÃ Cryptography" width="72" align="right">
+
 # P00RIJA Cryptography Linux Server Package
 
-This package contains the Linux server deployment for P00RIJA Cryptography v2.26.95, including the web app, Chat Signal relay, Monitor_Server, coturn, offline encrypted queues, server policies, and server-synced self-destruct message counters.
+This package contains the Linux server deployment for P00RIJA Cryptography v2.35.0, including the web app, Chat Signal relay, Monitor_Server, coturn, offline encrypted queues, server policies, and server-synced self-destruct message counters.
 
 ## Fresh Install
 

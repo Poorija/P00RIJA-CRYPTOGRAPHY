@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-capability",
+  "description": "Biometric presence checks on the phone shells. Kept apart from the main capability because biometric: permissions exist only in the Android and iOS ACL schemas, and naming one in a capability that also loads on the desktop fails validation there.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "biometric:default"
+  ]
+}

@@ -2029,6 +2029,12 @@ setChatView(chatState.activeView);
    profile menu are each built once and then kept, so their labels would stay
    in the language they were born in. */
 relabelChatMenus();
+/* The appearance pane is built once from t() and then only touched when one
+   of its own controls moves, so every label it writes itself -- the theme
+   names, the background tiles, the tick profile and the contrast reading --
+   stayed in the language the pane was opened in while the headings around
+   them switched. */
+renderChatAppearanceSettings();
 /* And so are the cards inside the settings panes: the import/export block and
    the whole Tools card are written by JavaScript, so nothing in
    updateLanguage()'s data-i18n sweep reaches them. That is why Tools showed an

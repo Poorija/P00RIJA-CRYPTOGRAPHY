@@ -1,3 +1,5 @@
+<img src="assets/pwa-icons/icon-192.png" alt="P00RIJÃ Cryptography" width="72" align="right">
+
 # Native desktop builds — macOS and Linux
 
 The desktop client is a **Tauri 2.11** shell around the same web app the

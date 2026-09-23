@@ -1,7 +1,7 @@
 {
   "name": "app",
-  "version": "2.26.95",
-  "buildTag": "chat-v50",
+  "version": "2.35.0",
+  "buildTag": "chat-v66",
   "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
   "main": "scripts/server.js",
   "directories": {
@@ -163,6 +163,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-biometric": "^2.3.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-notification": "^2.3.3",

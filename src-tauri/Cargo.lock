@@ -2925,21 +2925,24 @@ dependencies = [
 
 [[package]]
 name = "p00rija-cryptography"
-version = "2.26.95"
+version = "2.35.0"
 dependencies = [
  "block2 0.6.2",
  "getrandom 0.3.4",
+ "jni 0.21.1",
  "keyring",
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
  "objc2-local-authentication 0.3.2",
  "reqwest",
  "robius-authentication",
+ "security-framework",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
+ "tauri-plugin-biometric",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-notification",
@@ -4479,6 +4482,21 @@ dependencies = [
  "auto-launch",
  "serde",
  "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "tauri-plugin-biometric"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b9da80a13cea8a9e7d81af3e6347c04e28d109ec0a33ac5460950fbe72f3f4b"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "serde_repr",
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.20",

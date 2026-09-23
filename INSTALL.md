@@ -1,3 +1,5 @@
+<img src="assets/pwa-icons/icon-192.png" alt="P00RIJÃ Cryptography" width="72" align="right">
+
 # Installing
 
 [English](#english) · [فارسی](#فارسی)
@@ -21,14 +23,14 @@ one you simply have to trust.
 
 | You have | Download |
 |---|---|
-| Mac, Apple Silicon (M1–M4) | `P00RIJA Cryptography_2.26.95_aarch64.dmg` |
-| Mac, Intel or either | `P00RIJA Cryptography_2.26.95_universal.dmg` |
-| Windows 10/11, normal PC | `P00RIJA Cryptography_2.26.95_x64-setup.exe` |
-| Windows on ARM | `P00RIJA Cryptography_2.26.95_arm64-setup.exe` |
-| Android phone or tablet | `P00RIJA-Cryptography-2.26.95-universal.apk` |
-| Debian, Ubuntu, Mint | `P00RIJA Cryptography_2.26.95_amd64.deb` |
-| Fedora, RHEL, openSUSE | `P00RIJA Cryptography-2.26.95-1.x86_64.rpm` |
-| Any Linux, nothing installed | `P00RIJA Cryptography_2.26.95_amd64.AppImage` |
+| Mac, Apple Silicon (M1–M4) | `P00RIJA Cryptography_2.35.0_aarch64.dmg` |
+| Mac, Intel or either | `P00RIJA Cryptography_2.35.0_universal.dmg` |
+| Windows 10/11, normal PC | `P00RIJA Cryptography_2.35.0_x64-setup.exe` |
+| Windows on ARM | `P00RIJA Cryptography_2.35.0_arm64-setup.exe` |
+| Android phone or tablet | `P00RIJA-Cryptography-2.35.0-universal.apk` |
+| Debian, Ubuntu, Mint | `P00RIJA Cryptography_2.35.0_amd64.deb` |
+| Fedora, RHEL, openSUSE | `P00RIJA Cryptography-2.35.0-1.x86_64.rpm` |
+| Any Linux, nothing installed | `P00RIJA Cryptography_2.35.0_amd64.AppImage` |
 | iPhone or iPad | no app file — see [iPhone and iPad](#iphone-and-ipad) |
 
 On Linux, take the `aarch64` / `arm64` file instead if you are on a Raspberry Pi
@@ -43,7 +45,7 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 
 ```powershell
 # Windows PowerShell
-Get-FileHash ".\P00RIJA Cryptography_2.26.95_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.35.0_x64-setup.exe" -Algorithm SHA256
 ```
 
 The line it prints must match the one in `SHA256SUMS.txt`. If it does not, the
@@ -115,14 +117,14 @@ No warnings on any of these.
 
 ```bash
 # Debian, Ubuntu, Mint
-sudo apt install "./P00RIJA Cryptography_2.26.95_amd64.deb"
+sudo apt install "./P00RIJA Cryptography_2.35.0_amd64.deb"
 
 # Fedora, RHEL, openSUSE
-sudo dnf install "./P00RIJA Cryptography-2.26.95-1.x86_64.rpm"
+sudo dnf install "./P00RIJA Cryptography-2.35.0-1.x86_64.rpm"
 
 # Anywhere — nothing is installed, it just runs
-chmod +x "P00RIJA Cryptography_2.26.95_amd64.AppImage"
-"./P00RIJA Cryptography_2.26.95_amd64.AppImage"
+chmod +x "P00RIJA Cryptography_2.35.0_amd64.AppImage"
+"./P00RIJA Cryptography_2.35.0_amd64.AppImage"
 ```
 
 Calls are unavailable in the Linux native build; everything else works. See
@@ -179,14 +181,14 @@ for Android and iOS.
 
 | اگر داری | دانلود کن |
 |---|---|
-| مک با تراشهٔ اپل (M1 تا M4) | `P00RIJA Cryptography_2.26.95_aarch64.dmg` |
-| مک اینتل، یا هر دو | `P00RIJA Cryptography_2.26.95_universal.dmg` |
-| ویندوز ۱۰/۱۱ معمولی | `P00RIJA Cryptography_2.26.95_x64-setup.exe` |
-| ویندوز روی ARM | `P00RIJA Cryptography_2.26.95_arm64-setup.exe` |
-| گوشی یا تبلت اندروید | `P00RIJA-Cryptography-2.26.95-universal.apk` |
-| دبیان، اوبونتو، مینت | `P00RIJA Cryptography_2.26.95_amd64.deb` |
-| فدورا، RHEL، openSUSE | `P00RIJA Cryptography-2.26.95-1.x86_64.rpm` |
-| هر لینوکسی، بدون نصب | `P00RIJA Cryptography_2.26.95_amd64.AppImage` |
+| مک با تراشهٔ اپل (M1 تا M4) | `P00RIJA Cryptography_2.35.0_aarch64.dmg` |
+| مک اینتل، یا هر دو | `P00RIJA Cryptography_2.35.0_universal.dmg` |
+| ویندوز ۱۰/۱۱ معمولی | `P00RIJA Cryptography_2.35.0_x64-setup.exe` |
+| ویندوز روی ARM | `P00RIJA Cryptography_2.35.0_arm64-setup.exe` |
+| گوشی یا تبلت اندروید | `P00RIJA-Cryptography-2.35.0-universal.apk` |
+| دبیان، اوبونتو، مینت | `P00RIJA Cryptography_2.35.0_amd64.deb` |
+| فدورا، RHEL، openSUSE | `P00RIJA Cryptography-2.35.0-1.x86_64.rpm` |
+| هر لینوکسی، بدون نصب | `P00RIJA Cryptography_2.35.0_amd64.AppImage` |
 | آیفون یا آیپد | فایلی ندارد — [آیفون و آیپد](#آیفون-و-آیپد) را ببین |
 
 روی لینوکس، اگر روی رزبری‌پای یا سرور ARM هستی، نسخهٔ `aarch64` / `arm64` را
@@ -201,7 +203,7 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 
 ```powershell
 # پاورشل ویندوز
-Get-FileHash ".\P00RIJA Cryptography_2.26.95_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.35.0_x64-setup.exe" -Algorithm SHA256
 ```
 
 خطی که چاپ می‌شود باید با خط متناظرش در `SHA256SUMS.txt` یکی باشد. اگر یکی
@@ -271,14 +273,14 @@ xattr -dr com.apple.quarantine "/Applications/P00RIJA Cryptography.app"
 
 ```bash
 # دبیان، اوبونتو، مینت
-sudo apt install "./P00RIJA Cryptography_2.26.95_amd64.deb"
+sudo apt install "./P00RIJA Cryptography_2.35.0_amd64.deb"
 
 # فدورا، RHEL، openSUSE
-sudo dnf install "./P00RIJA Cryptography-2.26.95-1.x86_64.rpm"
+sudo dnf install "./P00RIJA Cryptography-2.35.0-1.x86_64.rpm"
 
 # هر جایی — چیزی نصب نمی‌شود، فقط اجرا می‌شود
-chmod +x "P00RIJA Cryptography_2.26.95_amd64.AppImage"
-"./P00RIJA Cryptography_2.26.95_amd64.AppImage"
+chmod +x "P00RIJA Cryptography_2.35.0_amd64.AppImage"
+"./P00RIJA Cryptography_2.35.0_amd64.AppImage"
 ```
 
 در نسخهٔ نیتیو لینوکس تماس کار نمی‌کند؛ باقی همه‌چیز کار می‌کند. دلیلش در

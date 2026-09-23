@@ -10,6 +10,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -472,6 +473,11 @@ function sendRestrictionResponse(req, res) {
   const restriction = getRestrictionForIdentity(requestIdentity(req));
   if (!restriction) return false;
   const suspendedText = 'اتصال شما با این سرور محدود شده است، لطفاً با ادمین تماس بگیرید.';
+  /* Deliberately says the same thing to a stranger as to somebody removed from
+     the list. Telling an uninvited caller "you are not on the list" confirms
+     the relay is there and that a list exists, which is more than a closed
+     door owes anybody. */
+  const notAllowedText = 'این سرور فقط کاربران تأییدشده را می‌پذیرد. برای دسترسی با ادمین تماس بگیرید.';
   const kickedText = restriction.policy?.permanent
     ? 'اتصال شما با این سرور محدود شده است، لطفاً با ادمین تماس بگیرید.'
     : `اتصال شما با این سرور تا ${new Date(restriction.policy.expiresAt).toLocaleString('fa-IR')} محدود شده است، لطفاً با ادمین تماس بگیرید.`;
@@ -481,7 +487,8 @@ function sendRestrictionResponse(req, res) {
     restrictionType: restriction.type,
     permanent: Boolean(restriction.policy?.permanent),
     until: restriction.policy?.expiresAt || null,
-    message: restriction.type === 'kicked' ? kickedText : suspendedText,
+    message: restriction.type === 'not-allowed' ? notAllowedText
+      : restriction.type === 'kicked' ? kickedText : suspendedText,
   });
   return true;
 }
@@ -678,6 +685,69 @@ app.post('/admin/resume-peer', authMiddleware, (req, res) => {
   }
   
   res.status(404).json({ ok: false, reason: 'Suspended user not found' });
+});
+
+/* ---- admission by invitation ------------------------------------------
+ *
+ * Three calls: turn the door on or off, put somebody through it, take them
+ * back out. Keyed on the identity fingerprint, so a new key is a new stranger
+ * rather than a way around the list.
+ */
+app.get('/admin/allowlist', authMiddleware, (_req, res) => {
+  res.json({
+    ok: true,
+    enabled: allowlistEnabled,
+    users: Array.from(allowedUsers.entries()).map(([fingerprint, entry]) => ({ fingerprint, ...entry })),
+  });
+});
+
+app.post('/admin/allowlist-mode', authMiddleware, (req, res) => {
+  const enabled = Boolean(req.body?.enabled);
+  /* Turning the door on with nobody behind it locks the admin out of their own
+     relay along with everyone else, and the way back in is a text editor on
+     the server. Refuse, and say which call to make first. */
+  if (enabled && allowedUsers.size === 0) {
+    return res.status(400).json({
+      ok: false,
+      reason: 'The allowlist is empty. Add at least one fingerprint through /admin/allowlist-add first, or this closes the door on everyone including you.',
+    });
+  }
+  allowlistEnabled = enabled;
+  savePolicyStore();
+  console.log(`[Admin] Allowlist ${enabled ? 'enabled' : 'disabled'} (${allowedUsers.size} allowed)`);
+  res.json({ ok: true, enabled: allowlistEnabled, allowed: allowedUsers.size });
+});
+
+app.post('/admin/allowlist-add', authMiddleware, (req, res) => {
+  const fingerprint = sanitizeFingerprint(String(req.body?.fingerprint || '').trim());
+  if (!fingerprint) return res.status(400).json({ ok: false, reason: 'A fingerprint is required.' });
+  allowedUsers.set(fingerprint, {
+    label: String(req.body?.label || '').slice(0, 80),
+    addedAt: Date.now(),
+  });
+  savePolicyStore();
+  console.log(`[Admin] Allowed ${fingerprint.slice(0, 12)} (${allowedUsers.size} on the list)`);
+  res.json({ ok: true, fingerprint, allowed: allowedUsers.size });
+});
+
+app.post('/admin/allowlist-remove', authMiddleware, (req, res) => {
+  const fingerprint = sanitizeFingerprint(String(req.body?.fingerprint || '').trim());
+  if (!allowedUsers.has(fingerprint)) {
+    return res.status(404).json({ ok: false, reason: 'That fingerprint is not on the list.' });
+  }
+  allowedUsers.delete(fingerprint);
+  savePolicyStore();
+  /* Removing somebody from the list bars their NEXT connection, not the one
+     they are holding. Hang that up too, so "revoke" means now rather than
+     whenever they next reconnect. */
+  let disconnected = 0;
+  for (const peer of presence.values()) {
+    if (sanitizeFingerprint(identitySnapshot(peer)?.fingerprint || '') !== fingerprint) continue;
+    disconnectRestrictedPeer(peer, { type: 'not-allowed', key: fingerprint, policy: { permanent: true } });
+    disconnected += 1;
+  }
+  console.log(`[Admin] Removed ${fingerprint.slice(0, 12)} from the allowlist`);
+  res.json({ ok: true, fingerprint, allowed: allowedUsers.size, disconnected });
 });
 
 app.post('/admin/unkick-peer', authMiddleware, (req, res) => {
@@ -2314,12 +2384,214 @@ app.get('/push/vapid-public-key', (_req, res) => {
   });
 });
 
-app.post('/push/subscribe', (req, res) => {
+/* ---- proving a subscription belongs to the fingerprint it names ---------
+ *
+ * /push/subscribe used to take a fingerprint's word for it. Anyone who could
+ * reach the relay could register THEIR endpoint against SOMEBODY ELSE'S
+ * fingerprint and be told, from then on, every time that person received a
+ * message -- who is talking to whom and when, which is the one thing the
+ * encryption cannot hide and the whole product is built to withhold. Five such
+ * rows also pushed the real device out of a list capped at five, so the victim
+ * simply stopped being woken.
+ *
+ * The socket already answers this question: the relay seals a nonce to the
+ * public key whose SHA-256 is the claimed fingerprint, and only the holder of
+ * the private key can read it back. Same ceremony here, over two calls.
+ */
+const PUSH_CHALLENGE_TTL_MS = 2 * 60 * 1000;
+const pushChallenges = new Map();
+
+function sweepPushChallenges() {
+  const now = Date.now();
+  for (const [id, challenge] of pushChallenges.entries()) {
+    if (challenge.expiresAt <= now) pushChallenges.delete(id);
+  }
+}
+
+app.post('/push/challenge', (req, res) => {
+  sweepPushChallenges();
+  const fingerprint = sanitizeFingerprint(req.body?.fingerprint);
+  const publicKeyData = String(req.body?.publicKeyData || '').slice(0, 8192);
+  if (!fingerprint || !publicKeyData) {
+    return res.status(400).json({ ok: false, reason: 'fingerprint-and-key-required' });
+  }
+  /* The fingerprint IS the SHA-256 of the SPKI, so a key that hashes to
+     anything else is a claim with the wrong proof attached -- exactly the
+     check the hello handler makes before it challenges anybody. */
+  let digest = '';
+  try {
+    digest = crypto.createHash('sha256').update(Buffer.from(publicKeyData, 'base64')).digest('hex');
+  } catch (_error) { /* undecodable key; the comparison answers it */ }
+  if (digest !== fingerprint) {
+    return res.status(400).json({ ok: false, reason: 'key-does-not-match-fingerprint' });
+  }
+  const nonce = crypto.randomBytes(32);
+  const body = publicKeyData.replace(/\s+/g, '');
+  const pem = `-----BEGIN PUBLIC KEY-----\n${(body.match(/.{1,64}/g) || []).join('\n')}\n-----END PUBLIC KEY-----`;
+  let cipher;
+  try {
+    cipher = crypto.publicEncrypt(
+      { key: pem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+      nonce,
+    );
+  } catch (error) {
+    return res.status(400).json({ ok: false, reason: 'key-unusable' });
+  }
+  const challengeId = crypto.randomUUID();
+  pushChallenges.set(challengeId, { fingerprint, nonce, expiresAt: Date.now() + PUSH_CHALLENGE_TTL_MS });
+  res.json({ ok: true, challengeId, cipher: cipher.toString('base64') });
+});
+
+/** Spends the challenge either way: a wrong answer must not be guessable twice. */
+function pushProofAccepted(fingerprint, challengeId, answerBase64) {
+  sweepPushChallenges();
+  const challenge = pushChallenges.get(String(challengeId || ''));
+  if (!challenge) return false;
+  pushChallenges.delete(String(challengeId));
+  if (challenge.fingerprint !== fingerprint) return false;
+  try {
+    const answer = Buffer.from(String(answerBase64 || ''), 'base64');
+    return answer.length === challenge.nonce.length && crypto.timingSafeEqual(answer, challenge.nonce);
+  } catch (_error) {
+    return false;
+  }
+}
+
+/* ---- polling, for a phone with no distributor ---------------------------
+ *
+ * UnifiedPush is the good answer: the distributor holds the socket and the
+ * phone is woken the moment something arrives. A phone with no distributor
+ * installed has nothing holding a socket, so the only thing left is to look
+ * every so often -- which Android will not let happen more than once every
+ * fifteen minutes, and under Doze rather less than that. It is a worse answer
+ * and it is off unless somebody turns it on.
+ *
+ * It cannot be an open question. "Does this fingerprint have mail waiting" is
+ * precisely the metadata the rest of this file works to withhold, and answered
+ * to anybody who asks it tells a watcher when a named person is being talked
+ * to. So the webview proves the identity once, the relay issues a token bound
+ * to that fingerprint, and the token is what the background worker carries --
+ * it can ask about one mailbox, its own.
+ */
+const POLL_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const POLL_TOKEN_STORE_PATH = process.env.CHAT_POLL_TOKEN_STORE_PATH
+  || path.join(path.dirname(OFFLINE_STORE_PATH), 'poll-tokens.json');
+
+/* Writes a file only its owner can read.
+ *
+ * Two files here hold what amount to credentials: the poll tokens, and the
+ * push subscriptions -- a UnifiedPush endpoint IS a capability, and anybody
+ * holding one can make that phone buzz. Written with the default umask they
+ * land 0644, which on a server with more than one account means every other
+ * account can read them.
+ *
+ * Through a temporary file opened 0600 and renamed over the target, because
+ * writing in place and fixing the mode afterwards leaves a window where the
+ * contents are there and the permissions are not. */
+function writePrivateFile(target, contents) {
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  const temporary = `${target}.${process.pid}.tmp`;
+  const handle = fs.openSync(temporary, 'w', 0o600);
+  try {
+    fs.writeFileSync(handle, contents);
+  } finally {
+    fs.closeSync(handle);
+  }
+  fs.renameSync(temporary, target);
+}
+
+function loadPollTokens() {
+  try {
+    return new Map(Object.entries(JSON.parse(fs.readFileSync(POLL_TOKEN_STORE_PATH, 'utf8'))));
+  } catch (_error) {
+    return new Map();
+  }
+}
+const pollTokens = loadPollTokens();
+
+function savePollTokens() {
+  try {
+    writePrivateFile(POLL_TOKEN_STORE_PATH, JSON.stringify(Object.fromEntries(pollTokens), null, 2));
+  } catch (error) {
+    console.error('Failed to save poll tokens:', error);
+  }
+}
+
+function sweepPollTokens() {
+  const now = Date.now();
+  let changed = false;
+  for (const [token, row] of pollTokens.entries()) {
+    if (row.expiresAt <= now) { pollTokens.delete(token); changed = true; }
+  }
+  if (changed) savePollTokens();
+}
+
+/** Issued only to somebody who has just proven the fingerprint. */
+app.post('/push/poll-token', (req, res) => {
+  sweepPollTokens();
+  const fingerprint = sanitizeFingerprint(req.body?.fingerprint);
+  if (!fingerprint) return res.status(400).json({ ok: false, reason: 'fingerprint-required' });
+  if (!pushProofAccepted(fingerprint, req.body?.challengeId, req.body?.nonce)) {
+    return res.status(403).json({ ok: false, reason: 'identity-unproven' });
+  }
+  // One per fingerprint: re-issuing replaces, so a reinstall does not leave a
+  // token nobody holds still answering questions about somebody's mailbox.
+  for (const [token, row] of pollTokens.entries()) {
+    if (row.fingerprint === fingerprint) pollTokens.delete(token);
+  }
+  const token = crypto.randomBytes(32).toString('base64url');
+  pollTokens.set(token, { fingerprint, issuedAt: Date.now(), expiresAt: Date.now() + POLL_TOKEN_TTL_MS });
+  savePollTokens();
+  res.json({ ok: true, token, expiresAt: Date.now() + POLL_TOKEN_TTL_MS });
+});
+
+/**
+ * How much is waiting. A count and nothing else -- no sender, no timestamps,
+ * no shape of who has been talking. The holder already knows it is their own
+ * mailbox; anybody else holds a token that answers about somebody else's.
+ */
+app.get('/push/mailbox', (req, res) => {
+  sweepPollTokens();
+  /* Header only. A query string is written into access logs, proxy logs and
+     any Referer this request produces, and a bearer token that reaches a log
+     file has been handed to everybody who can read logs. */
+  const token = String(req.get('x-p00rija-poll-token') || '');
+  const row = token ? pollTokens.get(token) : null;
+  if (!row) return res.status(403).json({ ok: false, reason: 'unknown-token' });
+  const queued = offlineBoxes.get(row.fingerprint) || [];
+  res.json({ ok: true, waiting: queued.length });
+});
+
+app.post('/push/poll-token-revoke', (req, res) => {
+  const token = String(req.body?.token || '');
+  if (pollTokens.delete(token)) savePollTokens();
+  res.json({ ok: true });
+});
+
+app.post('/push/subscribe', async (req, res) => {
   const fingerprint = sanitizeFingerprint(req.body?.fingerprint);
   const subscription = sanitizeSubscription(req.body?.subscription);
 
   if (!fingerprint || !subscription) {
     res.status(400).json({ ok: false, reason: 'invalid-subscription' });
+    return;
+  }
+
+  /* Without this, a subscription is a claim about somebody else's phone. */
+  if (!pushProofAccepted(fingerprint, req.body?.challengeId, req.body?.nonce)) {
+    console.warn(`[Push] Refused a subscription that did not prove ${fingerprint.slice(0, 12)}`);
+    res.status(403).json({ ok: false, reason: 'identity-unproven' });
+    return;
+  }
+
+  /* A UnifiedPush endpoint is a URL this process will POST to, and this call
+     takes no credentials, so the URL is attacker-controlled by design. Judge
+     where it points before storing it. A browser's subscription endpoint comes
+     from the engine's own push service rather than from the page, so it is not
+     the same question. */
+  if (subscription.type === 'unifiedpush' && !await pushEndpointIsReachable(subscription.endpoint)) {
+    console.warn(`[Push] Refused a UnifiedPush endpoint that does not resolve to a public address: ${subscription.endpoint.slice(0, 80)}`);
+    res.status(400).json({ ok: false, reason: 'endpoint-not-public' });
     return;
   }
 
@@ -2434,6 +2706,23 @@ const selfDestructRecords = loadSelfDestructRecords();
 const policyStore = loadPolicyStore();
 const suspendedUsers = new Map(Object.entries(policyStore.suspendedUsers || {}));
 const kickedUsers = new Map(Object.entries(policyStore.kickedUsers || {}));
+/* Admission by invitation.
+ *
+ * Suspension and kicking are deny lists: everybody is welcome until named.
+ * This is the other way round -- nobody is admitted unless the admin has put
+ * their fingerprint here first. It exists because a deny list cannot answer
+ * "keep strangers out", only "keep that stranger out", and on a private relay
+ * the first question is the one that matters.
+ *
+ * The key is the identity fingerprint, which is derived from the public key.
+ * Generating a new key therefore produces a new fingerprint and a stranger
+ * again -- which is the point: rotating a key must not be a way around the
+ * door, and on a deny list it always is.
+ */
+const allowedUsers = new Map(Object.entries(policyStore.allowedUsers || {}));
+/* Off means the relay is open, which is what it has always been and what an
+   existing install keeps after an upgrade. Turning it on is a decision. */
+let allowlistEnabled = Boolean(policyStore.allowlistEnabled);
 
 function loadOfflineBoxes() {
   try {
@@ -2732,13 +3021,102 @@ function sanitizeFingerprint(value) {
   return String(value || '').trim().slice(0, 128);
 }
 
+/* ---- where a push endpoint is allowed to point ---------------------------
+ *
+ * /push/subscribe takes no credentials -- it cannot, because a device has to
+ * be able to register before it has anything to authenticate with. That makes
+ * the endpoint URL attacker-controlled, and this process will POST to it. Left
+ * unchecked, anyone who can reach the relay can aim it at 169.254.169.254 and
+ * read cloud credentials through the relay's own network position, or knock on
+ * internal services that trusted the perimeter. They can fire it themselves by
+ * relaying a persisted message to a fingerprint they just subscribed.
+ *
+ * So the address is resolved and judged before the row is stored, and again
+ * before every send: a name that answered publicly at subscribe time can
+ * answer 127.0.0.1 an hour later, which is the whole DNS-rebinding trick.
+ * Redirects are refused outright rather than followed and re-checked -- a
+ * distributor has no reason to bounce, and "refuse" has no edge cases.
+ */
+const ALLOW_PRIVATE_PUSH_ENDPOINTS = process.env.CHAT_ALLOW_PRIVATE_PUSH_ENDPOINTS === '1';
+
+function isPrivateAddress(address, family) {
+  const value = String(address || '');
+  if (family === 6 || value.includes(':')) {
+    const lower = value.toLowerCase();
+    if (lower === '::1' || lower === '::') return true;
+    // IPv4 wearing an IPv6 hat: ::ffff:127.0.0.1 reaches loopback just as well.
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(lower);
+    if (mapped) return isPrivateAddress(mapped[1], 4);
+    const head = parseInt(lower.split(':')[0] || '0', 16);
+    if ((head & 0xfe00) === 0xfc00) return true;   // fc00::/7  unique local
+    if ((head & 0xffc0) === 0xfe80) return true;   // fe80::/10 link local
+    if ((head & 0xff00) === 0xff00) return true;   // ff00::/8  multicast
+    return false;
+  }
+  const parts = value.split('.').map((part) => parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  if (a === 0 || a === 127) return true;                       // this host, loopback
+  if (a === 10) return true;                                   // RFC1918
+  if (a === 172 && b >= 16 && b <= 31) return true;            // RFC1918
+  if (a === 192 && b === 168) return true;                     // RFC1918
+  if (a === 169 && b === 254) return true;                     // link local, cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return true;           // carrier NAT
+  if (a === 192 && b === 0) return true;                       // protocol assignments
+  if (a === 198 && (b === 18 || b === 19)) return true;        // benchmarking
+  if (a >= 224) return true;                                   // multicast and reserved
+  return false;
+}
+
+/** Resolves the host and answers whether every address it has is public. */
+async function pushEndpointIsReachable(endpoint) {
+  if (ALLOW_PRIVATE_PUSH_ENDPOINTS) return true;
+  let url;
+  try { url = new URL(endpoint); } catch (_error) { return false; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+  try {
+    const addresses = await dns.lookup(url.hostname, { all: true });
+    if (!addresses.length) return false;
+    // Every answer must be public: one private address among several is still
+    // a way in, and which one gets used is not ours to decide.
+    return addresses.every(({ address, family }) => !isPrivateAddress(address, family));
+  } catch (_error) {
+    return false;
+  }
+}
+
 function sanitizeSubscription(value) {
   if (!value || typeof value !== 'object') return null;
   const endpoint = String(value.endpoint || '').slice(0, 2048);
+  if (!endpoint) return null;
+
+  /* Two kinds of row live in this store.
+   *
+   * A browser's Push API subscription carries the two keys its vendor's
+   * service needs to accept an encrypted payload. A UnifiedPush endpoint is
+   * just a URL the distributor app on the phone handed out, with nothing to
+   * encrypt to -- the distributor is the transport, and it is the person's own
+   * choice of transport rather than Google's.
+   *
+   * The payload is the same either way, and it is the reason a bare URL is
+   * acceptable here: it names no sender, carries no message text and says only
+   * that something arrived. Anyone who learned the endpoint could make this
+   * phone buzz. Nobody could learn anything from it. */
+  if (String(value.type || '') === 'unifiedpush') {
+    if (!/^https?:\/\//i.test(endpoint)) return null;
+    return {
+      type: 'unifiedpush',
+      endpoint,
+      expirationTime: null,
+      lang: normalizePushLang(value.lang),
+    };
+  }
+
   const p256dh = String(value.keys?.p256dh || '').slice(0, 512);
   const auth = String(value.keys?.auth || '').slice(0, 512);
-  if (!endpoint || !p256dh || !auth) return null;
+  if (!p256dh || !auth) return null;
   return {
+    type: 'webpush',
     endpoint,
     expirationTime: value.expirationTime || null,
     keys: { p256dh, auth },
@@ -2763,8 +3141,9 @@ function loadPushSubscriptions() {
 
 function savePushSubscriptions() {
   try {
-    fs.mkdirSync(path.dirname(PUSH_STORE_PATH), { recursive: true });
-    fs.writeFileSync(PUSH_STORE_PATH, JSON.stringify(Object.fromEntries(pushSubscriptions), null, 2));
+    /* A UnifiedPush endpoint is itself a capability: anybody holding one can
+       make that phone buzz. Owner-only, for the same reason as the tokens. */
+    writePrivateFile(PUSH_STORE_PATH, JSON.stringify(Object.fromEntries(pushSubscriptions), null, 2));
   } catch (error) {
     console.error('Failed to save push subscriptions:', error);
   }
@@ -2790,6 +3169,8 @@ function savePolicyStore() {
     fs.writeFileSync(POLICY_STORE_PATH, JSON.stringify({
       suspendedUsers: Object.fromEntries(suspendedUsers),
       kickedUsers: Object.fromEntries(kickedUsers),
+      allowedUsers: Object.fromEntries(allowedUsers),
+      allowlistEnabled,
     }, null, 2));
   } catch (error) {
     console.error('Failed to save server policy store:', error);
@@ -2874,6 +3255,15 @@ function pruneExpiredPolicies() {
 
 function getRestrictionForIdentity(identity) {
   pruneExpiredPolicies();
+  /* The allowlist is asked first. "Nobody unless invited" outranks "everybody
+     except these", and asking it second would admit an uninvited peer for as
+     long as it took to walk the deny lists. */
+  if (allowlistEnabled) {
+    const fingerprint = sanitizeFingerprint(identity?.fingerprint || '');
+    if (!fingerprint || !allowedUsers.has(fingerprint)) {
+      return { type: 'not-allowed', key: fingerprint || 'unknown', policy: { permanent: true } };
+    }
+  }
   for (const [key, policy] of suspendedUsers.entries()) {
     if (identityMatchesPolicy(identity, policy)) {
       return { type: 'suspended', key, policy };
@@ -2976,11 +3366,48 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
     },
   });
 
+  /* A UnifiedPush endpoint takes a plain POST. There is no vendor service in
+     front of it and nothing to encrypt to: the distributor app on the phone
+     receives the bytes and raises the notification. The body is the same
+     contentless payload the browser path sends, so the distributor learns
+     exactly what a push service learns, which is that something arrived. */
+  const sendUnifiedPush = async (subscription) => {
+    /* Checked again rather than trusted from subscribe time: a name that
+       answered publicly an hour ago can answer 127.0.0.1 now, and that gap is
+       the whole of DNS rebinding. */
+    if (!await pushEndpointIsReachable(subscription.endpoint)) {
+      const error = new Error('endpoint no longer resolves to a public address');
+      error.statusCode = 410;
+      throw error;
+    }
+    const response = await fetch(subscription.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payloadFor(subscription),
+      /* Refused rather than followed and re-checked. A distributor has no
+         reason to redirect, and a 302 into the private range is the easiest
+         way around a check that only looks at the first URL. */
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error(`UnifiedPush endpoint tried to redirect (${response.status}); refused`);
+    }
+    if (!response.ok) {
+      const error = new Error(`UnifiedPush endpoint answered ${response.status}`);
+      /* 404 and 410 mean the same here as they do for a vendor service: that
+         endpoint is gone, and keeping it only produces failures forever. */
+      error.statusCode = response.status;
+      throw error;
+    }
+  };
+
   const remaining = [];
   let pruned = false;
   await Promise.all(subscriptions.map(async (subscription) => {
     try {
-      await webpush.sendNotification(subscription, payloadFor(subscription), pushSendOptions(kind));
+      if (subscription.type === 'unifiedpush') await sendUnifiedPush(subscription);
+      else await webpush.sendNotification(subscription, payloadFor(subscription), pushSendOptions(kind));
       remaining.push(subscription);
     } catch (error) {
       if ([404, 410].includes(error?.statusCode)) {

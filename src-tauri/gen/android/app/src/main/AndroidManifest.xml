@@ -15,6 +15,12 @@
     <!-- Voice and video calls. Without these declared, the WebView's
          onPermissionRequest handler has nothing to ask the user for and
          getUserMedia fails with NotAllowedError before any prompt appears. -->
+    <!-- The fingerprint or face prompt that unlocks a chat lock. USE_BIOMETRIC
+         is a normal permission: it is granted at install and never asks. -->
+    <!-- Android 13 and later ask before an app may post anything. Without
+         it a push arrives and nothing appears at all, silently. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -27,6 +33,15 @@
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- Android 11 and later hide installed packages from each other. Without
+         declaring what we look for, queryBroadcastReceivers returns nothing
+         and every phone reports "no distributor installed". -->
+    <queries>
+        <intent>
+            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+        </intent>
+    </queries>
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -84,5 +99,22 @@
             android:name="android.support.FILE_PROVIDER_PATHS"
             android:resource="@xml/file_paths" />
         </provider>
+    
+        <!-- The four broadcasts a UnifiedPush distributor sends back.
+             Declared here rather than registered in code so a push can wake
+             the app from cold, which is the entire point: a receiver
+             registered at runtime dies with the process that registered it.
+             exported, because the sender is another app. -->
+        <receiver
+            android:name=".UnifiedPushReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>

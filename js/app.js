@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.26.95';
+const APP_VERSION_SEMVER = '2.35.0';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v50';
+  return 'chat-v66';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -45,6 +45,111 @@ const APP_BUILD_TAG = (() => {
  *
  * Written immediately now, with the listener kept only for the case where the
  * element genuinely is not parsed yet. */
+/** Shows the row on the native builds and reflects the stored choice. */
+function syncUpdateCheckUi() {
+const row = document.getElementById('aboutUpdateRow');
+const auto = document.getElementById('aboutUpdateAuto');
+const updater = window.PoorijaUpdate;
+if (!row || !updater) return;
+row.classList.toggle('hidden', !updater.eligible());
+if (auto) auto.checked = updater.enabled();
+}
+
+function setUpdateAutoCheck(on) {
+window.PoorijaUpdate?.setEnabled(Boolean(on));
+syncUpdateCheckUi();
+}
+
+/* Offers a newer release, and opens the right file for this machine.
+ *
+ * Nothing is installed here and nothing is fetched into the app's own memory:
+ * accepting opens the asset in the system browser, which downloads it where
+ * that person's downloads go, and they install it themselves. Neither phone
+ * platform lets an app replace itself, and on the desktop a self-updater that
+ * downloads and runs a binary is a remote code execution channel into a
+ * cryptography app -- which is a poor trade for saving one click.
+ */
+async function offerUpdate(latest) {
+const updater = window.PoorijaUpdate;
+if (!updater || !latest || latest.error || latest.upToDate) return;
+const notes = latest.notes
+? `\n\n${latest.notes.slice(0, 1200)}`
+: `\n\n${state.language === 'fa' ? 'یادداشت انتشاری ثبت نشده است.' : 'This release carries no notes.'}`;
+const heading = state.language === 'fa'
+? `نسخهٔ ${latest.version} منتشر شده است. نسخهٔ فعلی شما ${APP_VERSION_SEMVER} است.`
+: `Version ${latest.version} is out. You are running ${APP_VERSION_SEMVER}.`;
+/* No asset for this platform means iOS, or a release that shipped without
+   this machine's artefact. Sending them to the page is the honest answer;
+   offering a download that does not exist is not. */
+const hasFile = Boolean(latest.asset);
+const okLabel = hasFile
+? (state.language === 'fa' ? 'دانلود' : 'Download')
+: (state.language === 'fa' ? 'باز کردن صفحه' : 'Open the page');
+const accepted = await PoorijaDialogs.confirm(heading + notes, {
+title: state.language === 'fa' ? 'به‌روزرسانی در دسترس است' : 'An update is available',
+okLabel,
+cancelLabel: state.language === 'fa' ? 'بعداً' : 'Not now',
+});
+if (!accepted) return;
+const target = hasFile ? latest.asset.url : latest.page;
+try {
+/* The native shells hand https links to the operating system; the browser
+   build opens a tab. Both end with the file in that person's downloads. */
+if (window.PoorijaDesktop?.available) await window.PoorijaDesktop.openExternal(target);
+else window.open(target, '_blank', 'noopener');
+showNotification(hasFile
+? (state.language === 'fa'
+? `دانلود ${latest.asset.name} آغاز شد. پس از پایان، خودتان نصبش کنید.`
+: `Downloading ${latest.asset.name}. Install it yourself once it lands.`)
+: (state.language === 'fa' ? 'صفحهٔ انتشار باز شد.' : 'The releases page is open.'),
+'info');
+} catch (error) {
+showNotification(state.language === 'fa' ? 'باز کردن لینک ناموفق بود' : 'The link would not open', 'error');
+}
+}
+
+/** The About page's button: says something whatever the answer is. */
+async function checkForUpdatesNow() {
+const updater = window.PoorijaUpdate;
+if (!updater) return;
+const button = document.getElementById('aboutUpdateBtn');
+if (button) button.disabled = true;
+try {
+const latest = await updater.check(true);
+if (!latest || latest.error) {
+showNotification(state.language === 'fa'
+? 'دسترسی به گیت‌هاب ممکن نشد. اتصال یا محدودیت نرخ.'
+: 'GitHub could not be reached — connection, or a rate limit.', 'warning');
+return;
+}
+if (latest.upToDate) {
+showNotification(state.language === 'fa'
+? `به‌روز هستید (${latest.version}).`
+: `You are up to date (${latest.version}).`, 'success');
+return;
+}
+await offerUpdate(latest);
+} finally {
+if (button) button.disabled = false;
+}
+}
+
+/* One quiet check after launch, on the native builds only.
+ *
+ * Delayed rather than immediate: the first seconds after launch belong to
+ * unlocking and to the relay, and an update dialog that lands on top of the
+ * password field is an interruption, not a service. */
+function scheduleUpdateCheck() {
+const updater = window.PoorijaUpdate;
+if (!updater?.eligible() || !updater.enabled()) return;
+setTimeout(async () => {
+try {
+const latest = await updater.check(false);
+if (latest) await offerUpdate(latest);
+} catch (_error) { /* a failed check is not worth reporting unprompted */ }
+}, 12000);
+}
+
 function paintAboutVersion() {
   const el = document.getElementById('aboutVersion');
   if (!el) return false;
@@ -54,6 +159,13 @@ function paintAboutVersion() {
 if (!paintAboutVersion()) {
   document.addEventListener('DOMContentLoaded', paintAboutVersion);
 }
+/* The row and the launch check both need PoorijaUpdate, which is a separate
+   deferred script -- so they wait for the document rather than running at
+   parse time, where the load order is not guaranteed either way. */
+document.addEventListener('DOMContentLoaded', () => {
+  syncUpdateCheckUi();
+  scheduleUpdateCheck();
+});
 const INSTALLATION_SECRET_STORAGE_KEY = 'poorija_installation_secret';
 const INSTALLATION_BINDING_NAMESPACE = 'poorija-installation-binding-v1';
 // ==================== Translations ====================
@@ -845,6 +957,10 @@ passkeyDisabled: 'هنوز فعال نشده',
 setupPasskey: 'راه‌اندازی',
 passkeyHint: 'در وب از Passkey و WebAuthn استفاده می‌شود و در نسخه دسکتاپ، احراز هویت محلی دستگاه برای بازکردن سریع برنامه به‌کار می‌رود.',
 passkeyHintDesktop: 'در نسخه دسکتاپ، این بخش از احراز هویت محلی سیستم‌عامل و secure store دستگاه استفاده می‌کند؛ اگر دستگاه شما Touch ID، Windows Hello یا روش مشابه داشته باشد، برای بازکردن سریع برنامه استفاده می‌شود.',
+passkeyHintMobile: 'روی اندروید رمز اصلی زیر کلیدی می‌نشیند که داخل Android Keystore ساخته می‌شود و روی iOS داخل Keychain؛ هیچ‌کدام بدون اثر انگشت یا چهره آن را پس نمی‌دهند. ثبت اثر انگشت یا چهرهٔ جدید، ذخیره‌شده را باطل می‌کند و باید یک بار رمز را دوباره وارد کنید.',
+updateCheckNow: 'بررسی به‌روزرسانی',
+updateCheckAuto: 'بررسی خودکار هنگام اجرا',
+updateCheckNote: 'این تنها درخواستی است که برنامه بدون خواست شما به اینترنت می‌زند. فقط شمارهٔ آخرین نسخه را از گیت‌هاب می‌پرسد و هیچ چیزی دربارهٔ شما نمی‌فرستد.',
 desktopBiometricPromptTitle: 'فعال‌سازی ورود سریع بیومتریک',
 desktopBiometricPromptSubtitle: 'در صورت پشتیبانی دستگاه، می‌توانید مثل پیام‌رسان‌های دسکتاپ با تایید محلی سریع‌تر وارد شوید.',
 desktopBiometricPromptBody: 'اگر نسخه دسکتاپ و دستگاه شما از احراز هویت محلی پشتیبانی کنند، برنامه می‌تواند master password را در storage امن سیستم نگه دارد و با Touch ID یا تایید محلی آن را سریع‌تر باز کند. آیا مایل هستید همین حالا آن را فعال کنید؟',
@@ -1855,6 +1971,10 @@ passkeyDisabled: 'Not enabled yet',
 setupPasskey: 'Set up',
 passkeyHint: 'On the web this feature uses Passkeys and WebAuthn, while desktop builds use the device\'s native local authentication for quick unlock.',
 passkeyHintDesktop: 'On desktop this section uses the operating system\'s local authentication flow and secure store; if your device supports Touch ID, Windows Hello, or an equivalent method, it can be used for quick unlock.',
+passkeyHintMobile: 'On Android the master password sits under a key created inside the Android Keystore, and on iOS inside the Keychain; neither hands it back without a fingerprint or a face. Enrolling a new finger or face invalidates what was stored, and the password has to be entered once more.',
+updateCheckNow: 'Check for updates',
+updateCheckAuto: 'Check automatically at launch',
+updateCheckNote: 'This is the only request the app makes without you asking. It asks GitHub for the latest version number and sends nothing about you.',
 desktopBiometricPromptTitle: 'Enable biometric quick unlock',
 desktopBiometricPromptSubtitle: 'If your device supports it, you can unlock faster with local verification similar to desktop messengers.',
 desktopBiometricPromptBody: 'If this desktop runtime and device support local authentication, the app can store your master password in the system secure store and unlock it faster with Touch ID or local verification. Do you want to enable it now?',
@@ -5129,6 +5249,27 @@ if (!readyFingerprint) {
    will not accept. None of those were caught, so they escaped past every step
    above and arrived at the caller as a bare "could not register" — which is
    precisely the message this whole exercise exists to stop producing. */
+/* The relay will not take a fingerprint's word for a subscription, and it
+   should not: without proof, anybody who could reach it could register THEIR
+   endpoint against SOMEBODY ELSE'S fingerprint and be told every time that
+   person received a message. So ask for a challenge, open it with the private
+   half of this identity, and hand the answer back with the subscription. */
+let proof = null;
+try {
+  const identity = await window.PoorijaChat?.identityProof?.();
+  if (!identity) throw new Error('no Secure Chat identity to prove');
+  const challenge = await fetch(new URL('/push/challenge', serverOrigin), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
+  }).then((r) => r.json());
+  if (!challenge?.ok) throw new Error(`relay refused a push challenge: ${challenge?.reason || 'unknown'}`);
+  proof = { challengeId: challenge.challengeId, nonce: await identity.solve(challenge.cipher) };
+} catch (error) {
+  notePushFailure('identity', error);
+  throw error;
+}
+
 let response;
 try {
 response = await fetch(new URL('/push/subscribe', serverOrigin), {
@@ -5136,6 +5277,8 @@ method: 'POST',
 headers: { 'content-type': 'application/json' },
 body: JSON.stringify({
 fingerprint: readyFingerprint,
+challengeId: proof.challengeId,
+nonce: proof.nonce,
 subscription: subscription.toJSON(),
 /* The relay drops the record when this runs out. */
 ttlDays: pushSettings().ttlDays,
@@ -5489,7 +5632,12 @@ return String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || String(fil
 function syncPasskeyHintCard() {
 const hintCard = document.getElementById('passkeyHintCard');
 if (!hintCard) return;
-hintCard.textContent = isDesktopAppRuntime()
+/* Three different runtimes, three different truths -- and the phones are
+   Tauri runtimes, so isDesktopAppRuntime() alone handed them the desktop's
+   story about Touch ID and Windows Hello on a handset that has neither. */
+hintCard.textContent = isNativeMobileShell()
+? getTranslatedText('passkeyHintMobile')
+: isDesktopAppRuntime()
 ? getTranslatedText('passkeyHintDesktop')
 : getTranslatedText('passkeyHint');
 }
@@ -5846,7 +5994,13 @@ const section = document.getElementById('desktopAppearanceSection');
 const select = document.getElementById('settingDesktopIconProfile');
 const preview = document.getElementById('desktopIconPreview');
 if (!section || !select || !preview) return;
-const isDesktop = isDesktopAppRuntime();
+/* isDesktopAppRuntime() is true on the phones as well -- they are Tauri
+   runtimes -- so this panel used to appear on Android and iOS, where the
+   launcher icon is fixed at install time and set_window_icon is a documented
+   no-op. The control changed the dropdown and nothing else, which is the worst
+   kind of setting: one that answers. Its own description says "on desktop
+   builds", so ask the question that sentence is actually asking. */
+const isDesktop = isDesktopAppRuntime() && !isNativeMobileShell();
 section.classList.toggle('hidden', !isDesktop);
 if (!isDesktop) return;
 const selectedProfileId = state.settings.desktopIconProfile || 'poorija-default';
@@ -6132,7 +6286,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.26.95-chat-v50';
+const reloadKey = 'poorija-sw-reload-2.35.0-chat-v66';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6145,7 +6299,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.26.95-chat-v50', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.35.0-chat-v66', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -6412,7 +6566,44 @@ if (host === '127.0.0.1' || host === '[::1]') return null;
 if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return null;
 return host;
 }
+/* Opens the window in which the phone will hand the master password back.
+ *
+ * The two platforms need opposite things here. Android's Keystore key is
+ * authentication-bound: decrypting fails outside the few seconds that a
+ * satisfied prompt opens, so the prompt has to be raised HERE, before the
+ * command that reads the secret. iOS is the other way round -- the Keychain
+ * item carries its own access control and raises Face ID as it is read, so
+ * prompting here as well would ask the same person twice for one unlock.
+ *
+ * Returns false when the person declined, which every caller treats as "ask
+ * for the password instead" rather than as a wrong answer.
+ */
+async function openMobileBiometricWindow() {
+if (!isNativeMobileShell()) return true;
+if (!/Android/i.test(navigator.userAgent || '')) return true;
+const api = window.__TAURI__?.biometric;
+if (!api?.authenticate) return false;
+try {
+await api.authenticate(
+state.language === 'fa' ? 'برای باز کردن برنامه هویت خود را تأیید کنید' : 'Confirm it is you to open the app',
+{ allowDeviceCredential: true,
+  title: state.language === 'fa' ? 'باز کردن برنامه' : 'Open the app',
+  cancelTitle: state.language === 'fa' ? 'استفاده از رمز عبور' : 'Use the password' },
+);
+return true;
+} catch (error) {
+return false;
+}
+}
 function refreshPasskeyUi() {
+/* The phones take the native path, the same as the desktop, because they now
+   have what that path needs: a store the operating system guards -- Android
+   keeps the key inside the Keystore, iOS keeps the item in the Keychain, and
+   neither releases it without a face or a finger. See mobile_secure_store.rs.
+
+   Unlocking a conversation lock does not come through here at all: that is a
+   presence check, it goes through the platform biometric plugin, and it needs
+   no stored secret. */
 const isDesktop = isDesktopAppRuntime();
 const passkeyRecord = isDesktop
 ? (state.desktopAuth.enabled ? { desktop: true } : null)
@@ -6590,6 +6781,11 @@ async function refreshStoredPasskeyUnlockSecret() {
 if (isDesktopAppRuntime()) {
 if (!state.desktopAuth.enabled || !state.masterPassword) return;
 try {
+/* The phone's key is time-bound, so it is unusable in either direction
+   until a prompt has been satisfied -- storing needs one as much as reading
+   does. Asking here also proves the sensor works before anything starts
+   depending on it. Desktop returns true without prompting. */
+if (!await openMobileBiometricWindow()) return;
 await invokeDesktopCommand('desktop_store_quick_unlock', {
 masterPassword: state.masterPassword
 });
@@ -6881,6 +7077,11 @@ state.language === 'fa' ? 'برای فعال‌سازی ابتدا با رمز �
 return;
 }
 try {
+/* The phone's key is time-bound, so it is unusable in either direction
+   until a prompt has been satisfied -- storing needs one as much as reading
+   does. Asking here also proves the sensor works before anything starts
+   depending on it. Desktop returns true without prompting. */
+if (!await openMobileBiometricWindow()) return;
 await invokeDesktopCommand('desktop_store_quick_unlock', {
 masterPassword: state.masterPassword
 });
@@ -7157,6 +7358,7 @@ state.language === 'fa' ? 'ورود سریع بیومتریک برای این د
 return;
 }
 try {
+if (!await openMobileBiometricWindow()) return;
 const recovered = await invokeDesktopCommand('desktop_unlock_with_biometric');
 if (!await adoptFromPassword(recovered)) {
   showNotification(
@@ -7479,6 +7681,12 @@ window.initSecQuestionsUI();
 updateSetupButtonState();
 syncDesktopAppearanceUi();
 syncDesktopNotificationUi();
+/* The line under the background-notification switch is written with
+   textContent, not carried by data-i18n, because which of the five sentences
+   it shows depends on the subscription's state rather than on any key. Nothing
+   called this on a language change, so the label above it turned English while
+   the sentence below stayed in the language it was born in. */
+syncPushSettingsUi();
 syncShredderDesktopUi();
 renderTabOrderCustomizer();
 /* The bottom bar on a phone builds its labels from state.language in
@@ -9728,6 +9936,7 @@ async function biometricViewPassword() {
    passkey configured in settings asserts, and the stored secret unwraps. */
 if (window.PoorijaDesktop?.available) {
 try {
+if (!await openMobileBiometricWindow()) return;
 const master = await invokeDesktopCommand('desktop_unlock_with_biometric');
 await finishPasswordGate(String(master || ''));
 } catch (_error) {
@@ -12882,6 +13091,10 @@ state,
    discoverable. A second copy of that logic in the chat module got both halves
    wrong and simply never opened anything. */
 isDesktopAppRuntime,
+/* The phone shells are Tauri runtimes too, so isDesktopAppRuntime alone
+   cannot tell them apart from a laptop -- and they answer biometrics
+   through a different mechanism than either the desktop or the browser. */
+isNativeMobileShell,
 invokeDesktopCommand,
 getPasskeyRecord,
 /* The ceremony's shape, not just its ingredients: the relying-party id the

@@ -91,3 +91,9 @@ tools/forbidden-paths.txt
 
 # Local workspace directories of whatever editor or tooling is in use.
 */worktrees/
+
+# The relay reads push-wording.js from ./lib, and its Dockerfile copies it
+# there from scripts/lib at build time -- so the directory belongs to the
+# image, not the repository. The test suites reproduce that layout to run
+# the relay from source and a crashed run can leave the copy behind.
+standalone-relay/lib/

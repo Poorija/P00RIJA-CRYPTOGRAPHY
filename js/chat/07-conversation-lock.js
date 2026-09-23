@@ -846,6 +846,54 @@ function setLockBiometric(target, on) {
   return Boolean(on);
 }
 
+/* The phone shells answer through tauri-plugin-biometric.
+ *
+ * They are Tauri runtimes, so isDesktopAppRuntime() is true for them and the
+ * desktop branch below used to claim them -- and that branch asks the keyring,
+ * which no phone has, so it answered no on every Android and iOS build and the
+ * unlock button was never drawn. A lock only wants a presence check, "still
+ * the same person holding the same phone", which is exactly what the plugin
+ * provides and what neither the keyring nor a stored secret is needed for.
+ *
+ * allowDeviceCredential lets the PIN, pattern or passcode stand in for a face
+ * or a finger, so a phone with nothing enrolled is still able to answer.
+ */
+function mobileBiometricApi() {
+  const app = window.PoorijaApp;
+  if (!app?.isNativeMobileShell?.()) return null;
+  return window.__TAURI__?.biometric || null;
+}
+
+async function mobileBiometricAvailable() {
+  const api = mobileBiometricApi();
+  if (!api?.checkStatus) return false;
+  try {
+    const status = await api.checkStatus();
+    return Boolean(status?.isAvailable);
+  } catch (error) {
+    return false;
+  }
+}
+
+async function mobileBiometricAuthenticate() {
+  const api = mobileBiometricApi();
+  if (!api?.authenticate) return false;
+  try {
+    /* Resolves on success and throws on refusal, timeout or lockout, so
+       reaching the next line is the whole answer. */
+    await api.authenticate(
+      t('برای باز کردن قفل، هویت خود را تأیید کنید', 'Confirm it is you to open this lock'),
+      { allowDeviceCredential: true,
+        title: t('باز کردن قفل', 'Open the lock'),
+        cancelTitle: t('استفاده از رمز', 'Use the PIN') },
+    );
+    return true;
+  } catch (error) {
+    console.warn('[Lock] biometric unlock did not complete:', error?.name || error);
+    return false;
+  }
+}
+
 /* Whether this device can offer it at all.
  *
  * Two different mechanisms, because they are two different runtimes. The
@@ -857,6 +905,7 @@ function setLockBiometric(target, on) {
 async function lockBiometricAvailable() {
   try {
     const app = window.PoorijaApp;
+    if (app?.isNativeMobileShell?.()) return await mobileBiometricAvailable();
     if (app?.isDesktopAppRuntime?.()) return Boolean(app?.state?.desktopAuth?.enabled);
     if (!window.isSecureContext) return false;
     if (typeof window.PublicKeyCredential !== 'function') return false;
@@ -885,7 +934,10 @@ async function unlockWithBiometric() {
      for. The buttons are only rendered when syncLockBiometricButtons() has
      already answered the same question, so the check here is the cheap,
      synchronous half. */
-  if (app?.isDesktopAppRuntime?.()) {
+  if (app?.isNativeMobileShell?.()) {
+    /* Nothing to check synchronously: the plugin owns the prompt and
+       syncLockBiometricButtons() has already asked whether it is available. */
+  } else if (app?.isDesktopAppRuntime?.()) {
     if (!app?.state?.desktopAuth?.enabled) return false;
   } else if (!window.isSecureContext
       || typeof window.PublicKeyCredential !== 'function'
@@ -893,6 +945,8 @@ async function unlockWithBiometric() {
       || !app?.getPasskeyRecord?.()) {
     return false;
   }
+
+  if (app?.isNativeMobileShell?.()) return await mobileBiometricAuthenticate();
 
   if (app?.isDesktopAppRuntime?.()) {
     try {

@@ -46,6 +46,17 @@ use tauri::{
 #[cfg(desktop)]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+/* Where the master password lives on a phone. The desktop's keyring has no
+   mobile equivalent as a crate, so each platform's own guarded store is
+   reached directly -- see the module for what guards what. */
+#[cfg(mobile)]
+mod mobile_secure_store;
+
+/* Waking the phone without FCM. Android only in practice, but the module
+   compiles everywhere so the commands can be registered unconditionally and
+   answer honestly rather than not existing. */
+mod mobile_unifiedpush;
+
 #[cfg(mobile)]
 fn desktop_only<T>(what: &str) -> Result<T, NativeError> {
     Err(NativeError::Message(format!(
@@ -829,18 +840,28 @@ fn keyring_available() -> bool {
     {
         keyring_entry().is_ok()
     }
+    /* The phones have no keyring crate, but they do have the thing a keyring
+       is: a store the operating system guards. Android keeps the key inside
+       the Keystore, iOS keeps the item in the Keychain, and neither hands it
+       back without a face or a finger. See mobile_secure_store. */
     #[cfg(mobile)]
     {
-        false
+        mobile_secure_store::state().available
     }
 }
 
 fn biometric_available() -> bool {
-    // Face ID and the Android keystore are reached through the platform
-    // plugins, not from here.
+    /* Face ID, Touch ID and the Android prompt are reached through
+       tauri-plugin-biometric, which answers from the webview rather than from
+       here -- its status call is asynchronous and platform-specific, and this
+       function is neither. Saying yes is therefore a statement about the
+       build, not about the handset: the plugin is compiled in, so the front
+       end has something to ask. Whether THIS phone has a face or a finger
+       enrolled is settled by the plugin's own status call before any button
+       is shown, which is the only place that can know. */
     #[cfg(mobile)]
     {
-        false
+        true
     }
     #[cfg(all(desktop, target_os = "macos"))]
     {
@@ -863,7 +884,7 @@ fn biometric_available() -> bool {
 fn quick_unlock_enabled() -> bool {
     #[cfg(mobile)]
     {
-        false
+        mobile_secure_store::state().has_secret
     }
     #[cfg(desktop)]
     keyring_entry()
@@ -877,7 +898,13 @@ fn quick_unlock_enabled() -> bool {
 }
 
 fn platform_label() -> &'static str {
-    if cfg!(target_os = "macos") {
+    // The phones first: macOS and iOS both have a Keychain, but they are not
+    // the same store and the front end shows this string to the person.
+    if cfg!(target_os = "android") {
+        "android-keystore"
+    } else if cfg!(target_os = "ios") {
+        "ios-keychain"
+    } else if cfg!(target_os = "macos") {
         "macos-keychain"
     } else if cfg!(target_os = "windows") {
         "windows-credential-vault"
@@ -886,6 +913,37 @@ fn platform_label() -> &'static str {
     } else {
         "desktop-secure-store"
     }
+}
+
+
+/* ---- UnifiedPush ------------------------------------------------------- */
+
+#[tauri::command]
+fn unifiedpush_status() -> mobile_unifiedpush::UnifiedPushStatus {
+    mobile_unifiedpush::status()
+}
+
+/// Asks a distributor for an endpoint. The endpoint itself arrives later, as
+/// a broadcast, so the caller polls the status rather than waiting here.
+#[tauri::command]
+fn unifiedpush_register(distributor: String) -> Result<bool, NativeError> {
+    mobile_unifiedpush::register(&distributor)
+}
+
+#[tauri::command]
+fn unifiedpush_unregister() -> Result<(), NativeError> {
+    mobile_unifiedpush::unregister()
+}
+
+/// Arms the fifteen-minute fallback poll for a phone with no distributor.
+#[tauri::command]
+fn unifiedpush_poll_enable(origin: String, token: String) -> Result<(), NativeError> {
+    mobile_unifiedpush::poll_enable(&origin, &token)
+}
+
+#[tauri::command]
+fn unifiedpush_poll_disable() -> Result<(), NativeError> {
+    mobile_unifiedpush::poll_disable()
 }
 
 #[tauri::command]
@@ -903,8 +961,15 @@ fn desktop_auth_status() -> DesktopAuthStatus {
 fn desktop_store_quick_unlock(master_password: String) -> Result<(), NativeError> {
     #[cfg(mobile)]
     {
-        let _ = master_password;
-        return desktop_only("quick unlock");
+        if master_password.is_empty() {
+            return Err(NativeError::msg("master password is empty"));
+        }
+        /* No biometric challenge before writing, and that is on purpose: the
+           person has just typed the master password, which is a stronger proof
+           than a fingerprint. The challenge belongs on the way out, and the
+           platform puts it there -- an Android key that refuses to decrypt and
+           a Keychain item that refuses to be read. */
+        return mobile_secure_store::store(&master_password).map_err(NativeError::msg);
     }
     #[cfg(desktop)]
     {
@@ -929,7 +994,13 @@ fn desktop_store_quick_unlock(master_password: String) -> Result<(), NativeError
 fn desktop_unlock_with_biometric() -> Result<String, NativeError> {
     #[cfg(mobile)]
     {
-        return desktop_only("quick unlock");
+        /* The front end has just satisfied the platform's biometric prompt
+           through tauri-plugin-biometric; on Android that opens the Keystore
+           key's authentication window, and on iOS the Keychain raises its own
+           prompt as the item is read. Either way the refusal below is the
+           operating system's answer, not a judgement made here. */
+        return mobile_secure_store::retrieve()
+            .ok_or_else(|| NativeError::msg("the device did not release the stored password"));
     }
     #[cfg(desktop)]
     {
@@ -945,7 +1016,11 @@ fn desktop_unlock_with_biometric() -> Result<String, NativeError> {
 fn desktop_clear_quick_unlock() -> Result<(), NativeError> {
     #[cfg(mobile)]
     {
-        // Nothing was ever stored, so clearing it has already succeeded.
+        /* Forgetting takes no biometric challenge. Turning the feature off has
+           to work for somebody whose finger the sensor no longer recognises --
+           that is one of the reasons to turn it off -- and nothing is
+           disclosed by deleting. */
+        mobile_secure_store::clear();
         return Ok(());
     }
     #[cfg(desktop)]
@@ -1862,11 +1937,24 @@ pub fn run() {
             ));
     }
 
+    /* Face ID, Touch ID and the Android prompt. Mobile only: the desktop
+       answers the same question through the operating system directly, and
+       the crate does not exist for those targets. */
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_biometric::init());
+    }
+
     let app = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            unifiedpush_status,
+            unifiedpush_register,
+            unifiedpush_unregister,
+            unifiedpush_poll_enable,
+            unifiedpush_poll_disable,
             desktop_auth_status,
             desktop_store_quick_unlock,
             desktop_unlock_with_biometric,

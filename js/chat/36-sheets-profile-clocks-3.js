@@ -870,6 +870,26 @@ window.PoorijaChat = Object.assign(window.PoorijaChat || {}, {
     await ensureVaultSources();
     return renderFileManager();
   },
+  /* Proving to the relay that a push subscription belongs to this identity.
+     The relay seals a nonce to the public key whose SHA-256 is the claimed
+     fingerprint; only the holder of the private half reads it back. Same
+     ceremony the presence socket already uses, over HTTP, and app.js needs
+     both halves to run it. */
+  identityProof: async () => {
+    const identity = await ensureIdentity();
+    if (!identity?.publicKeyData) return null;
+    return {
+      fingerprint: identity.fingerprint,
+      publicKeyData: identity.publicKeyData,
+      solve: async (cipherBase64) => {
+        const priv = await importIdentityPrivateKey();
+        const nonce = await crypto.subtle.decrypt(
+          { name: 'RSA-OAEP' }, priv, app().base64ToArrayBuffer(cipherBase64));
+        return app().arrayBufferToBase64(nonce);
+      },
+    };
+  },
+
   vaultLock: () => ({
     state: vaultLockState,
     enable: enableVaultLock,
