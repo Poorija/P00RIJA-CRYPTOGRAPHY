@@ -269,13 +269,21 @@ noiseSuppression: true,
 autoGainControl: true,
 }
 : false;
+/* Asked for, not insisted on. `ideal` lets the engine hand back whatever the
+   camera and the machine can actually manage, so a device that cannot do 1080p
+   returns 720p rather than refusing -- and the bitrate ladder below decides
+   what is really sent, which is what the link can carry rather than what the
+   camera can produce. Naming the frame rate matters as much as the size: left
+   unsaid, some engines settle on 15 and a call looks stilted however much
+   bandwidth is going spare. */
 const preferredConstraints = {
 audio: audioConstraints,
 video: wantsVideo
 ? {
 facingMode: { ideal: chatState.callFacingMode || 'user' },
-width: { ideal: 1280 },
-height: { ideal: 720 },
+width: { ideal: 1920 },
+height: { ideal: 1080 },
+frameRate: { ideal: 30 },
 }
 : false,
 };
@@ -1313,6 +1321,47 @@ endCurrentCall({ closePeer: false });
 }
 });
 }
+/* Ask Opus for the two things that decide how a call holds up.
+ *
+ * useinbandfec=1 lets the encoder carry a coarse copy of the previous frame
+ * inside the current one, so a single lost packet is reconstructed rather than
+ * heard as a gap. It is a request to the far end about what to send us, which
+ * is why both sides run this transform -- an offer that asks for it and an
+ * answer that asks back. Chrome turns it on by default and others do not, and
+ * saying so costs nothing where it was already true.
+ *
+ * maxaveragebitrate says the same thing as the sender ceiling applied through
+ * setParameters, in the one place an engine that ignores setParameters will
+ * still read. Some WebKit builds are exactly that, and the sender path here
+ * already carries a fallback for them.
+ *
+ * Nothing existing is removed: an fmtp line that already carries a key keeps
+ * its own value, since it came from an engine that knows its own encoder
+ * better than this does. */
+function tuneOpus(lines, codecs) {
+  const wanted = { useinbandfec: '1', maxaveragebitrate: '128000' };
+  for (const [payloadType, name] of codecs) {
+    if (name !== 'opus') continue;
+    const at = lines.findIndex((line) => line.startsWith(`a=fmtp:${payloadType} `));
+    const existing = at < 0 ? '' : lines[at].slice(`a=fmtp:${payloadType} `.length);
+    const params = new Map(existing.split(';').filter(Boolean).map((pair) => {
+      const eq = pair.indexOf('=');
+      return eq < 0 ? [pair.trim(), ''] : [pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()];
+    }));
+    for (const [key, value] of Object.entries(wanted)) if (!params.has(key)) params.set(key, value);
+    const rebuilt = `a=fmtp:${payloadType} ${[...params].map(([k, v]) => (v === '' ? k : `${k}=${v}`)).join(';')}`;
+    if (at < 0) {
+      /* No fmtp line for this payload type yet. It belongs after the rtpmap
+         that names it, where an engine reading the section expects to find it. */
+      const rtpmap = lines.findIndex((line) => line.startsWith(`a=rtpmap:${payloadType} `));
+      if (rtpmap < 0) continue;
+      lines.splice(rtpmap + 1, 0, rebuilt);
+    } else {
+      lines[at] = rebuilt;
+    }
+  }
+}
+
 /* Prefer interoperable codecs without removing any fallback or RTX/FEC payload.
    PeerJS creates its first offer inside peer.call(), before it exposes the PC;
    its documented sdpTransform hook is therefore used for initial negotiation. */
@@ -1334,6 +1383,7 @@ function preferCallCodecs(sdp) {
       return i < 0 ? preferred.length : i;
     };
     lines[0] = [...fields.slice(0, 3), ...fields.slice(3).sort((a, b) => rank(a) - rank(b))].join(' ');
+    if (media[1] === 'audio') tuneOpus(lines, codecs);
     return lines.join('\r\n');
   }).join('');
 }
@@ -1382,8 +1432,22 @@ async function adaptCallSenders(pc, reading) {
       if (!sender.track || sender.track.readyState === 'ended' || !sender.getParameters || !sender.setParameters) continue;
       const video = sender.track.kind === 'video';
       const screen = ['detail', 'text'].includes(sender.track.contentHint);
-      let bitrate = (video ? [180000, 600000, 2000000] : [24000, 40000, 64000])[state.level];
-      if (video && bandwidth != null) bitrate = Math.min(bitrate, Math.max(64000, Math.floor(bandwidth * 0.75)));
+      /* Top of the video ladder is what a good link can carry at 1080p30. It
+         is a ceiling and rarely the operating point: the estimate below takes
+         precedence whenever there is one, so asking for more on a link that
+         cannot carry it costs nothing. */
+      let bitrate = (video ? [180000, 600000, 4000000] : [24000, 48000, 128000])[state.level];
+      if (bandwidth != null) {
+        /* Video bids for most of the link. Audio never does -- it is small
+           enough that a share this modest still reaches the top of its ladder
+           on any link worth calling over, and leaving the rest to video is
+           what keeps the two from bidding past the estimate between them.
+           Both have a floor, because the thing to protect when a link
+           collapses is that the call continues at all. */
+        bitrate = Math.min(bitrate, video
+          ? Math.max(64000, Math.floor(bandwidth * 0.75))
+          : Math.max(24000, Math.floor(bandwidth * 0.15)));
+      }
       const preference = screen ? 'maintain-resolution' : state.level < 2 ? 'maintain-framerate' : 'balanced';
       const signature = `${sender.track.id}:${bitrate}:${video ? preference : ''}`;
       if (state.applied.get(sender) === signature) continue;

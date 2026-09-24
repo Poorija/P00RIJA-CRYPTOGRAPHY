@@ -108,6 +108,17 @@ if ! node tools/check-versions.cjs > "$LOGS/00-check-versions.log" 2>&1; then
 fi
 good "$(tail -1 "$LOGS/00-check-versions.log" | sed 's/^ *//')"
 
+# The service worker names every asset it precaches, so a script added to
+# index.html and not to sw.js is absent offline after each version bump --
+# which is the one condition this app exists to work in, and the one a build
+# machine with a network never reproduces.
+if ! node tools/check-assets.cjs > "$LOGS/00-check-assets.log" 2>&1; then
+    bad "the service worker's asset lists do not match index.html — nothing was built"
+    tail -14 "$LOGS/00-check-assets.log" | sed 's/^/      /'
+    exit 1
+fi
+good "$(grep -m1 'every script' "$LOGS/00-check-assets.log" | sed 's/^ *//')"
+
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     warn "the working tree has uncommitted changes — they WILL go into these packages"
 fi

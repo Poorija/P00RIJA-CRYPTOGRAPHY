@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.35.0**
+نسخهٔ این پکیج: **2.44.0**
 
 </div>
 
@@ -69,13 +69,13 @@ docker cp js/chat.js     Poorija-Cryptography_App:/usr/share/nginx/html/js/chat.
 ```
 
 **Bump the version tag whenever you do this.** Every asset in `index.html`
-carries `?v=<TAG>` — right now `2.35.0-chat-v66` — and `sw.js` puts the
+carries `?v=<TAG>` — right now `2.44.0-chat-v69` — and `sw.js` puts the
 same string in `CACHE_NAME`. Without a bump the service worker serves the old
 file and you debug a build that is not running:
 
 ```bash
 OLD_TAG=$(grep -o "?v=[^\"']*" index.html | head -1 | cut -c4-)
-NEW_TAG="2.35.0-chat-v67"
+NEW_TAG="2.44.0-chat-v70"
 sed -i "" "s/$OLD_TAG/$NEW_TAG/g" index.html sw.js js/app.js
 sed -i "" "s/return '${OLD_TAG#*-}';/return '${NEW_TAG#*-}';/" js/app.js
 ```

@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.35.0';
+const APP_VERSION_SEMVER = '2.44.0';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v66';
+  return 'chat-v69';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -961,6 +961,23 @@ passkeyHintMobile: 'روی اندروید رمز اصلی زیر کلیدی می
 updateCheckNow: 'بررسی به‌روزرسانی',
 updateCheckAuto: 'بررسی خودکار هنگام اجرا',
 updateCheckNote: 'این تنها درخواستی است که برنامه بدون خواست شما به اینترنت می‌زند. فقط شمارهٔ آخرین نسخه را از گیت‌هاب می‌پرسد و هیچ چیزی دربارهٔ شما نمی‌فرستد.',
+upTitle: 'اعلان بدون گوگل (UnifiedPush)',
+upDesc: 'یک اپ توزیع‌کننده که خودتان نصب و انتخاب می‌کنید سوکت را نگه می‌دارد و رله به آدرسی که آن می‌دهد پیام می‌فرستد. گوگل در مسیر نیست.',
+upConnect: 'اتصال',
+upDisconnect: 'قطع اتصال',
+upConnected: 'متصل',
+upNotConnected: 'متصل نیست',
+upConnectedNow: 'متصل شد. از این پس پیام‌ها گوشی را بیدار می‌کنند.',
+upDisconnected: 'اتصال قطع شد.',
+upNoDistributor: 'هیچ اپ توزیع‌کننده‌ای روی این گوشی نصب نیست. ntfy را از F-Droid یا Play نصب کنید و دوباره همین‌جا برگردید.',
+upNoEndpoint: 'توزیع‌کننده هنوز آدرسی نداده است. اتصال اینترنت آن اپ را بررسی کنید و دوباره تلاش کنید.',
+upFailed: 'اتصال به توزیع‌کننده ناموفق بود',
+upPollDesc: 'اگر توزیع‌کننده ندارید: هر ۱۵ دقیقه یک بار سر بزن. کندتر است، باتری می‌برد و یک الگوی ترافیکی می‌سازد که قبلاً نبود.',
+upWhatIsNtfy: 'ntfy یک اپ کوچک و متن‌باز است که فقط یک کار می‌کند: یک اتصال باز نگه می‌دارد و وقتی چیزی رسید به برنامه خبر می‌دهد. محتوای پیام‌های شما را نمی‌بیند — رله چیزی جز «چیزی رسید» نمی‌فرستد.',
+upNtfyNoAccount: 'نصبش کافی است. نه حساب می‌خواهد، نه تنظیمات.',
+stickerPacks: 'پک‌های استیکر',
+managePacks: 'مدیریت پک‌ها',
+stickerPacksHint: 'نام و ترتیب پک‌ها را عوض کنید، یا چندتا را با هم انتخاب و حذف کنید. ترتیب همان است که در پنل استیکر می‌بینید.',
 desktopBiometricPromptTitle: 'فعال‌سازی ورود سریع بیومتریک',
 desktopBiometricPromptSubtitle: 'در صورت پشتیبانی دستگاه، می‌توانید مثل پیام‌رسان‌های دسکتاپ با تایید محلی سریع‌تر وارد شوید.',
 desktopBiometricPromptBody: 'اگر نسخه دسکتاپ و دستگاه شما از احراز هویت محلی پشتیبانی کنند، برنامه می‌تواند master password را در storage امن سیستم نگه دارد و با Touch ID یا تایید محلی آن را سریع‌تر باز کند. آیا مایل هستید همین حالا آن را فعال کنید؟',
@@ -1975,6 +1992,23 @@ passkeyHintMobile: 'On Android the master password sits under a key created insi
 updateCheckNow: 'Check for updates',
 updateCheckAuto: 'Check automatically at launch',
 updateCheckNote: 'This is the only request the app makes without you asking. It asks GitHub for the latest version number and sends nothing about you.',
+upTitle: 'Notifications without Google (UnifiedPush)',
+upDesc: 'A distributor app you install and choose holds the socket, and the relay posts to the address it hands out. Google is not in the path.',
+upConnect: 'Connect',
+upDisconnect: 'Disconnect',
+upConnected: 'connected',
+upNotConnected: 'not connected',
+upConnectedNow: 'Connected. Messages will wake the phone from now on.',
+upDisconnected: 'Disconnected.',
+upNoDistributor: 'No distributor app is installed on this phone. Install ntfy from F-Droid or Play, then come back here.',
+upNoEndpoint: 'The distributor has not handed out an address yet. Check that app can reach the internet and try again.',
+upFailed: 'Could not reach the distributor',
+upPollDesc: 'If you will not install a distributor: look every fifteen minutes instead. It is slower, it costs battery, and it makes a traffic pattern where there was none.',
+upWhatIsNtfy: 'ntfy is a small open-source app that does one thing: it holds a connection open and tells this app when something arrives. It never sees your messages — the relay sends nothing but the fact that something came.',
+upNtfyNoAccount: 'Installing it is enough. No account, nothing to configure.',
+stickerPacks: 'Sticker packs',
+managePacks: 'Manage packs',
+stickerPacksHint: 'Rename packs, put them in the order you want, or select several and clear them out together. That order is the one the sticker panel shows.',
 desktopBiometricPromptTitle: 'Enable biometric quick unlock',
 desktopBiometricPromptSubtitle: 'If your device supports it, you can unlock faster with local verification similar to desktop messengers.',
 desktopBiometricPromptBody: 'If this desktop runtime and device support local authentication, the app can store your master password in the system secure store and unlock it faster with Touch ID or local verification. Do you want to enable it now?',
@@ -5488,6 +5522,174 @@ function chatRelayOriginForPush() {
   return window.PoorijaChat?.serverOrigin?.() || window.location.origin;
 }
 
+/* ---- UnifiedPush, the Android route -------------------------------------
+ *
+ * The switch above this in the settings reaches the browser's Push API, which
+ * Android's WebView does not expose to its service workers -- so inside the
+ * native Android shell it reaches nothing at all. This is the route that
+ * works: a distributor app the person installed holds the socket, and the
+ * relay posts to the URL it hands out.
+ *
+ * The endpoint does not arrive from the register call. The distributor has to
+ * talk to its own server first and answers by broadcast, which Kotlin stores;
+ * this side reads it afterwards. So registering and subscribing are two
+ * separate moments, and the second one polls briefly for the first to land.
+ */
+function unifiedPushApi() {
+return isNativeMobileShell() && /Android/i.test(navigator.userAgent || '')
+? window.PoorijaDesktop
+: null;
+}
+
+async function unifiedPushStatus() {
+try {
+return await unifiedPushApi()?.invoke('unifiedpush_status') || null;
+} catch (_error) {
+return null;
+}
+}
+
+async function syncUnifiedPushUi() {
+const card = document.getElementById('unifiedPushCard');
+if (!card) return;
+const status = await unifiedPushStatus();
+card.classList.toggle('hidden', !status?.supported);
+if (!status?.supported) return;
+
+const select = document.getElementById('upDistributor');
+const none = document.getElementById('upNone');
+const row = document.getElementById('upDistributorRow');
+const disconnect = document.getElementById('upDisconnect');
+const state = document.getElementById('upState');
+const polling = document.getElementById('upPolling');
+
+const has = status.distributors.length > 0;
+if (none) none.classList.toggle('hidden', has);
+if (row) row.classList.toggle('hidden', !has);
+if (select && has) {
+select.innerHTML = status.distributors
+.map((name) => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join('');
+if (status.distributor) select.value = status.distributor;
+}
+const connected = Boolean(status.endpoint);
+if (disconnect) disconnect.classList.toggle('hidden', !connected);
+if (state) {
+state.textContent = connected
+? (state.language === 'fa' ? 'متصل' : 'connected')
+: getTranslatedText(connected ? 'upConnected' : 'upNotConnected');
+}
+if (polling) polling.checked = Boolean(status.polling);
+}
+
+/** Asks the chosen distributor for an endpoint, then registers it with the relay. */
+async function connectUnifiedPush() {
+const api = unifiedPushApi();
+const select = document.getElementById('upDistributor');
+if (!api) return;
+const button = document.getElementById('upConnect');
+if (button) button.disabled = true;
+try {
+const reached = await api.invoke('unifiedpush_register', { distributor: select?.value || '' });
+if (!reached) {
+showNotification(getTranslatedText('upNoDistributor'), 'warning');
+return;
+}
+/* The distributor answers by broadcast after talking to its own server.
+   Nothing here can hurry that, so wait for the endpoint to appear rather
+   than reporting success on a request that has not been answered. */
+let endpoint = '';
+for (let attempt = 0; attempt < 20 && !endpoint; attempt += 1) {
+await new Promise((resolve) => setTimeout(resolve, 500));
+endpoint = (await unifiedPushStatus())?.endpoint || '';
+}
+if (!endpoint) {
+showNotification(getTranslatedText('upNoEndpoint'), 'warning');
+return;
+}
+await registerUnifiedPushEndpoint(endpoint);
+showNotification(getTranslatedText('upConnectedNow'), 'success');
+} catch (error) {
+showNotification(`${getTranslatedText('upFailed')} — ${error}`, 'error');
+} finally {
+if (button) button.disabled = false;
+await syncUnifiedPushUi();
+}
+}
+
+/* The relay will not take a fingerprint's word for a subscription, so this
+   runs the same challenge the browser path runs -- see the note there. */
+async function registerUnifiedPushEndpoint(endpoint) {
+const origin = chatRelayOriginForPush();
+if (!origin) throw new Error('no relay configured');
+const identity = await window.PoorijaChat?.identityProof?.();
+if (!identity) throw new Error('no Secure Chat identity to prove');
+const challenge = await fetch(new URL('/push/challenge', origin), {
+method: 'POST',
+headers: { 'content-type': 'application/json' },
+body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
+}).then((r) => r.json());
+if (!challenge?.ok) throw new Error(challenge?.reason || 'the relay refused a challenge');
+const answer = await fetch(new URL('/push/subscribe', origin), {
+method: 'POST',
+headers: { 'content-type': 'application/json' },
+body: JSON.stringify({
+fingerprint: identity.fingerprint,
+challengeId: challenge.challengeId,
+nonce: await identity.solve(challenge.cipher),
+subscription: { type: 'unifiedpush', endpoint, lang: state.language },
+}),
+}).then((r) => r.json());
+if (!answer?.ok) throw new Error(answer?.reason || 'the relay refused the subscription');
+}
+
+async function disconnectUnifiedPush() {
+try {
+await unifiedPushApi()?.invoke('unifiedpush_unregister');
+showNotification(getTranslatedText('upDisconnected'), 'info');
+} catch (error) {
+showNotification(String(error), 'error');
+} finally {
+await syncUnifiedPushUi();
+}
+}
+
+/** The fifteen-minute fallback. Needs a token, so it proves identity too. */
+async function toggleMailPolling(on) {
+const api = unifiedPushApi();
+if (!api) return;
+try {
+if (!on) {
+await api.invoke('unifiedpush_poll_disable');
+} else {
+const origin = chatRelayOriginForPush();
+if (!origin) throw new Error('no relay configured');
+const identity = await window.PoorijaChat?.identityProof?.();
+if (!identity) throw new Error('no Secure Chat identity to prove');
+const challenge = await fetch(new URL('/push/challenge', origin), {
+method: 'POST',
+headers: { 'content-type': 'application/json' },
+body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
+}).then((r) => r.json());
+if (!challenge?.ok) throw new Error(challenge?.reason || 'the relay refused a challenge');
+const issued = await fetch(new URL('/push/poll-token', origin), {
+method: 'POST',
+headers: { 'content-type': 'application/json' },
+body: JSON.stringify({
+fingerprint: identity.fingerprint,
+challengeId: challenge.challengeId,
+nonce: await identity.solve(challenge.cipher),
+}),
+}).then((r) => r.json());
+if (!issued?.ok) throw new Error(issued?.reason || 'the relay refused a poll token');
+await api.invoke('unifiedpush_poll_enable', { origin: String(origin).replace(/\/$/, ''), token: issued.token });
+}
+} catch (error) {
+showNotification(String(error?.message || error), 'error');
+} finally {
+await syncUnifiedPushUi();
+}
+}
+
 function syncPushSettingsUi() {
   /* Deliberately NOT priming here.
    *
@@ -6286,7 +6488,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.35.0-chat-v66';
+const reloadKey = 'poorija-sw-reload-2.44.0-chat-v69';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6299,7 +6501,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.35.0-chat-v66', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.44.0-chat-v69', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -7681,6 +7883,7 @@ window.initSecQuestionsUI();
 updateSetupButtonState();
 syncDesktopAppearanceUi();
 syncDesktopNotificationUi();
+syncUnifiedPushUi();
 /* The line under the background-notification switch is written with
    textContent, not carried by data-i18n, because which of the five sentences
    it shows depends on the subscription's state rather than on any key. Nothing
@@ -13095,6 +13298,13 @@ isDesktopAppRuntime,
    cannot tell them apart from a laptop -- and they answer biometrics
    through a different mechanism than either the desktop or the browser. */
 isNativeMobileShell,
+/* The update check compares against this from its own file, and had no way
+   to read it: it is a module-scope const here, so the checker fell back to
+   "0.0.0" and every release on earth looked newer. The dialog printed the
+   real number because it is written in this file and could see it, which is
+   how a build told people 2.35.0 was an update over 2.35.0. */
+APP_VERSION_SEMVER,
+APP_BUILD_TAG,
 invokeDesktopCommand,
 getPasskeyRecord,
 /* The ceremony's shape, not just its ingredients: the relying-party id the

@@ -133,6 +133,9 @@ function buildChatSettingsTabs() {
   body.querySelectorAll(':scope > .chat-ringtone-row').forEach((row) => move(row, 'sounds'));
   move(document.getElementById('chatLockToggle')?.closest('.chat-storage-card'), 'lock');
   move(document.getElementById('chatStorageCard'), 'storage');
+  /* Stickers are stored things, and the vault pane is where somebody
+     already goes to see what this app is keeping on their device. */
+  move(document.getElementById('chatStickerPacksCard'), 'storage');
   move(document.getElementById('chatAppearanceCard'), 'appearance');
   /* What a file gives away and how long a message stays openable are one
      subject, and none of it is about the relay address. The two toggles bring

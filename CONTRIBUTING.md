@@ -17,7 +17,7 @@ debug a build that is not running:
 ```bash
 OLD=$(grep -o 'chat-v[0-9]*' index.html | head -1)   # read, not spelled out
 NEW=chat-v$(( ${OLD#chat-v} + 1 ))
-sed -i '' "s/2\.26\.95-$OLD/2.35.0-$NEW/g" index.html sw.js js/app.js
+sed -i '' "s/2\.26\.95-$OLD/2.44.0-$NEW/g" index.html sw.js js/app.js
 sed -i '' "s/return '$OLD';/return '$NEW';/" js/app.js   # APP_BUILD_TAG fallback
 node tools/check-versions.cjs   # refuses if any of the eight declarations drift
 ```

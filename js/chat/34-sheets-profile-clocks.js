@@ -1235,17 +1235,40 @@ chatState.activePeerClientId = '';
 updateChatShellMode();
 setChatView('groups');
 }
-function updateProfileAvatar(file) {
-if (!file || !file.type.startsWith('image/')) return;
+async function updateProfileAvatar(file) {
+/* The type check used to be the gate, and it turned people away for the
+   wrong reason: a DNG often arrives with an empty type from the picker, and
+   one that arrives as image/x-adobe-dng passed the check and then failed
+   silently at new Image(). What decides is whether a picture can be got out
+   of the file, which is the question asked below. */
+if (!file) return;
 if (file.size > MAX_PROFILE_AVATAR_BYTES) {
 notify(t('تصویر پروفایل باید کمتر از 5 مگابایت باشد', 'Profile image must be under 5 MB'), 'warning');
 return;
 }
-const reader = new FileReader();
-reader.onload = () => {
-openAvatarEditor(String(reader.result || ''), { prepareOriginalForSave: true });
-};
-reader.readAsDataURL(file);
+/* An iPhone shoots HEIC and a camera in raw mode writes DNG. Most engines
+   draw neither, and the old path waited for an onload that never came, so
+   the picture was chosen and nothing happened. */
+try {
+const { dataUrl } = await window.PoorijaImageFormats.toDrawableDataUrl(file);
+openAvatarEditor(dataUrl, { prepareOriginalForSave: true });
+} catch (error) {
+notify(describeImageFailure(error), 'error');
+}
+}
+
+/** Says which format could not be opened, rather than "that did not work". */
+function describeImageFailure(error) {
+const reason = String(error?.message || error);
+if (reason.includes('DNG-no-preview')) {
+return t('این فایل DNG پیش‌نمایشی درون خود ندارد. از برنامهٔ دوربین یک JPEG بگیرید.',
+  'This DNG carries no embedded preview. Export a JPEG from your camera app.');
+}
+if (reason.includes('HEIC-no-preview')) {
+return t('این فایل HEIC پیش‌نمایشی درون خود ندارد. از برنامهٔ عکس یک JPEG بگیرید.',
+  'This HEIC carries no embedded preview. Export a JPEG from your photos app.');
+}
+return t('این تصویر باز نشد.', 'That image could not be opened.');
 }
 function setAvatarEditorVisible(visible) {
 const chooser = document.getElementById('chatAvatarChooser');
@@ -1389,16 +1412,24 @@ saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 broadcastHello();
 }
-function updateGroupAvatar(file) {
+async function updateGroupAvatar(file) {
 const space = getActiveConversation();
-if (!space || space.type !== 'group' || !file || !file.type.startsWith('image/')) return;
+/* No type gate: see updateProfileAvatar. A camera container is judged by
+   whether a picture can be got out of it, not by what the picker called it. */
+if (!space || space.type !== 'group' || !file) return;
 if (file.size > 2 * 1024 * 1024) {
 notify(t('تصویر گروه باید کمتر از 2 مگابایت باشد', 'Group image must be under 2 MB'), 'warning');
 return;
 }
-const reader = new FileReader();
-reader.onload = () => {
-space.avatarData = String(reader.result || '');
+let dataUrl;
+try {
+({ dataUrl } = await window.PoorijaImageFormats.toDrawableDataUrl(file));
+} catch (error) {
+notify(describeImageFailure(error), 'error');
+return;
+}
+{
+space.avatarData = dataUrl;
 space.members = normalizeSpaceMembers(space.members);
 saveSpaces();
 broadcastSpaceRecord(space);
@@ -1406,8 +1437,7 @@ renderPeers();
 renderActivePeer();
 renderSpaceMemberManager();
 notify(t('عکس گروه ذخیره شد.', 'Group picture saved.'), 'success');
-};
-reader.readAsDataURL(file);
+}
 }
 function toggleAvatarChooser(force) {
 mountChatPortals();

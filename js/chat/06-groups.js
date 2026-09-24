@@ -233,14 +233,18 @@ async function setActiveSpaceAvatar(file) {
     notify(t('فقط سازنده یا ادمین می‌تواند تصویر گروه را عوض کند.', 'Only the owner or an admin can change the group picture.'), 'warning');
     return;
   }
-  if (!/^image\//i.test(file.type)) {
-    notify(t('فقط تصویر پشتیبانی می‌شود.', 'Only images are supported.'), 'warning');
-    return;
-  }
   try {
+    /* No type check before the attempt. A DNG from a picker often arrives with
+       an empty type and was turned away here, and a HEIC passed the check and
+       then failed at createImageBitmap on every engine but WebKit. Whether a
+       picture can be got out of the file is the only question that matters,
+       and toDrawableDataUrl is the one that answers it -- pulling the embedded
+       preview out of a camera container when the engine cannot read it. */
+    const { dataUrl } = await window.PoorijaImageFormats.toDrawableDataUrl(file);
+    const drawable = await fetch(dataUrl).then((response) => response.blob());
     /* Shrink before storing: a group picture travels to every member inside
        the space record, so a 4 MB photo would be re-sent on every edit. */
-    const bitmap = await createImageBitmap(file);
+    const bitmap = await createImageBitmap(drawable);
     const size = 256;
     const canvas = document.createElement('canvas');
     canvas.width = size;

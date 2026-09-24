@@ -52,6 +52,19 @@ const found = {
     'src-tauri/gen/apple/project.yml': (/CFBundleShortVersionString:\s*([0-9][0-9A-Za-z.\-]*)/
       .exec(read('src-tauri/gen/apple/project.yml')) || [])[1],
   } : {}),
+  /* The iOS Info.plist states the version twice and only one of them was
+     watched here. `tauri ios build` rewrites CFBundleShortVersionString on
+     every build, so that one kept up on its own; CFBundleVersion is left
+     alone, and it sat at 2.26.95 through nine releases without anything
+     noticing. It is the number App Store Connect identifies an upload by, and
+     it has to differ from the last one or the upload is refused -- a rejection
+     at the end of a release, for a field nothing in the build would have
+     mentioned. */
+  ...(exists('src-tauri/gen/apple/p00rija-cryptography_iOS/Info.plist') ? {
+    'src-tauri/gen/apple/.../Info.plist CFBundleVersion':
+      (/<key>CFBundleVersion<\/key>\s*<string>([^<]+)<\/string>/
+        .exec(read('src-tauri/gen/apple/p00rija-cryptography_iOS/Info.plist')) || [])[1],
+  } : {}),
   ...(exists('src-tauri/gen/android/app/tauri.properties') ? {
     'src-tauri/gen/android/app/tauri.properties': (/tauri\.android\.versionName=([0-9][0-9A-Za-z.\-]*)/
       .exec(read('src-tauri/gen/android/app/tauri.properties')) || [])[1],

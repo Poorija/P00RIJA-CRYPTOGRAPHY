@@ -119,5 +119,40 @@ console.log('\nUpdate checker');
   ok(u.eligible() === true, 'a native shell is eligible');
 }
 
+// ---- the wiring, not just the arithmetic --------------------------------
+/* This is the check that was missing, and its absence shipped a build that
+   announced 2.35.0 as an update over 2.35.0.
+ *
+ * isNewer was right the whole time. What was wrong was where the running
+ * version came from: APP_VERSION_SEMVER is a module-scope const in app.js and
+ * was never exported, so the checker read undefined, fell back to '0.0.0', and
+ * every release on earth was newer. The dialog printed the correct number
+ * because it is written inside app.js and could see the real one -- two
+ * sources of truth, agreeing on the screen and disagreeing in the comparison.
+ *
+ * Testing isNewer in isolation could never catch that. These test the seam. */
+{
+  const u = load('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
+  globalThis.window.__POORIJA_DESKTOP__ = true;
+
+  globalThis.window.PoorijaApp.APP_VERSION_SEMVER = '2.35.0';
+  const same = await u.check(true);
+  ok(same && same.upToDate === true,
+    'a release equal to the running version reports up to date, not an update');
+
+  globalThis.window.PoorijaApp.APP_VERSION_SEMVER = '2.35.0';
+  ok(!u.isNewer('2.35.0', '2.35.0'), 'and the comparison behind it agrees');
+
+  /* With no version to compare against, the answer is "I do not know" -- never
+     "there is an update". A default of 0.0.0 here is what made every release
+     look newer than the build running it. */
+  delete globalThis.window.PoorijaApp.APP_VERSION_SEMVER;
+  const blind = await u.check(false);
+  ok(blind === null, 'a build that cannot read its own version says nothing at launch');
+  const blindManual = await u.check(true);
+  ok(blindManual && blindManual.error === true,
+    'and reports a problem when somebody asked, rather than inventing an update');
+}
+
 console.log(`\n${failures ? `${failures} of ${checks} checks failed` : `${checks} checks passed`}\n`);
 process.exit(failures ? 1 : 0);

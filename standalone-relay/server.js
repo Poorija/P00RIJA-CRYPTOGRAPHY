@@ -2747,8 +2747,14 @@ function loadOfflineBoxes() {
 function saveOfflineBoxesNow() {
   try {
     fs.mkdirSync(path.dirname(OFFLINE_STORE_PATH), { recursive: true });
-    fs.writeFileSync(`${OFFLINE_STORE_PATH}.tmp`, JSON.stringify(Object.fromEntries(offlineBoxes), null, 2));
+    /* Written flat, not indented. The bulk of this file is base64 bodies,
+       which are single strings however it is formatted: the indentation only
+       ever padded the braces around them, and it was being recomputed over
+       the entire store every time a chunk landed. */
+    const started = Date.now();
+    fs.writeFileSync(`${OFFLINE_STORE_PATH}.tmp`, JSON.stringify(Object.fromEntries(offlineBoxes)));
     fs.renameSync(`${OFFLINE_STORE_PATH}.tmp`, OFFLINE_STORE_PATH);
+    lastOfflineSaveMs = Date.now() - started;
   } catch (error) {
     console.error('Failed to save offline boxes:', error);
   }
@@ -2756,8 +2762,27 @@ function saveOfflineBoxesNow() {
 
 /* Every ACK and every queued message rewrites the entire store, and a burst
    of them rewrote it once per item. A short trailing debounce collapses the
-   burst into one write; shutdown flushes whatever is still pending. */
+   burst into one write; shutdown flushes whatever is still pending.
+
+   The wait grows with the store. A rewrite costs time in proportion to what
+   is being written, so a fixed wait spends an ever larger share of the clock
+   persisting: a 200 MB file arriving as chunks pushed the store past a
+   quarter of a gigabyte, and at 300 ms it was being written out over and
+   over while the rest of the file was still coming in. Waiting a multiple of
+   however long the last write actually took holds that share roughly
+   constant, and needs no guess at the size -- the previous write reports its
+   own cost. What a crash can cost is the wait, so it is capped. */
+const SAVE_DEBOUNCE_MIN_MS = 300;
+const SAVE_DEBOUNCE_MAX_MS = 5000;
+const SAVE_DEBOUNCE_FACTOR = 4;
+
 let saveOfflineBoxesTimer = null;
+let lastOfflineSaveMs = 0;
+
+function offlineSaveDelay() {
+  const proportional = lastOfflineSaveMs * SAVE_DEBOUNCE_FACTOR;
+  return Math.min(SAVE_DEBOUNCE_MAX_MS, Math.max(SAVE_DEBOUNCE_MIN_MS, proportional));
+}
 
 function flushOfflineBoxes() {
   if (saveOfflineBoxesTimer) {
@@ -2772,7 +2797,7 @@ function saveOfflineBoxes() {
   saveOfflineBoxesTimer = setTimeout(() => {
     saveOfflineBoxesTimer = null;
     saveOfflineBoxesNow();
-  }, 300);
+  }, offlineSaveDelay());
 }
 
 /* ------------------------------------------------------------------
@@ -2788,7 +2813,15 @@ const TEXT_RETENTION_MS = Number(process.env.CHAT_TEXT_RETENTION_MS || 30 * 24 *
 /* Media is measured in bytes and text in items; both ceilings are far past
    anything a real correspondent reaches, and both exist so the store cannot
    be farmed as free storage. */
-const MEDIA_MAILBOX_QUOTA_BYTES = Number(process.env.CHAT_MEDIA_QUOTA_BYTES || 256 * 1024 * 1024);
+/* Big enough to hold one whole offline file and still have room.
+ *
+ * The client allows a 200 MB file to somebody who is absent, and base64 inside
+ * the chunk envelopes makes that about 268 MB on the way in. At the old 256 MB
+ * the eviction sweep would start dropping the EARLY chunks of a transfer while
+ * its later chunks were still arriving -- the file could never complete, and
+ * nothing said why. 512 MB clears one such file with space for the ordinary
+ * traffic behind it. */
+const MEDIA_MAILBOX_QUOTA_BYTES = Number(process.env.CHAT_MEDIA_QUOTA_BYTES || 512 * 1024 * 1024);
 const TEXT_MAILBOX_LIMIT = Number(process.env.CHAT_TEXT_MAILBOX_LIMIT || 200);
 const EXPIRY_LOG_PATH = process.env.CHAT_EXPIRY_LOG_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'expiry-log.json');
 const EXPIRY_LOG_LIMIT = 500;
@@ -2815,23 +2848,52 @@ function saveExpiryLog() {
   }
 }
 
-function envelopeClass(item) {
+/* What the sweep needs to know about an envelope, worked out once and kept
+   against the envelope itself, so it is dropped when the envelope is and
+   reaches neither the store nor the recipient.
+
+   The sweep runs every time mail lands, and it used to re-derive all three
+   facts for every envelope already waiting. Sizing an envelope means
+   stringifying its payload, so a file being queued chunk by chunk paid for
+   the square of its own size in JSON: measured over a 30 MB file, the last
+   chunks were landing seven times slower than the first, and a 200 MB one
+   would have crawled. Deriving each fact once turns that back into a walk of
+   numbers. */
+const envelopeFacts = new WeakMap();
+
+function envelopeFactsFor(item) {
+  const cached = item && typeof item === 'object' ? envelopeFacts.get(item) : null;
+  if (cached) return cached;
+
   const declared = String(item?.payload?.class || '').toLowerCase();
   const type = String(item?.payload?.type || '').toLowerCase();
-  return declared === 'media' || type.startsWith('file-') ? 'media' : 'text';
+  let bytes = 0;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(item?.payload || null), 'utf8');
+  } catch (_error) {
+    bytes = 0;
+  }
+  const parsed = Date.parse(item?.queuedAt || '');
+
+  const facts = {
+    kind: declared === 'media' || type.startsWith('file-') ? 'media' : 'text',
+    bytes,
+    at: Number.isFinite(parsed) ? parsed : Date.now(),
+  };
+  if (item && typeof item === 'object') envelopeFacts.set(item, facts);
+  return facts;
+}
+
+function envelopeClass(item) {
+  return envelopeFactsFor(item).kind;
 }
 
 function envelopeBytes(item) {
-  try {
-    return Buffer.byteLength(JSON.stringify(item?.payload || null), 'utf8');
-  } catch (_error) {
-    return 0;
-  }
+  return envelopeFactsFor(item).bytes;
 }
 
 function queuedAtMs(item) {
-  const parsed = Date.parse(item?.queuedAt || '');
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  return envelopeFactsFor(item).at;
 }
 
 /* Records that something waited and did not survive. The note deliberately
@@ -2861,9 +2923,28 @@ function sweepMailbox(fingerprint) {
   const now = Date.now();
   let changed = false;
 
-  /* Weighed once: the byte count is the JSON of the payload, and
-     re-stringifying it inside a loop would turn one sweep into a quadratic
-     one for a box full of media. */
+  /* Mail landing is the ordinary case, and ordinarily it evicts nothing: the
+     box is inside both caps and everything in it is younger than its
+     retention. Settle that first, with nothing but arithmetic over the cached
+     facts, and leave without building the wrapper array or sorting it. A file
+     arriving as hundreds of chunks runs this path hundreds of times. */
+  let standingMedia = 0;
+  let standingText = 0;
+  let anyExpired = false;
+  for (const item of items) {
+    const facts = envelopeFactsFor(item);
+    if (facts.kind === 'media') standingMedia += facts.bytes;
+    else standingText += 1;
+    const limit = facts.kind === 'media' ? MEDIA_RETENTION_MS : TEXT_RETENTION_MS;
+    if (now - facts.at > limit) {
+      anyExpired = true;
+      break;
+    }
+  }
+  if (!anyExpired && standingMedia <= MEDIA_MAILBOX_QUOTA_BYTES && standingText <= TEXT_MAILBOX_LIMIT) {
+    return false;
+  }
+
   const entries = items.map((item) => ({
     item,
     kind: envelopeClass(item),
@@ -3571,6 +3652,44 @@ function findOpenPresenceByFingerprint(fingerprint = '') {
 /* Everything hello used to hand over on the strength of a claim: the mailbox
    sweep, the batched delivery and the expiry notices. It moved behind the
    identity proof and now runs one round trip later, unchanged. */
+/* How many envelopes may be with a recipient at once, unacknowledged. A whole
+   mailbox at once would be a burst of hundreds of megabytes into a socket that
+   cannot refuse it; one at a time would cost a round trip per envelope. */
+const MAIL_WINDOW = 50;
+
+/* Sends whatever the window has room for, skipping what this connection has
+   already been handed.
+
+   It used to slice the first MAIL_WINDOW off the queue each time, which was
+   wrong in both directions. The same envelopes went out again on every top-up,
+   so a recipient collecting a file received most of it several times over. And
+   the top-up only happened on an ACK that actually removed something -- so
+   once the recipient had acknowledged everything it held, no further ACK
+   changed anything, nothing triggered the next send, and each side sat waiting
+   for the other. Delivery stopped dead after about MAIL_WINDOW envelopes and
+   only a reconnection moved it on. Nothing reported this: a file simply
+   advanced a few megabytes per reconnect and looked like a slow network.
+
+   Tracking what this connection has been sent fixes both. The set belongs to
+   the connection, not to the mailbox, so a reconnection re-sends anything that
+   was in flight when the socket went -- which is what makes an unacknowledged
+   envelope safe to drop. */
+function pumpHeldMail(record, ws) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const queued = offlineBoxes.get(record.fingerprint) || [];
+  if (!queued.length) return;
+  if (!record.sentMail) record.sentMail = new Set();
+
+  let inFlight = record.sentMail.size;
+  for (const item of queued) {
+    if (inFlight >= MAIL_WINDOW) break;
+    if (record.sentMail.has(item.relayId)) continue;
+    safeSend(ws, item);
+    record.sentMail.add(item.relayId);
+    inFlight += 1;
+  }
+}
+
 function deliverHeldMail(record, ws) {
   // Expire before delivering, so nothing stale is handed over and the
   // notices below reflect what actually happened while they were away.
@@ -3579,20 +3698,10 @@ function deliverHeldMail(record, ws) {
   const queued = offlineBoxes.get(record.fingerprint) || [];
   if (queued.length) {
     console.log(`[Presence] Delivering ${queued.length} queued messages to ${record.fingerprint}`);
-
-    const sendBatches = () => {
-      if (record.ws.readyState !== WebSocket.OPEN) return;
-      // We don't remove them here anymore; client will ACK them.
-      // But we only send a limited batch to avoid flooding.
-      const toSend = queued.slice(0, 50);
-      for (const item of toSend) {
-        safeSend(ws, item);
-      }
-      // If there's more, the client's ACKs will eventually trigger more sends
-      // or we can just wait for the next identification.
-      // For now, let's just send the first batch and wait for ACKs.
-    };
-    sendBatches();
+    /* A fresh start for this socket: whatever a previous one was sent went
+       with it, and anything unacknowledged has to come round again. */
+    record.sentMail = new Set();
+    pumpHeldMail(record, ws);
   }
 
   /* Somebody wrote to them and it did not survive the wait. Saying so is
@@ -3821,7 +3930,11 @@ wsServer.on('connection', (ws, req) => {
       const ids = Array.isArray(message.ids) ? message.ids : [];
       const queued = offlineBoxes.get(record.fingerprint) || [];
       if (queued.length && ids.length) {
-        const next = queued.filter(msg => !ids.includes(msg.relayId));
+        /* A Set, because the app acknowledges one envelope per message and a
+           file is thousands of them: an includes() per queued item per ACK is
+           the same quadratic the retention sweep used to have. */
+        const acked = new Set(ids);
+        const next = queued.filter(msg => !acked.has(msg.relayId));
         if (next.length !== queued.length) {
           console.log(`[Presence] ACK received for ${queued.length - next.length} messages from ${record.fingerprint}`);
           if (next.length) {
@@ -3830,15 +3943,13 @@ wsServer.on('connection', (ws, req) => {
             offlineBoxes.delete(record.fingerprint);
           }
           saveOfflineBoxes();
-          
-          // If we still have messages, send the next batch
-          if (next.length > 0) {
-            const toSend = next.slice(0, 50);
-            for (const item of toSend) {
-              safeSend(ws, item);
-            }
-          }
         }
+        /* The window reopens by whatever was acknowledged, whether or not it
+           was still in the mailbox -- an ACK for something already gone is a
+           duplicate, and treating it as nothing to do is what used to leave
+           both sides waiting. */
+        if (record.sentMail) for (const id of acked) record.sentMail.delete(id);
+        pumpHeldMail(record, ws);
       }
       return;
     }

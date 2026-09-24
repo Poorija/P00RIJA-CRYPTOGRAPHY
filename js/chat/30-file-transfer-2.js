@@ -1413,10 +1413,27 @@ async function canDecodeImage(file) {
     const bitmap = await createImageBitmap(file);
     bitmap.close?.();
     return true;
-  } catch (_error) { return false; }
+  } catch (_error) { /* the engine cannot; the container still might */ }
+  /* WebKit decodes HEIC and Chromium does not, so this used to answer no on
+     Android and Linux and the photograph went out with its metadata intact --
+     the one outcome the offer exists to avoid. A HEIC carries a finished JPEG
+     beside its HEVC data, and that is enough to re-encode from. */
+  try {
+    await window.PoorijaImageFormats?.toDrawableDataUrl(file);
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 async function convertImageToJpeg(file, quality = 0.92) {
-  const bitmap = await createImageBitmap(file);
+  /* Through the format module rather than straight to createImageBitmap: on
+     an engine that cannot read the container it returns the embedded preview,
+     which re-encodes just as well and is the difference between converting
+     the photograph and sending it untouched. */
+  const drawable = window.PoorijaImageFormats
+    ? await fetch((await window.PoorijaImageFormats.toDrawableDataUrl(file)).dataUrl).then((r) => r.blob())
+    : file;
+  const bitmap = await createImageBitmap(drawable);
   const canvas = document.createElement('canvas');
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;

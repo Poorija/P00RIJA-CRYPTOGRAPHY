@@ -716,20 +716,54 @@ document.getElementById('chatTimerPopover')?.classList.add('hidden');
 if (immediate) {
 composerActions.classList.add('hidden');
 composerActions.classList.remove('is-closing');
+window.visualViewport?.removeEventListener('resize', fitComposerActions);
 return;
 }
 composerActions.classList.add('is-closing');
 window.setTimeout(() => {
 composerActions.classList.add('hidden');
 composerActions.classList.remove('is-closing');
+window.visualViewport?.removeEventListener('resize', fitComposerActions);
 }, 150);
 }
+/* Fits the sheet into the room that is actually there.
+ *
+ * It is absolutely positioned inside section.chat-thread, which has
+ * overflow:hidden, and it grows upward from the composer with no ceiling. On a
+ * phone with the keyboard up there is not enough room above the composer for
+ * nine rows, so the top of the sheet was cut off by the thread's edge -- and
+ * the first row is Stickers, which is why that is the one that disappeared.
+ *
+ * It was never the header covering it: the sheet sits at z-index 60 and the
+ * header at 50. Raising it would have changed nothing, because the sheet was
+ * being CLIPPED rather than covered, and nothing inside an overflow:hidden
+ * ancestor escapes it by stacking higher.
+ *
+ * So it is measured instead. The gap between the top of the thread and the top
+ * of the composer is the space the sheet may use; anything taller scrolls. */
+function fitComposerActions() {
+if (!composerActions) return;
+const thread = composerActions.closest('.chat-thread');
+const bar = composerActions.closest('.chat-composer-bar');
+if (!thread || !bar) return;
+const room = bar.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+/* A floor, so a very short thread does not produce a sheet too small to be
+   worth opening -- better to overlap a little than to show two rows. */
+const usable = Math.max(room - 16, 180);
+composerActions.style.maxHeight = `${Math.round(usable)}px`;
+composerActions.style.overflowY = 'auto';
+}
+
 function openComposerActions() {
 if (!composerActions) return;
 composerActions.classList.remove('is-closing');
 composerActions.classList.remove('hidden');
+fitComposerActions();
 composerPlusBtn?.classList.add('is-open');
 composerPlusBtn?.setAttribute('aria-expanded', 'true');
+/* The keyboard arriving or leaving changes the room available while the sheet
+   is already open, which is exactly the moment somebody is looking at it. */
+window.visualViewport?.addEventListener('resize', fitComposerActions);
 }
 composerPlusBtn?.addEventListener('click', (event) => {
 event.preventDefault();

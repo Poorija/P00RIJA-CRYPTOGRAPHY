@@ -161,8 +161,21 @@
     }
   }
 
+  /**
+   * What this build is, or empty when it cannot be established.
+   *
+   * Never a default. The first version of this returned '0.0.0' when it could
+   * not read the real number, which made every published release newer than
+   * the running one -- so a build announced an update over itself. A checker
+   * that does not know what it is running has nothing useful to say, and
+   * saying nothing is the correct behaviour rather than a missed opportunity.
+   */
   function currentVersion() {
-    return app()?.APP_VERSION_SEMVER || window.APP_VERSION_SEMVER || '0.0.0';
+    const fromApp = app()?.APP_VERSION_SEMVER;
+    if (typeof fromApp === 'string' && fromApp) return fromApp;
+    const fromWindow = window.APP_VERSION_SEMVER;
+    if (typeof fromWindow === 'string' && fromWindow) return fromWindow;
+    return '';
   }
 
   /**
@@ -177,10 +190,15 @@
         if (Date.now() - last < MIN_INTERVAL_MS) return null;
       } catch (_error) { /* private mode: check every launch */ }
     }
+    const running = currentVersion();
+    /* Nothing sensible to compare against. Say so when somebody pressed the
+       button, and stay quiet otherwise -- announcing an update on the strength
+       of a version we could not read is how this went wrong the first time. */
+    if (!running) return manual ? { error: true } : null;
     const latest = await fetchLatest();
     try { localStorage.setItem(LAST_SEEN_KEY, String(Date.now())); } catch (_error) { /* ignore */ }
     if (!latest) return manual ? { error: true } : null;
-    if (!isNewer(latest.version, currentVersion())) {
+    if (!isNewer(latest.version, running)) {
       return manual ? { upToDate: true, version: latest.version } : null;
     }
     return latest;

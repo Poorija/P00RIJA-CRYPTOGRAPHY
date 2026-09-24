@@ -333,7 +333,10 @@ function rememberActiveStickerPack(packId) {
 async function loadStickerPacks() {
   try {
     const packs = await stickerDbGetAllPacks();
-    chatState.stickerPacks = (packs || []).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    /* An explicit order when one has been set, and arrival order for packs
+       imported before there was such a thing -- so an install that predates
+       the manager opens looking exactly as it did. */
+    chatState.stickerPacks = (packs || []).sort(stickerPackOrder);
   } catch (error) {
     console.warn('[Stickers] load failed', error);
     chatState.stickerPacks = [];
@@ -582,6 +585,213 @@ async function importStickerFiles(fileList) {
   if (skipped) {
     console.warn(`[Stickers] ${skipped} item(s) skipped (unreadable or unsupported)`);
   }
+}
+
+/* ---- the pack manager --------------------------------------------------
+ *
+ * One panel, two shapes. A centred card on a desktop, where the backdrop is
+ * the way out; the whole screen with a back arrow on a phone, where a cramped
+ * box inside a screen that could have held the list is just worse. The CSS
+ * decides which, so there is one set of behaviour to maintain rather than two.
+ *
+ * Built when it opens and thrown away when it closes: it holds thumbnails of
+ * every pack, and keeping those alive behind a panel nobody is looking at
+ * costs memory on the device this app is trying to stay small on.
+ */
+let packManagerElement = null;
+
+function packManagerSelection() {
+  if (!packManagerElement) return [];
+  return Array.from(packManagerElement.querySelectorAll('input[type="checkbox"]:checked'))
+    .map((box) => box.getAttribute('data-pack-id'))
+    .filter(Boolean);
+}
+
+function syncPackManagerFooter() {
+  if (!packManagerElement) return;
+  const chosen = packManagerSelection().length;
+  const remove = packManagerElement.querySelector('[data-pack-delete]');
+  const label = packManagerElement.querySelector('[data-pack-selected]');
+  if (remove) remove.disabled = chosen === 0;
+  if (label) {
+    label.textContent = chosen
+      ? t(`${chosen} پک انتخاب شده`, `${chosen} selected`)
+      : t('برای کار گروهی چند پک را انتخاب کنید', 'Select packs to act on several at once');
+  }
+  packManagerElement.querySelectorAll('.packman-row').forEach((row) => {
+    const box = row.querySelector('input[type="checkbox"]');
+    row.classList.toggle('on', Boolean(box?.checked));
+  });
+}
+
+function renderPackManagerList() {
+  const list = packManagerElement?.querySelector('[data-pack-list]');
+  if (!list) return;
+  const packs = chatState.stickerPacks;
+  if (!packs.length) {
+    list.innerHTML = `<p class="packman-note">${app().escapeHTML(t('هنوز پکی وارد نکرده‌اید.', 'No packs imported yet.'))}</p>`;
+    syncPackManagerFooter();
+    return;
+  }
+  list.innerHTML = packs.map((pack, index) => {
+    const first = pack.stickers?.[0];
+    const url = first ? stickerObjectUrl(first) : '';
+    const thumb = url
+      ? `<img class="packman-thumb" src="${app().escapeHTML(url)}" alt="">`
+      : '<span class="packman-thumb"></span>';
+    return `<div class="packman-row">
+      <input type="checkbox" data-pack-id="${app().escapeHTML(pack.id)}" aria-label="${app().escapeHTML(pack.title || '')}">
+      ${thumb}
+      <input class="packman-name" data-rename="${app().escapeHTML(pack.id)}" value="${app().escapeHTML(pack.title || '')}" maxlength="60">
+      <span class="packman-count">${pack.stickers?.length || 0}</span>
+      <span class="packman-move">
+        <button type="button" data-move="up" data-pack-id="${app().escapeHTML(pack.id)}" ${index === 0 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('بالا', 'Up'))}">&#8593;</button>
+        <button type="button" data-move="down" data-pack-id="${app().escapeHTML(pack.id)}" ${index === packs.length - 1 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('پایین', 'Down'))}">&#8595;</button>
+      </span>
+    </div>`;
+  }).join('');
+  syncPackManagerFooter();
+}
+
+function closePackManager() {
+  packManagerElement?.remove();
+  packManagerElement = null;
+  document.documentElement.classList.remove('packman-open');
+}
+
+function openPackManager() {
+  closePackManager();
+  const host = document.createElement('div');
+  host.className = 'packman';
+  host.innerHTML = `
+    <div class="packman-backdrop" data-pack-close></div>
+    <div class="packman-card" role="dialog" aria-modal="true">
+      <div class="packman-head">
+        <button type="button" class="packman-back" data-pack-close aria-label="${app().escapeHTML(t('بازگشت', 'Back'))}">&#8592;</button>
+        <h3>${app().escapeHTML(t('مدیریت پک‌های استیکر', 'Manage sticker packs'))}</h3>
+      </div>
+      <div class="packman-body">
+        <p class="packman-note">${app().escapeHTML(t('نام هر پک را همین‌جا می‌توانید عوض کنید، و با فلش‌ها ترتیبشان را. ترتیب همان است که در پنل استیکر می‌بینید.', 'Rename a pack in place, and use the arrows to order them. That order is the one the sticker panel shows.'))}</p>
+        <div class="packman-list" data-pack-list></div>
+      </div>
+      <div class="packman-foot">
+        <span class="packman-count" data-pack-selected style="flex:1 1 auto;align-self:center"></span>
+        <button type="button" class="packman-bulk is-danger" data-pack-delete>${app().escapeHTML(t('حذف انتخاب‌شده‌ها', 'Delete selected'))}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(host);
+  packManagerElement = host;
+  document.documentElement.classList.add('packman-open');
+
+  host.addEventListener('click', async (event) => {
+    if (event.target.closest('[data-pack-close]')) { closePackManager(); return; }
+    const move = event.target.closest('[data-move]');
+    if (move) {
+      await moveStickerPack(move.getAttribute('data-pack-id'), move.getAttribute('data-move') === 'up' ? -1 : 1);
+      renderPackManagerList();
+      return;
+    }
+    const remove = event.target.closest('[data-pack-delete]');
+    if (remove) {
+      const chosen = packManagerSelection();
+      if (!chosen.length) return;
+      const yes = await PoorijaDialogs.confirm(
+        t(`${chosen.length} پک و همهٔ استیکرهایشان حذف شوند؟`, `Delete ${chosen.length} pack(s) and every sticker in them?`),
+        { okLabel: t('حذف', 'Delete'), cancelLabel: t('انصراف', 'Cancel'), danger: true },
+      );
+      if (!yes) return;
+      const removed = await deleteStickerPacks(chosen);
+      notify(t(`${removed} پک حذف شد.`, `${removed} pack(s) deleted.`), 'success');
+      renderPackManagerList();
+      return;
+    }
+  });
+
+  host.addEventListener('change', (event) => {
+    if (event.target.matches('input[type="checkbox"]')) syncPackManagerFooter();
+  });
+
+  /* Renamed on blur and on Enter rather than on every keystroke: a write to
+     IndexedDB per character is a lot of writes for a name somebody is still
+     halfway through typing. */
+  host.addEventListener('blur', async (event) => {
+    const field = event.target.closest('[data-rename]');
+    if (field) await renameStickerPack(field.getAttribute('data-rename'), field.value);
+  }, true);
+  host.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target.closest('[data-rename]')) event.target.blur();
+    if (event.key === 'Escape') closePackManager();
+  });
+
+  renderPackManagerList();
+}
+
+/* ---- arranging packs ---------------------------------------------------
+ *
+ * Packs used to be shown in the order they were imported, which is the order
+ * nobody chose. These three let somebody name them, put them where they want
+ * them, and clear out several at once -- all of it written straight back to
+ * IndexedDB, because a pack list that forgets its arrangement on reload is
+ * worse than one that never offered to remember it.
+ */
+function stickerPackOrder(a, b) {
+  const left = Number.isFinite(a?.order) ? a.order : Number.MAX_SAFE_INTEGER;
+  const right = Number.isFinite(b?.order) ? b.order : Number.MAX_SAFE_INTEGER;
+  if (left !== right) return left - right;
+  return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''));
+}
+
+/** Writes the current array positions back as the stored order. */
+async function persistStickerPackOrder() {
+  await Promise.all(chatState.stickerPacks.map(async (pack, index) => {
+    if (pack.order === index) return;
+    pack.order = index;
+    try { await stickerDbPutPack(pack); } catch (error) { console.warn('[Stickers] order not saved', error); }
+  }));
+}
+
+async function renameStickerPack(packId, title) {
+  const pack = chatState.stickerPacks.find((item) => item.id === packId);
+  if (!pack) return false;
+  /* Trimmed, capped, and an empty name refused rather than stored: a pack
+     with a blank title becomes unfindable in its own list. */
+  const next = String(title || '').trim().slice(0, 60);
+  if (!next || next === pack.title) return false;
+  pack.title = next;
+  try {
+    await stickerDbPutPack(pack);
+  } catch (error) {
+    console.warn('[Stickers] rename failed', error);
+    return false;
+  }
+  renderStickerPanel();
+  return true;
+}
+
+/** Moves one pack by one place. Returns false at the ends rather than wrapping. */
+async function moveStickerPack(packId, delta) {
+  const from = chatState.stickerPacks.findIndex((pack) => pack.id === packId);
+  if (from < 0) return false;
+  const to = from + delta;
+  if (to < 0 || to >= chatState.stickerPacks.length) return false;
+  const [moved] = chatState.stickerPacks.splice(from, 1);
+  chatState.stickerPacks.splice(to, 0, moved);
+  await persistStickerPackOrder();
+  renderStickerPanel();
+  return true;
+}
+
+/** Deletes several at once, and answers how many actually went. */
+async function deleteStickerPacks(packIds) {
+  const wanted = Array.from(new Set(packIds || []));
+  let removed = 0;
+  for (const packId of wanted) {
+    const before = chatState.stickerPacks.length;
+    await deleteStickerPack(packId);
+    if (chatState.stickerPacks.length < before) removed += 1;
+  }
+  if (removed) await persistStickerPackOrder();
+  return removed;
 }
 
 async function deleteStickerPack(packId) {

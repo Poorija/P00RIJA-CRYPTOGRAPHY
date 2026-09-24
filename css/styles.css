@@ -26770,3 +26770,50 @@ html body .slock-picker-done { width: 100%; min-height: 2.9rem; border: 0; borde
   html body .slock-picker-back { display: grid; }
   html body .slock-picker-backdrop { display: none; }
 }
+
+/* ---- sticker pack manager -----------------------------------------------
+ *
+ * Same shape as the shared-lock picker above and for the same reason: a
+ * centred card is right on a desktop, where a backdrop is a way out, and
+ * wrong on a phone, where it leaves a cramped box inside a screen that could
+ * have held the whole list. The phone gets the full screen and a back arrow,
+ * because that is the gesture it already expects from every other pane.
+ */
+html.packman-open body { overflow: hidden !important; }
+html body .packman { position: fixed; inset: 0; z-index: 2147482500; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+html body .packman.hidden { display: none !important; }
+html body .packman-backdrop { position: absolute; inset: 0; background: rgba(2, 6, 23, .68); backdrop-filter: blur(2px); }
+html body .packman-card {
+  position: relative; display: flex; flex-direction: column; width: min(38rem, 100%);
+  max-height: min(82dvh, 46rem); overflow: hidden; box-sizing: border-box;
+  background: var(--app-bg, #0f172a); color: inherit;
+  border: 1px solid #64748b55; border-radius: 1.1rem; box-shadow: 0 24px 60px rgba(2, 6, 23, .55);
+}
+html body .packman-head { display: flex; flex: 0 0 auto; align-items: center; gap: .6rem; padding: 1rem 1.1rem .6rem; }
+html body .packman-head h3 { font-weight: 700; font-size: 1rem; margin: 0; flex: 1 1 auto; }
+/* The back arrow is the phone's way out; a desktop closes on the backdrop. */
+html body .packman-back { display: none; width: 2.4rem; height: 2.4rem; flex: 0 0 auto; place-items: center; border-radius: .7rem; border: 1px solid #64748b44; background: transparent; color: inherit; cursor: pointer; }
+html body .packman-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 1.1rem .6rem; }
+html body .packman-list { display: grid; gap: .4rem; }
+html body .packman-row { display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem; border: 1px solid #64748b33; border-radius: .8rem; background: #64748b0f; }
+html body .packman-row.on { border-color: #38bdf877; background: #38bdf81f; }
+html body .packman-row input[type="checkbox"] { flex: 0 0 auto; width: 1.05rem; height: 1.05rem; accent-color: #38bdf8; }
+html body .packman-thumb { flex: 0 0 auto; width: 2.1rem; height: 2.1rem; border-radius: .45rem; object-fit: cover; background: #64748b22; }
+html body .packman-name { flex: 1 1 auto; min-width: 0; background: transparent; border: 0; color: inherit; font: inherit; font-weight: 600; padding: .2rem .1rem; border-bottom: 1px dashed transparent; }
+html body .packman-name:focus { outline: none; border-bottom-color: #38bdf8aa; }
+html body .packman-count { flex: 0 0 auto; font-size: .72rem; opacity: .6; font-variant-numeric: tabular-nums; }
+html body .packman-move { display: flex; flex: 0 0 auto; gap: .15rem; }
+html body .packman-move button { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; border-radius: .5rem; border: 1px solid #64748b44; background: transparent; color: inherit; cursor: pointer; }
+html body .packman-move button:disabled { opacity: .3; cursor: default; }
+html body .packman-note { font-size: .78rem; opacity: .7; margin: .2rem 0 .8rem; line-height: 1.7; }
+html body .packman-foot { flex: 0 0 auto; display: flex; gap: .5rem; padding: .8rem 1.1rem calc(1rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid #64748b33; }
+html body .packman-bulk { flex: 1 1 auto; min-height: 2.7rem; border-radius: .8rem; border: 1px solid #64748b55; background: transparent; color: inherit; font-weight: 700; cursor: pointer; }
+html body .packman-bulk.is-danger { border-color: #ef444477; color: #fca5a5; }
+html body .packman-bulk:disabled { opacity: .35; cursor: default; }
+@media (max-width: 1023px) {
+  html body .packman { padding: 0; align-items: stretch; }
+  html body .packman-card { width: 100%; max-width: none; max-height: none; height: 100dvh; border: 0; border-radius: 0; }
+  html body .packman-head { padding-top: calc(1rem + var(--pwa-safe-top, 0px)); }
+  html body .packman-back { display: grid; }
+  html body .packman-backdrop { display: none; }
+}

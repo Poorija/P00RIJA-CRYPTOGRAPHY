@@ -59,10 +59,20 @@ const FILE_CHUNK_BYTES = 64 * 1024;
    MAX_OFFLINE_FILE_BYTES below is the one that guards the relay's mailbox and
    it is deliberately left where it is. */
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024;
-/* Queued through the relay rather than sent over a live channel. The relay
-   allows 512 MB per recipient, so one 500 MB file would take essentially all
-   of it and evict everything else waiting for that person. */
-const MAX_OFFLINE_FILE_BYTES = 100 * 1024 * 1024;
+/* Queued through the relay rather than sent over a live channel.
+ *
+ * A file is never one envelope. sendBlobChunks splits every blob into
+ * FILE_CHUNK_BYTES pieces and re-decides the route per piece, so an offline
+ * transfer is N small relay frames rather than one large one -- the 12 MB
+ * frame ceiling is never anywhere near being reached by a file.
+ *
+ * What this number actually guards is the recipient's mailbox. The relay keeps
+ * MEDIA_MAILBOX_QUOTA_BYTES per person and evicts oldest-first when that runs
+ * out, so a file large enough to fill it does not just risk itself: it pushes
+ * out everything else waiting for them, including the earlier chunks of the
+ * same transfer. Base64 inside the envelopes adds a third, so the mailbox cost
+ * of a file is about 1.34x its size. */
+const MAX_OFFLINE_FILE_BYTES = 200 * 1024 * 1024;
 /* Above this a received file is handed over as a download instead of being
    kept in the on-device vault, whose whole budget is 512 MB. */
 const MEDIA_VAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;

@@ -2256,15 +2256,39 @@ check('logging a call leaves the Chats panel alone',
 console.log('\n===== the About page =====');
 await page.evaluate(() => window.switchTab?.('about'));
 await page.waitForTimeout(900);
-const about = await page.evaluate(() => ({
+/* The page carries the project's name, not a person's.
+ *
+ * The names it must not carry are read from tools/forbidden-strings.txt rather
+ * than written here. That file is gitignored, and the reason is this check:
+ * spelling the names out in a test that ships would publish the very thing the
+ * check exists to keep out of a public tree -- which is what it did, in the
+ * one file a scrub of deployment strings had no reason to touch.
+ *
+ * A clone without the file has nothing to look for and says so, rather than
+ * reporting a pass it did not earn. */
+const forbiddenNames = (() => {
+  /* read() answers '' for a file that is not there, which is the case this
+     has to survive: a public clone does not carry the list. */
+  return read('tools/forbidden-strings.txt').split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    /* Straight into a RegExp, so anything a pattern could read as syntax is
+       quoted first. */
+    .map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+})();
+
+const about = await page.evaluate((names) => ({
   navLabel: document.querySelector('[data-i18n="about"]')?.textContent.trim() || '',
   name: document.querySelector('#content-about .about-name')?.textContent.trim() || '',
-  /* The page carries the project's name, not a person's. */
-  personal: /Farhadianfard|Mohammadmahdi/i.test(document.getElementById('content-about')?.textContent || ''),
+  personal: names.length > 0
+    && new RegExp(names.join('|'), 'i').test(document.getElementById('content-about')?.textContent || ''),
   mail: document.querySelector('#content-about a[href^="mailto:"]')?.getAttribute('href') || '',
   wallet: document.querySelector('#aboutDonateAddress code')?.textContent.trim() || '',
   ton: document.querySelector('#content-about a[href^="ton://"]')?.getAttribute('href') || '',
-}));
+}), forbiddenNames);
+if (!forbiddenNames.length) {
+  console.log('  (tools/forbidden-strings.txt is absent, so nothing was looked for)');
+}
 console.log('  ' + JSON.stringify(about));
 check('the page is about the project, under one name',
   about.name === 'P00RIJÃ' && about.personal === false, JSON.stringify(about));
