@@ -39,10 +39,21 @@ const SIGNAL_PORT = 9811;
 const PRESENCE_PORT = 9812;
 const PASSWORD = 'throughput-suite-2026';
 
+/* Which relay to exercise. Two of them live in this repository: the one the
+   Dockerfile builds and deploys (scripts/server.js) and the self-contained
+   distribution (standalone-relay/server.js). They drifted, and the drift was
+   invisible because every suite only ever spawned the second one -- so fixes
+   were proven against a program nobody runs. RELAY_SERVER points this at
+   either, and tools/check-relay-parity.cjs refuses a release where the two
+   disagree about which routes they answer. */
+const RELAY_SERVER = process.env.RELAY_SERVER
+  ? join(ROOT, process.env.RELAY_SERVER)
+  : join(ROOT, 'standalone-relay', 'server.js');
+
 /* A 30 MB file at the app's own chunk size. Enough chunks for a quadratic to
    be unmistakable, few enough to stay a few seconds on a slow machine. */
 const CHUNK_KB = 64;
-const CHUNKS = 480;
+const CHUNKS = Number(process.env.THROUGHPUT_CHUNKS || 480);
 /* Generous. The regression this guards was a 6.8x spread and climbing; normal
    run-to-run noise on a loaded machine is well under two. */
 const MAX_SPREAD = 2.5;
@@ -63,7 +74,7 @@ if (libWasMissing) {
   copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), join(libDir, 'push-wording.js'));
 }
 
-const relay = spawn(process.execPath, [join(ROOT, 'standalone-relay', 'server.js')], {
+const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,
@@ -151,8 +162,9 @@ ok(spread < MAX_SPREAD,
 
 /* The same property stated the other way round, so a change that slows every
    chunk equally cannot pass by flattening the curve. */
+const megabytes = Math.round(CHUNKS * CHUNK_KB / 1024);
 ok(seconds < 30,
-  `a 30 MB file queues in ${seconds.toFixed(1)}s`);
+  `a ${megabytes} MB file queues in ${seconds.toFixed(1)}s`);
 
 console.log(`\n${failures ? `${failures} of ${checks} checks failed` : `${checks} checks passed`}\n`);
 process.exit(failures ? 1 : 0);

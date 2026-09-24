@@ -1,6 +1,6 @@
 # Call quality — what is left to do
 
-وضعیت: برنامه‌ریزی‌شده، پیاده نشده · Status: planned, not implemented
+وضعیت: پیاده‌شده، تست میان‌پلتفرمی باقی مانده · Status: implemented, cross-platform testing outstanding
 
 این سند دو کار باقی‌ماندهٔ بهبود کیفیت تماس را نگه می‌دارد، با اندازه‌گیری‌هایی
 که تصمیم‌ها بر پایهٔ آن‌ها گرفته شد. دو کار دیگر از همان بررسی در
@@ -136,6 +136,67 @@ it.
 
 **Estimate.** Half a day to write, and the cross-platform testing is the real
 cost.
+
+---
+
+## What shipped since (2.44.0-chat-v69)
+
+Both remaining items are implemented. What is NOT done is the part this
+document was most insistent about, so it is stated first.
+
+**The tuning is still untested on real links.** Every threshold and every rung
+below was reasoned, not measured between two devices on different networks.
+This document said a simulated network "will produce a ladder that looks right
+and behaves wrong", and that caution has not been discharged — it has only been
+narrowed, because the ladder now adapts rather than sitting at one setting.
+
+**Item 2 — the adaptive ladder.** Three grades with hysteresis: a step down
+takes effect on the sample that sees it, a step up needs three consecutive
+healthy samples. `degradationPreference` follows `contentHint` as planned —
+`maintain-resolution` for a shared screen, `maintain-framerate` under strain,
+`balanced` when there is room. WebKit builds that accept the bitrate cap but
+not the hint fall back to the cap alone rather than losing both.
+
+The rungs as built, which are ceilings rather than operating points — the
+measured `availableOutgoingBitrate` takes precedence wherever there is one:
+
+| Grade | Condition | Video | Audio |
+|---|---|---|---|
+| good | RTT < 250ms, loss < 2%, est. > 1 Mbit/s | 4 Mbit/s | 128 kbit/s |
+| strained | RTT 250–500ms, loss 2–8%, est. 0.3–1 Mbit/s | 600 kbit/s | 48 kbit/s |
+| bad | RTT > 500ms, loss > 8%, est. < 300 kbit/s | 180 kbit/s | 24 kbit/s |
+
+One departure from the plan above, which said audio is "untouched" at every
+grade. Audio is capped too, but from below rather than above: it takes at most
+15% of the estimate against video's 75%, and never less than 24 kbit/s
+whatever the estimate says. The intent is the plan's — the call is the voice —
+but leaving audio genuinely uncapped meant the two streams could bid past the
+estimate between them on a link that was already failing, which is the moment
+the plan exists to survive.
+
+The capture request moved with it: 1280x720 with no frame rate named became
+1920x1080 at 30, as `ideal` rather than a requirement. Left unsaid, some
+engines settle on 15.
+
+**Item 4 — codec preferences and Opus.** The fmtp line now carries
+`useinbandfec=1` and `maxaveragebitrate=128000`, added to whatever the engine
+already wrote and never overwriting a value it chose for itself. `stereo=0` is
+deliberately NOT set: the plan asked for it, but an engine that has not
+mentioned stereo is already mono, and writing the key would be this code
+overruling an encoder about its own default for no gain.
+
+The codec ordering the plan describes was already in place; what is new is the
+fmtp tuning beside it.
+
+`tests/e2e/callcodec.mjs` takes the transform out of the source and exercises
+it on the shapes engines actually emit — a line already carrying parameters, a
+payload type with no fmtp line at all, a video section that must be left alone,
+and running twice, since both sides of a call apply it and a renegotiation
+applies it again. That is a unit test of a string transform. It is not the
+cross-platform test this document asks for, and it does not stand in for one.
+
+**Still outstanding:** macOS↔Android, iOS↔Windows and the rest of the pairs, on
+real links. Until then the risk the plan named for item 4 stands.
 
 ---
 

@@ -972,6 +972,10 @@ upDisconnected: 'اتصال قطع شد.',
 upNoDistributor: 'هیچ اپ توزیع‌کننده‌ای روی این گوشی نصب نیست. ntfy را از F-Droid یا Play نصب کنید و دوباره همین‌جا برگردید.',
 upNoEndpoint: 'توزیع‌کننده هنوز آدرسی نداده است. اتصال اینترنت آن اپ را بررسی کنید و دوباره تلاش کنید.',
 upFailed: 'اتصال به توزیع‌کننده ناموفق بود',
+pushRelayTooOld: 'این رله از اعلان پشتیبانی نمی‌کند. سرور را به نسخهٔ ۲.۴۴.۰ یا بالاتر به‌روز کنید.',
+pushRelayRefused: 'رله درخواست اعلان را رد کرد',
+pushNotARelay: 'این آدرس پاسخ رله نمی‌دهد. آدرس سرور را در تنظیمات چت بررسی کنید.',
+pushRelayUnreadable: 'پاسخ رله خوانا نبود',
 upPollDesc: 'اگر توزیع‌کننده ندارید: هر ۱۵ دقیقه یک بار سر بزن. کندتر است، باتری می‌برد و یک الگوی ترافیکی می‌سازد که قبلاً نبود.',
 upWhatIsNtfy: 'ntfy یک اپ کوچک و متن‌باز است که فقط یک کار می‌کند: یک اتصال باز نگه می‌دارد و وقتی چیزی رسید به برنامه خبر می‌دهد. محتوای پیام‌های شما را نمی‌بیند — رله چیزی جز «چیزی رسید» نمی‌فرستد.',
 upNtfyNoAccount: 'نصبش کافی است. نه حساب می‌خواهد، نه تنظیمات.',
@@ -2003,6 +2007,10 @@ upDisconnected: 'Disconnected.',
 upNoDistributor: 'No distributor app is installed on this phone. Install ntfy from F-Droid or Play, then come back here.',
 upNoEndpoint: 'The distributor has not handed out an address yet. Check that app can reach the internet and try again.',
 upFailed: 'Could not reach the distributor',
+pushRelayTooOld: 'This relay has no push support. Update the server to 2.44.0 or newer.',
+pushRelayRefused: 'The relay refused the push request',
+pushNotARelay: 'That address does not answer as a relay. Check the server address in Chat settings.',
+pushRelayUnreadable: 'The relay\'s answer could not be read',
 upPollDesc: 'If you will not install a distributor: look every fifteen minutes instead. It is slower, it costs battery, and it makes a traffic pattern where there was none.',
 upWhatIsNtfy: 'ntfy is a small open-source app that does one thing: it holds a connection open and tells this app when something arrives. It never sees your messages — the relay sends nothing but the fact that something came.',
 upNtfyNoAccount: 'Installing it is enough. No account, nothing to configure.',
@@ -5296,7 +5304,7 @@ try {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
-  }).then((r) => r.json());
+  }).then((r) => readRelayJson(r, 'challenge'));
   if (!challenge?.ok) throw new Error(`relay refused a push challenge: ${challenge?.reason || 'unknown'}`);
   proof = { challengeId: challenge.challengeId, nonce: await identity.solve(challenge.cipher) };
 } catch (error) {
@@ -5518,6 +5526,44 @@ window.handlePushTtlChange = async function handlePushTtlChange() {
 
 /* Push has to go to the relay the chat actually uses, which is not always this
    page's origin — a desktop build serves itself from tauri://. */
+/* A relay answer, read as JSON only once it is established that it IS JSON.
+ *
+ * Every push call used to be `.then((r) => r.json())` with nothing between.
+ * When the relay answered with something that was not JSON, the parser was
+ * the first thing to notice, and what reached the user was
+ * "SyntaxError: Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON".
+ *
+ * That is Express's own 404 page, which is what a relay older than 2.44.0
+ * returns for /push/challenge because the route did not exist yet -- and
+ * "upgrade the relay" is not a thing anybody could read out of that sentence.
+ * The same message came back for a reverse proxy that does not forward
+ * /push/, and for an address that is not a relay at all: three different
+ * problems, one meaningless error, and no way to tell them apart.
+ *
+ * The status and the content type are both known before anything is parsed,
+ * so the answer names what actually happened. */
+async function readRelayJson(response, what) {
+  const type = String(response.headers.get('content-type') || '');
+  const isJson = /\bjson\b/i.test(type);
+
+  if (response.status === 404 || response.status === 405) {
+    throw new Error(getTranslatedText('pushRelayTooOld'));
+  }
+  if (!response.ok && !isJson) {
+    throw new Error(`${getTranslatedText('pushRelayRefused')} (${response.status})`);
+  }
+  if (!isJson) {
+    throw new Error(getTranslatedText('pushNotARelay'));
+  }
+  try {
+    return await response.json();
+  } catch (_error) {
+    /* JSON by its own account and not parseable: a proxy or a captive portal
+       writing its own body over the answer. */
+    throw new Error(`${getTranslatedText('pushRelayUnreadable')} (${what})`);
+  }
+}
+
 function chatRelayOriginForPush() {
   return window.PoorijaChat?.serverOrigin?.() || window.location.origin;
 }
@@ -5627,7 +5673,7 @@ const challenge = await fetch(new URL('/push/challenge', origin), {
 method: 'POST',
 headers: { 'content-type': 'application/json' },
 body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
-}).then((r) => r.json());
+}).then((r) => readRelayJson(r, 'challenge'));
 if (!challenge?.ok) throw new Error(challenge?.reason || 'the relay refused a challenge');
 const answer = await fetch(new URL('/push/subscribe', origin), {
 method: 'POST',
@@ -5638,7 +5684,7 @@ challengeId: challenge.challengeId,
 nonce: await identity.solve(challenge.cipher),
 subscription: { type: 'unifiedpush', endpoint, lang: state.language },
 }),
-}).then((r) => r.json());
+}).then((r) => readRelayJson(r, 'subscribe'));
 if (!answer?.ok) throw new Error(answer?.reason || 'the relay refused the subscription');
 }
 
@@ -5669,7 +5715,7 @@ const challenge = await fetch(new URL('/push/challenge', origin), {
 method: 'POST',
 headers: { 'content-type': 'application/json' },
 body: JSON.stringify({ fingerprint: identity.fingerprint, publicKeyData: identity.publicKeyData }),
-}).then((r) => r.json());
+}).then((r) => readRelayJson(r, 'challenge'));
 if (!challenge?.ok) throw new Error(challenge?.reason || 'the relay refused a challenge');
 const issued = await fetch(new URL('/push/poll-token', origin), {
 method: 'POST',
@@ -5679,7 +5725,7 @@ fingerprint: identity.fingerprint,
 challengeId: challenge.challengeId,
 nonce: await identity.solve(challenge.cipher),
 }),
-}).then((r) => r.json());
+}).then((r) => readRelayJson(r, 'poll-token'));
 if (!issued?.ok) throw new Error(issued?.reason || 'the relay refused a poll token');
 await api.invoke('unifiedpush_poll_enable', { origin: String(origin).replace(/\/$/, ''), token: issued.token });
 }

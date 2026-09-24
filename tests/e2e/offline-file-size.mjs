@@ -44,6 +44,17 @@ const SIGNAL_PORT = 9711;
 const PRESENCE_PORT = 9712;
 const PASSWORD = 'offline-size-suite-2026';
 
+/* Which relay to exercise. Two of them live in this repository: the one the
+   Dockerfile builds and deploys (scripts/server.js) and the self-contained
+   distribution (standalone-relay/server.js). They drifted, and the drift was
+   invisible because every suite only ever spawned the second one -- so fixes
+   were proven against a program nobody runs. RELAY_SERVER points this at
+   either, and tools/check-relay-parity.cjs refuses a release where the two
+   disagree about which routes they answer. */
+const RELAY_SERVER = process.env.RELAY_SERVER
+  ? join(ROOT, process.env.RELAY_SERVER)
+  : join(ROOT, 'standalone-relay', 'server.js');
+
 let failures = 0;
 let checks = 0;
 function ok(condition, label) {
@@ -60,7 +71,7 @@ if (libWasMissing) {
   copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), join(libDir, 'push-wording.js'));
 }
 
-const relay = spawn(process.execPath, [join(ROOT, 'standalone-relay', 'server.js')], {
+const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,

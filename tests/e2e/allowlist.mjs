@@ -31,6 +31,11 @@ const PORT = 9399;
 const BASE = `http://127.0.0.1:${PORT}`;
 const PASSWORD = 'allowlist-suite-password-2026';
 
+/* Which relay to exercise -- see the note in relaythroughput.mjs. */
+const RELAY_SERVER = process.env.RELAY_SERVER
+  ? join(ROOT, process.env.RELAY_SERVER)
+  : join(ROOT, 'standalone-relay', 'server.js');
+
 let failures = 0;
 let checks = 0;
 function ok(condition, label) {
@@ -67,7 +72,7 @@ if (libWasMissing) {
   copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), libFile);
 }
 
-const relay = spawn(process.execPath, [join(ROOT, 'standalone-relay', 'server.js')], {
+const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,

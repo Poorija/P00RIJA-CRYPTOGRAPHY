@@ -119,6 +119,17 @@ if ! node tools/check-assets.cjs > "$LOGS/00-check-assets.log" 2>&1; then
 fi
 good "$(grep -m1 'every script' "$LOGS/00-check-assets.log" | sed 's/^ *//')"
 
+# Two relays live here and only one of them is deployed. Everything added
+# after 2.26.95 went into the other, and no suite noticed because every suite
+# spawned the other one too -- so a release shipped a phone an Express 404
+# page where it expected JSON. A route in one and not in the other stops this.
+if ! node tools/check-relay-parity.cjs > "$LOGS/00-check-relay-parity.log" 2>&1; then
+    bad "the two relays do not answer the same calls — nothing was built"
+    tail -16 "$LOGS/00-check-relay-parity.log" | sed 's/^/      /'
+    exit 1
+fi
+good "$(grep -m1 'both relays' "$LOGS/00-check-relay-parity.log" | sed 's/^ *//')"
+
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     warn "the working tree has uncommitted changes — they WILL go into these packages"
 fi

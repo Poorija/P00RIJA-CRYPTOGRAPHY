@@ -66,6 +66,11 @@ const PRESENCE_PORT = 9412;
 const SINK_PORT = 9413;
 const PASSWORD = 'unifiedpush-suite-password-2026';
 
+/* Which relay to exercise -- see the note in relaythroughput.mjs. */
+const RELAY_SERVER = process.env.RELAY_SERVER
+  ? join(ROOT, process.env.RELAY_SERVER)
+  : join(ROOT, 'standalone-relay', 'server.js');
+
 let failures = 0;
 let checks = 0;
 function ok(condition, label) {
@@ -98,7 +103,7 @@ if (libWasMissing) {
   copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), libFile);
 }
 
-const relay = spawn(process.execPath, [join(ROOT, 'standalone-relay', 'server.js')], {
+const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,
@@ -198,7 +203,13 @@ socket.send(JSON.stringify({
   type: 'relay',
   toFingerprint: recipient.fingerprint,
   persist: true,
-  payload: { type: 'chat', sealed: 'this is opaque to the relay' },
+  /* The envelope the app actually sends: an 'offline-chat' whose `notify`
+     says whether it is worth waking somebody for. A bare `type: 'chat'` is not
+     a payload any client produces, and the deployed relay does not treat it as
+     one -- it wakes a device for a curated list of types, or for whatever an
+     envelope asks to be woken for, rather than for anything at all. Testing
+     with a shape the app never sends measured a rule nobody runs. */
+  payload: { type: 'offline-chat', notify: true, sealed: 'this is opaque to the relay' },
   tag: 'suite-1',
 }));
 
@@ -232,7 +243,7 @@ if (delivered.length > 0) {
    is an unauthenticated SSRF: aim it at the cloud metadata address and the
    relay knocks on it from inside the perimeter. These run against a second
    relay started WITHOUT the development escape hatch. */
-const guarded = spawn(process.execPath, [join(ROOT, 'standalone-relay', 'server.js')], {
+const guarded = spawn(process.execPath, [RELAY_SERVER], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,

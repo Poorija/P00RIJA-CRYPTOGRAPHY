@@ -151,6 +151,85 @@ networks, timed — and it decides whether the rest is worth two days.
 
 ---
 
+## The relay path, which none of the above measured
+
+هر عددی که تا این‌جا آمد از مسیر P2P است. مسیر رله — همان که وقتی گیرنده آفلاین
+است یا NAT اجازهٔ اتصال مستقیم نمی‌دهد استفاده می‌شود — جداگانه اندازه گرفته شد
+و دو نقص داشت که هیچ‌کدام در جدول‌های بالا دیده نمی‌شدند.
+
+Everything above is the peer-to-peer path. The relay path — the one used when
+the recipient is absent, or when NAT will not allow a direct connection — was
+measured separately and had two defects, neither of which any table above would
+have shown. The conclusion "the app is not the part that is slow" was true of
+the data channel and false of the relay.
+
+### 1. The retention sweep was quadratic in the mailbox
+
+`sweepRetention()` runs every time mail lands, and it derived each waiting
+envelope's size by stringifying its payload. A file arrives as one envelope per
+chunk into one mailbox, so chunk N re-measured the N-1 already there.
+
+480 chunks of 64 KB — a 30 MB file — into one mailbox, per-chunk round trip:
+
+| | first 60 chunks | last 60 chunks | spread | overall |
+|---|---|---|---|---|
+| before | 1.80 ms | 9.77 ms | 5.4x | 11.7 MB/s |
+| after | 1.00 ms | 0.77 ms | 0.8x | 73.4 MB/s |
+
+The shape is the diagnosis: a fixed per-message cost draws a flat line, and
+this one climbed linearly, which is what work proportional to the mailbox looks
+like. Summed, a straight line is a parabola.
+
+At 200 MB the same code took **143 seconds**; it takes **3.1** now. That is
+also the answer to "the app disconnects from the relay during a heavy send":
+an idle bystander never dropped even against the old code, worst response gap
+433 ms. What dropped was the transfer's own watchdog, `TRANSFER_STALL_TIMEOUT_MS`
+at 60 seconds, against a transfer that needed 143.
+
+Two smaller costs on the same path: the store was written out pretty-printed,
+which only ever indented the braces around single-line base64 bodies, and it
+was rewritten on a fixed 300 ms debounce however large it had grown. The wait
+now scales with how long the previous write took.
+
+### 2. Delivery deadlocked at the window
+
+Worse than slow, and invisible for the same reason. The relay hands a returning
+recipient a window of envelopes and tops it up as they are acknowledged. The
+top-up sliced the front of the queue instead of tracking what had been sent, so
+it re-sent what the recipient already held; and it ran only on an ACK that
+removed something. The app acknowledges every envelope it handles, duplicates
+included, and an ACK for an envelope already gone changed nothing — so once the
+recipient had acknowledged everything it held, neither side had a reason to
+speak next.
+
+3200 chunks queued for an absent recipient, acknowledged one at a time as the
+app does:
+
+| | delivered | duplicate traffic |
+|---|---|---|
+| before | 53 of 3200, then silence | 4.4x |
+| after | 3200 of 3200 | 1.0x |
+
+A conversation rarely has fifty messages waiting, so this only ever showed on
+files — which advanced a few megabytes per reconnection and read as a slow
+network.
+
+### What this says about the P2P conclusions above
+
+Nothing. They were measured on the data channel and they still hold: the
+transport is the wall there, chunk size is inside the noise, and several
+channels share one congestion window. What is now recorded is that the relay
+path has its own economics and had never been measured, which is the gap this
+document was one reader away from hiding.
+
+Both are regression-tested rather than left as one-off scripts, because unlike
+the engine measurements above these assert this app's own behaviour:
+`tests/e2e/relaythroughput.mjs` asserts the shape of the curve rather than any
+throughput number, and `tests/e2e/maildelivery.mjs` asserts that everything
+queued arrives exactly once. Both fail against the previous code.
+
+---
+
 ## Reproducing
 
 Both experiments were one-off scripts rather than suites, because they measure
