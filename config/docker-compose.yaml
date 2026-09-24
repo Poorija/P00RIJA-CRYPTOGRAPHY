@@ -28,7 +28,7 @@ services:
     container_name: Poorija-Cryptography_ChatSignal
     environment:
       CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
-      CHAT_TURN_USERNAME: ${TURN_USER:-poorija}
+      CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
       CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
       CHAT_PUBLIC_RELAY_ORIGIN: ${CHAT_PUBLIC_RELAY_ORIGIN:-}
       CHAT_PUBLIC_PRESENCE_URL: ${CHAT_PUBLIC_PRESENCE_URL:-}
@@ -66,7 +66,13 @@ services:
       - --server-name=${DOMAIN:-localhost}
       - --cert=/etc/coturn/certs/cert.pem
       - --pkey=/etc/coturn/certs/key.pem
-      - --user=${TURN_USER:-poorija}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      # Both halves required, and for the same reason. The password already
+      # was; the username fell back to one deployment's own name, so a relay
+      # nobody had configured TURN on started coturn under a stranger's
+      # username and handed that name to every client through /turn-config.
+      # Failing here with a readable message beats a credential pair that is
+      # half somebody else's.
+      - --user=${TURN_USER:?Set TURN_USER in .env}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
       - --lt-cred-mech
       - --fingerprint
       - --no-cli

@@ -12,7 +12,7 @@ services:
       CHAT_TRUSTED_PROXIES: ${CHAT_TRUSTED_PROXIES:-0}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       CHAT_TURN_URL: ${CHAT_TURN_URL:-turns:${DOMAIN:-localhost}:5349?transport=tcp}
-      CHAT_TURN_USERNAME: ${TURN_USER:-poorija}
+      CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
       CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -39,7 +39,8 @@ services:
       - --server-name=${DOMAIN:-localhost}
       - --cert=/etc/coturn/certs/cert.pem
       - --pkey=/etc/coturn/certs/key.pem
-      - --user=${TURN_USER:-poorija}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      # Both halves required — see the note in config/docker-compose.yaml.
+      - --user=${TURN_USER:?Set TURN_USER in .env}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
       - --lt-cred-mech
       - --fingerprint
       - --no-cli
