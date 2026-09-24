@@ -1,7 +1,7 @@
 {
   "name": "app",
-  "version": "2.44.0",
-  "buildTag": "chat-v69",
+  "version": "2.44.1",
+  "buildTag": "chat-v70",
   "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
   "main": "scripts/server.js",
   "directories": {
