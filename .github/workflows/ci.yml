@@ -163,6 +163,7 @@ jobs:
           npm run test:notifyprivacy
           npm run test:pusherrors
           npm run test:callcodec
+          npm run test:callladder
 
           # Every relay suite against BOTH relays. The deployed one and the
           # distribution are different programs, and running the suites

@@ -45,11 +45,19 @@ function extract(name) {
   throw new Error(`${name} is not closed`);
 }
 
-const scope = {};
-// eslint-disable-next-line no-new-func
-new Function('scope', `${extract('tuneOpus')}\n${extract('preferCallCodecs')}\n`
-  + 'scope.preferCallCodecs = preferCallCodecs;')(scope);
-const { preferCallCodecs } = scope;
+/* The transform reads the codec order the device probe settled on. Supplying
+   it here rather than letting it fall back means the ordering under test is
+   the one being asserted, not whatever the fallback happens to be. */
+function transformWith(videoCodecOrder) {
+  const scope = {};
+  // eslint-disable-next-line no-new-func
+  new Function('scope', 'chatState', `${extract('tuneOpus')}\n${extract('preferCallCodecs')}\n`
+    + 'scope.preferCallCodecs = preferCallCodecs;')(scope, { videoCodecOrder });
+  return scope.preferCallCodecs;
+}
+
+/* What a device with no hardware AV1 gets, which is nearly all of them. */
+const preferCallCodecs = transformWith(['VP9', 'H264', 'VP8']);
 
 let failures = 0;
 let checks = 0;
@@ -95,6 +103,16 @@ const video = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 98\r\n'
 ok(fmtp(video, 98) === 'a=fmtp:98 profile-level-id=42e01f', 'a video section is left as it was');
 ok(preferCallCodecs(video).includes('m=video 9 UDP/TLS/RTP/SAVPF 98 96'),
   'though its codec order still moves H264 in front');
+
+/* The order is the device's, not a literal. Both shapes have to work. */
+const videoOffer = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 98 100 102\r\n'
+  + 'a=rtpmap:96 VP8/90000\r\na=rtpmap:98 H264/90000\r\n'
+  + 'a=rtpmap:100 VP9/90000\r\na=rtpmap:102 AV1/90000\r\n';
+ok(preferCallCodecs(videoOffer).includes('m=video 9 UDP/TLS/RTP/SAVPF 100 98 96 102'),
+  'without hardware AV1 the order is VP9, H264, VP8 — and AV1 is still offered, last');
+ok(transformWith(['AV1', 'VP9', 'H264', 'VP8'])(videoOffer)
+  .includes('m=video 9 UDP/TLS/RTP/SAVPF 102 100 98 96'),
+  'with hardware AV1 it goes first');
 
 /* Both sides of a call run this, and a renegotiation runs it again. */
 ok(preferCallCodecs(preferCallCodecs(chromeLike)) === preferCallCodecs(chromeLike),

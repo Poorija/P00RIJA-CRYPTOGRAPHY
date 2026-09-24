@@ -17285,8 +17285,37 @@ html body #chatIncomingCallModal .chat-incoming-reply {
 html body #chatIncomingCallModal .chat-incoming-reply:hover { background: rgba(255, 255, 255, 0.16); }
 
 @media (max-width: 640px) {
-  html body #chatFloatingCall:is(#chatFloatingCall) .chat-call-control { width: 3rem !important; height: 3rem !important; min-height: 0 !important; font-size: 0.95rem !important; }
-  html body #chatFloatingCall:is(#chatFloatingCall) .chat-call-control.chat-call-control-danger { width: 3.5rem !important; height: 3rem !important; min-height: 0 !important; }
+  /* Sized from the width there actually is, not from a breakpoint guessing at
+     it.
+     Seven controls at a fixed 3rem, plus the wider hang-up, the six gaps, the
+     row's own padding and the dock's, come to about 395px. A 375px surface has
+     343px of it, so the row overflowed — and with justify-content: center that
+     overflow goes out BOTH sides, which is why the hang-up button was cut off
+     the edge. It was marginal everywhere and only showed where the viewport
+     was narrowest: the same build's PWA sat on a 393px or 412px viewport and
+     scraped through, and the native webview reports slightly less and did not.
+     One number chosen for one phone is what produced that, so this solves for
+     the width instead: 100vw less everything that is not a button, divided by
+     the seven. The floor keeps them tappable on a very narrow phone and the
+     ceiling stops them growing past the size the wider layout already uses. */
+  html body #chatFloatingCall:is(#chatFloatingCall) .chat-call-control {
+    /* The floor is 2rem rather than lower: below that a circle stops being a
+       reliable touch target, and 320px is the narrowest surface anything still
+       ships on. At exactly 320 the row uses every pixel it has, which is the
+       correct answer for a screen that small. */
+    --call-control-size: clamp(2rem, (100vw - 92px) / 7, 3rem);
+    width: var(--call-control-size) !important;
+    height: var(--call-control-size) !important;
+    min-height: 0 !important;
+    font-size: 0.95rem !important;
+  }
+  html body #chatFloatingCall:is(#chatFloatingCall) .chat-call-control.chat-call-control-danger {
+    /* Wider than the rest so the one button nobody wants to miss is the
+       easiest to hit; the extra is inside the budget above. */
+    width: calc(var(--call-control-size) + 0.5rem) !important;
+    height: var(--call-control-size) !important;
+    min-height: 0 !important;
+  }
   html body #chatFloatingCall:is(#chatFloatingCall) .chat-call-more-sheet { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 

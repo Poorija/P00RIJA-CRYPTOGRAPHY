@@ -513,6 +513,9 @@ chatState.prefs.autoDownloadLimitBytes = Number.isFinite(limit) && limit >= 0
 ? limit
 : DEFAULT_AUTO_DOWNLOAD_LIMIT_BYTES;
 chatState.prefs.relayOnboardAsked = Boolean(savedPrefs.relayOnboardAsked);
+/* Clamped on the way in: a stored value outside the ladder's own steps would
+   start a call at a size that does not exist. */
+chatState.prefs.callPixelStep = Math.max(0, Math.min(3, Number(savedPrefs.callPixelStep) || 0));
 }
 /* Last step of every unlock: whatever the chat received while the vault was
    shut is sitting in the store cache marked dirty — land it in localStorage

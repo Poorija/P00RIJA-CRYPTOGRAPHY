@@ -262,6 +262,10 @@ chatState.incomingCallTimer = null;
 }
 async function requestCallMedia(mode, includeAudio = true) {
 const wantsVideo = mode === 'video';
+/* Started here, which is the earliest moment a call is known to be happening
+   and several round trips before an SDP exists. The camera prompt alone
+   usually outlasts the probe. */
+if (wantsVideo) primeVideoCodecOrder();
 const audioConstraints = includeAudio
 ? {
 echoCancellation: true,
@@ -283,7 +287,13 @@ video: wantsVideo
 facingMode: { ideal: chatState.callFacingMode || 'user' },
 width: { ideal: 1920 },
 height: { ideal: 1080 },
-frameRate: { ideal: 30 },
+/* A floor as well as a target. With `ideal` alone a camera is free to drop
+   to 15 or lower whenever it feels like it -- most often in dim light, where
+   a longer exposure per frame is how it brightens the picture -- and no
+   encoder setting can put back frames that were never captured. `min` makes
+   that a constraint the camera has to satisfy or refuse, and the refusal is
+   caught below by asking again for anything it can do. */
+frameRate: { min: 24, ideal: 30 },
 }
 : false,
 };
@@ -1121,15 +1131,23 @@ function renderCallQualityCard() {
         ${stat(t('لرزش', 'jitter'), reading.jitter === null ? '—' : `${reading.jitter} ms`)}
         ${stat(t('دریافت‌شده', 'received'),
           window.PoorijaApp?.formatBytes?.(reading.bytes) ?? `${reading.bytes} B`)}
+        ${reading.recvSize ? stat(t('تصویر', 'picture'), reading.recvSize) : ''}
+        ${reading.recvFps === null || reading.recvFps === undefined
+          ? '' : stat(t('فریم', 'frame rate'), `${reading.recvFps}/s`)}
+        ${reading.recvCodec ? stat(t('کدک', 'codec'), reading.recvCodec) : ''}
       </div>
     </article>`;
   });
   /* The outbound direction, in the same terms: what the other side receives
    * from this device. Null when the browser does not report it. */
-  const mineWorst = readings
-    .map((reading) => reading.mine)
-    .filter(Boolean)
-    .sort((a, b) => (b.rtt ?? 0) - (a.rtt ?? 0))[0];
+  /* Two things off the same worst leg: `mine` is how the far end says our
+     stream arrived, and the leg itself carries what our encoder did with it.
+     They describe one direction, so they belong in one row. */
+  const worstOutLeg = readings
+    .filter((reading) => reading.mine)
+    .sort((a, b) => (b.mine.rtt ?? 0) - (a.mine.rtt ?? 0))[0];
+  const mineWorst = worstOutLeg?.mine;
+  const outgoing = worstOutLeg || {};
   if (mineWorst) {
     const mineLevel = callQualityLevel({ rtt: mineWorst.rtt, lossPercent: mineWorst.lossPercent });
     const stat = (label, value) =>
@@ -1143,6 +1161,23 @@ function renderCallQualityCard() {
         ${stat(t('رفت‌وبرگشت', 'round trip'), mineWorst.rtt === null ? '—' : `${mineWorst.rtt} ms`)}
         ${stat(t('اتلاف بسته', 'packet loss'), `${mineWorst.lossPercent}%`)}
         ${stat(t('لرزش', 'jitter'), mineWorst.jitter === null ? '—' : `${mineWorst.jitter} ms`)}
+        ${outgoing.sentSize ? stat(t('تصویر', 'picture'), outgoing.sentSize) : ''}
+        ${outgoing.sentFps === null || outgoing.sentFps === undefined
+          ? '' : stat(t('فریم', 'frame rate'), `${outgoing.sentFps}/s`)}
+        ${outgoing.sentCodec ? stat(t('کدک', 'codec'), outgoing.sentCodec) : ''}
+        ${outgoing.limitReason
+          ? stat(t('محدودشده توسط', 'limited by'), outgoing.limitReason === 'cpu'
+            ? t('توان دستگاه', 'this device')
+            : outgoing.limitReason === 'bandwidth'
+              ? t('پهنای باند', 'bandwidth')
+              : outgoing.limitReason)
+          : ''}
+        ${/* What the app decided to do about it, next to the reason. Seeing
+              "limited by this device" and "picture 540p" together is the whole
+              story in two lines: it could not manage more, so it was given
+              fewer pixels and kept the bitrate. */''}
+        ${outgoing.pixelBudget && outgoing.pixelBudget > 1
+          ? stat(t('کاهش پیکسل', 'pixels reduced'), `÷${outgoing.pixelBudget}`) : ''}
       </div>
     </article>`);
   }
@@ -1321,6 +1356,133 @@ endCurrentCall({ closePeer: false });
 }
 });
 }
+/* Which video codec this device can actually afford.
+ *
+ * Ranked by how much picture they carry per bit, AV1 beats VP9 by roughly a
+ * third and VP9 beats VP8 and the constrained-baseline H264 that WebRTC
+ * negotiates by roughly a third again. Preferring the newest one outright
+ * would be the obvious move and the wrong one: AV1 encode is software on
+ * nearly every phone shipping today, and software AV1 at 1080p30 cannot keep
+ * up -- which produces exactly the dropped frames on movement that a better
+ * codec was supposed to cure. A sharper codec the device cannot run is worse
+ * than a coarser one it can.
+ *
+ * mediaCapabilities answers the question directly. `powerEfficient` is the
+ * browser saying a hardware encoder is behind this, and `smooth` that it can
+ * hold the frame rate. A codec gets to go first only when both are true.
+ *
+ * Probed once and remembered: it describes the hardware, which does not
+ * change between calls.
+ */
+let videoCodecOrderPromise = null;
+
+/* Kicked off before the first offer is built, so the answers are in chatState
+   by the time an SDP needs them. Safe to call repeatedly. */
+function primeVideoCodecOrder() {
+  videoCodecOrder().then((order) => { chatState.videoCodecOrder = order; }).catch(() => {});
+  videoPixelCeiling().then((step) => { chatState.videoPixelCeiling = step; }).catch(() => {});
+}
+
+/* The most pixels this device can encode without falling behind.
+ *
+ * Starting every call at 1080p and waiting to be told otherwise means the
+ * first seconds are always the worst ones: the encoder is asked for more than
+ * it can manage, the frames drop, and only then does the ladder walk down. A
+ * phone that has never once managed 1080p30 pays that toll on every call.
+ *
+ * The same API that ranks the codecs answers this. `smooth` is the browser
+ * saying it can hold the frame rate at that size and `powerEfficient` that
+ * hardware is doing the work; a size counts only when both are true. The
+ * answer becomes the starting pixel step, so a device that can do 720p starts
+ * at 720p and climbs if it turns out to have room, rather than starting at
+ * 1080p and falling.
+ *
+ * It is a ceiling on ambition, not a promise -- the ladder still reacts to
+ * what actually happens, because a probe cannot know how warm the phone is or
+ * what else it is doing.
+ */
+let videoPixelCeilingPromise = null;
+
+function videoPixelCeiling() {
+  if (videoPixelCeilingPromise) return videoPixelCeilingPromise;
+  videoPixelCeilingPromise = (async () => {
+    const api = navigator.mediaCapabilities;
+    /* No answer available is not a reason to be timid: without the API this
+       behaves as it did before, starting at full size and reacting. */
+    if (!api?.encodingInfo) return 0;
+
+    const codecs = await videoCodecOrder().catch(() => ['VP9']);
+    const contentType = `video/${codecs[0] || 'VP9'}`;
+
+    /* Same order as SCALE_STEPS in the ladder: index 0 is full size. */
+    const sizes = [
+      [1920, 1080, 8_000_000],
+      [1280, 720, 4_000_000],
+      [960, 540, 2_500_000],
+      [640, 360, 1_200_000],
+    ];
+    for (let step = 0; step < sizes.length; step += 1) {
+      const [width, height, bitrate] = sizes[step];
+      try {
+        const info = await api.encodingInfo({
+          type: 'webrtc',
+          video: { contentType, width, height, bitrate, framerate: 30 },
+        });
+        if (info?.supported && info?.smooth && info?.powerEfficient) return step;
+      } catch (_error) {
+        /* An engine that does not understand the question tells us nothing
+           about the device, so stop asking and start optimistic. */
+        return 0;
+      }
+    }
+    /* Nothing came back affordable. The smallest step is still better than
+       demanding the largest and discovering the same thing the hard way. */
+    return sizes.length - 1;
+  })();
+  return videoPixelCeilingPromise;
+}
+
+function videoCodecOrder() {
+  if (videoCodecOrderPromise) return videoCodecOrderPromise;
+  videoCodecOrderPromise = (async () => {
+    /* The order to fall back to. VP9 first because it is the best of the three
+       that have been hardware-encoded for years; H264 second because it is the
+       one every phone has in silicon; VP8 last. */
+    const fallback = ['VP9', 'H264', 'VP8'];
+    const api = navigator.mediaCapabilities;
+    if (!api?.encodingInfo) return fallback;
+
+    const affordable = async (contentType) => {
+      try {
+        const info = await api.encodingInfo({
+          type: 'webrtc',
+          video: {
+            contentType,
+            /* The shape a call actually asks for, not a token frame: a codec
+               can be power-efficient at 360p and software at 1080p. */
+            width: 1920,
+            height: 1080,
+            bitrate: 6_000_000,
+            framerate: 30,
+          },
+        });
+        return Boolean(info?.supported && info?.smooth && info?.powerEfficient);
+      } catch (_error) {
+        /* An engine that does not know 'webrtc' here throws. That is not a no
+           to the codec, only to the question, so the fallback stands. */
+        return false;
+      }
+    };
+
+    const order = [];
+    if (await affordable('video/AV1')) order.push('AV1');
+    if (await affordable('video/VP9')) order.push('VP9');
+    for (const name of fallback) if (!order.includes(name)) order.push(name);
+    return order;
+  })();
+  return videoCodecOrderPromise;
+}
+
 /* Ask Opus for the two things that decide how a call holds up.
  *
  * useinbandfec=1 lets the encoder carry a coarse copy of the previous frame
@@ -1371,7 +1533,21 @@ function preferCallCodecs(sdp) {
     const lines = section.split('\r\n');
     const media = /^m=(audio|video) /.exec(lines[0]);
     if (!media) return section;
-    const preferred = media[1] === 'audio' ? ['opus'] : ['H264', 'VP8'];
+    /* The order videoCodecOrder() worked out for this device.
+     *
+     * Read from a cache rather than awaited: PeerJS hands this hook a string
+     * and wants one back, so there is nowhere to wait. The probe is started
+     * when a call is being set up, which is several round trips before an SDP
+     * exists, and until it answers this uses the same VP9-first order it
+     * would have used anyway -- so the worst case of losing that race is the
+     * previous behaviour, not a broken one.
+     *
+     * Reordering, never excluding: every payload type the far end offered is
+     * still in the list, so a device missing the first choice negotiates the
+     * next and a call never ends up with no codec in common. */
+    const preferred = media[1] === 'audio'
+      ? ['opus']
+      : (chatState.videoCodecOrder || ['VP9', 'H264', 'VP8']);
     const codecs = new Map();
     lines.forEach((line) => {
       const match = /^a=rtpmap:(\d+) ([^/]+)/.exec(line);
@@ -1412,7 +1588,28 @@ function callIntervalLoss(pc, stats) {
 async function adaptCallSenders(pc, reading) {
   if (!pc?.getSenders || pc.signalingState === 'closed' || !reading) return;
   let state = callAdaptationState.get(pc);
-  if (!state) { state = { level: 2, healthy: 0, busy: false, applied: new WeakMap() }; callAdaptationState.set(pc, state); }
+  if (!state) {
+    /* Where to begin, rather than beginning at the ceiling and falling.
+     *
+     * Two things are known before the first frame is encoded. The device was
+     * asked what it can manage (videoPixelCeiling), and the last call that
+     * reached a steady state left its answer behind. Starting from the more
+     * cautious of the two, minus one step so there is somewhere to climb,
+     * replaces the opening seconds of every call -- which used to be spent
+     * asking for 1080p, failing, and walking down -- with a setting that
+     * probably holds and a ladder that probes upward from it.
+     *
+     * Cautious, not fixed: everything below still reacts to what actually
+     * happens, because no probe knows how warm the phone is or what else it
+     * is doing. */
+    const probed = Number(chatState.videoPixelCeiling || 0);
+    const remembered = Number(chatState.prefs?.callPixelStep ?? 0);
+    const start = Math.max(0, Math.min(3, Math.max(probed, remembered) - 1));
+    /* `scale` is the pixel budget and `level` the bit budget. They answer to
+       different things -- see the note above the CPU branch below. */
+    state = { level: 2, scale: start, healthy: 0, easing: 0, steady: 0, busy: false, applied: new WeakMap() };
+    callAdaptationState.set(pc, state);
+  }
   if (state.busy) return;
   const rtt = reading.mine?.rtt ?? reading.rtt;
   const loss = reading.outboundLoss;
@@ -1422,10 +1619,62 @@ async function adaptCallSenders(pc, reading) {
   const bad = (rtt != null && rtt >= 500) || (loss != null && loss >= 8) || (bandwidth != null && bandwidth < 300000);
   const strained = (rtt != null && rtt >= 250) || (loss != null && loss >= 2) || (bandwidth != null && bandwidth < 1000000);
   const target = bad ? 0 : strained ? 1 : 2;
+
   if (target < state.level) { state.level = target; state.healthy = 0; }
   else if (target > state.level) {
     if (++state.healthy >= 3) { state.level++; state.healthy = 0; }
   } else state.healthy = 0;
+
+  /* A struggling encoder is given fewer PIXELS, not fewer bits.
+   *
+   * Lowering the bitrate was the wrong remedy, and the report that followed
+   * said so: both limits were being seen, one after the other. Fewer bits do
+   * nothing for an encoder that cannot keep up -- it still has to get through
+   * 1920x1080 thirty times a second, and the cost of that is pixels. Worse,
+   * the rung it dropped to capped video at 600 kbit/s, so a link that could
+   * carry three megabits had most of it thrown away too; three healthy samples
+   * later it climbed back, the encoder failed again, and that oscillation IS
+   * the instability.
+   *
+   * So the budgets are separate. Bits answer to the link, through its own
+   * estimate, which is what the estimate is for. Pixels answer to the encoder:
+   * halve them and the work halves, while the bitrate stays whatever the link
+   * will carry -- and 540p with three megabits behind it looks far better than
+   * 1080p starved of them.
+   *
+   * Steps of 1, 1.5, 2 and 3 are 1080p, 720p, 540p and 360p out of a 1080p
+   * capture. Easing back up takes six clear samples rather than three: a
+   * device that has just been overloaded is usually still warm, and asking too
+   * early is how the oscillation starts again. */
+  const SCALE_STEPS = [1, 1.5, 2, 3];
+  if (reading.limitedByCpu) {
+    state.easing = 0;
+    state.steady = 0;
+    if (state.scale < SCALE_STEPS.length - 1) state.scale += 1;
+  } else if (state.scale > 0) {
+    state.steady += 1;
+    if (++state.easing >= 6) { state.scale -= 1; state.easing = 0; }
+  } else {
+    state.easing = 0;
+    state.steady += 1;
+  }
+
+  /* What held, written down for next time.
+   *
+   * A call between the same two devices over the same networks converges on
+   * the same answer every time, and rediscovering it from scratch is what
+   * makes the first stretch of every call the worst of it. Recorded only once
+   * a setting has actually held for a while -- a step it fell out of a moment
+   * later is not worth remembering -- and read back above as a starting point
+   * one step more ambitious, so an upgraded phone or network is not held to
+   * last month's answer. */
+  if (state.steady === 8) {
+    const settled = state.scale;
+    if (chatState.prefs && chatState.prefs.callPixelStep !== settled) {
+      chatState.prefs.callPixelStep = settled;
+      if (typeof saveChatPrefs === 'function') { try { saveChatPrefs(); } catch (_error) { /* not fatal */ } }
+    }
+  }
   state.busy = true;
   try {
     for (const sender of pc.getSenders()) {
@@ -1436,7 +1685,28 @@ async function adaptCallSenders(pc, reading) {
          is a ceiling and rarely the operating point: the estimate below takes
          precedence whenever there is one, so asking for more on a link that
          cannot carry it costs nothing. */
-      let bitrate = (video ? [180000, 600000, 4000000] : [24000, 48000, 128000])[state.level];
+      /* The top of the video ladder is 8 Mbit/s, not 4.
+       *
+       * A still 1080p30 picture needs about two; the same picture with the
+       * camera panning or the subject moving needs three or four times that
+       * for the same sharpness, because almost nothing can be predicted from
+       * the frame before. At a 4 Mbit/s ceiling that shortfall had to come out
+       * of something, and it came out as blocking and dropped frames the
+       * moment anything moved.
+       *
+       * It is a ceiling and rarely the operating point: the measured estimate
+       * below still decides, so a link that cannot carry 8 never sees it. */
+      /* The rungs are a ceiling on ambition, not a cap on what the link is
+         offering. They used to be both, and that was the other half of the
+         oscillation: a strained rung pinned video at 600 kbit/s even where the
+         estimate said three megabits were available, so a moment of high round
+         trip cost most of the picture and kept costing it until three clean
+         samples had gone by. The estimate is measured and the rung is a guess,
+         so where they disagree the measurement wins -- the rung's job is to
+         stop this asking for more than the situation deserves, not to refuse
+         what the link has already said it can carry. */
+      const ceilings = video ? [1500000, 3000000, 8000000] : [24000, 48000, 128000];
+      let bitrate = ceilings[state.level];
       if (bandwidth != null) {
         /* Video bids for most of the link. Audio never does -- it is small
            enough that a share this modest still reaches the top of its ladder
@@ -1448,13 +1718,55 @@ async function adaptCallSenders(pc, reading) {
           ? Math.max(64000, Math.floor(bandwidth * 0.75))
           : Math.max(24000, Math.floor(bandwidth * 0.15)));
       }
-      const preference = screen ? 'maintain-resolution' : state.level < 2 ? 'maintain-framerate' : 'balanced';
-      const signature = `${sender.track.id}:${bitrate}:${video ? preference : ''}`;
+      /* A moving picture keeps its frame rate; a shared screen keeps its
+         resolution.
+         'balanced' was the top rung's answer and it is the wrong one for a
+         camera: on a motion spike it lets the engine give up frames AND
+         detail at once, which is the stutter-plus-smear that gets reported.
+         A face that is momentarily a little softer is still a conversation; a
+         face that jumps is not. Text on a shared screen is the opposite --
+         legibility is the whole point, so that one keeps its pixels. */
+      const preference = screen ? 'maintain-resolution' : 'maintain-framerate';
+      /* The frame rate is asked for; the resolution is not pinned.
+       *
+       * Pinning both was a mistake worth naming. The bitrate ceiling is fixed,
+       * so on a motion spike SOMETHING has to give -- and with the resolution
+       * held at 1 and the frame rate held at 30, the only thing left to give
+       * was the quantiser, which is blocking, or whole frames. That is exactly
+       * the "severe frame and quality drop when the camera moves" this is
+       * fixing. Naming the frame rate still matters, because an engine left to
+       * guess settles on 15 and a call looks stilted with bandwidth to spare;
+       * letting the resolution flex is what gives the encoder somewhere to go. */
+      const topRung = video && !screen && state.level === 2;
+      const signature = `${sender.track.id}:${bitrate}:${video ? preference : ''}:${topRung}:${state.scale}`;
       if (state.applied.get(sender) === signature) continue;
       try {
         const params = sender.getParameters();
         if (!params.encodings?.length) continue; // Not negotiated yet; retry on the next sample.
-        params.encodings.forEach((encoding) => { encoding.maxBitrate = Math.floor(bitrate / params.encodings.length); });
+        params.encodings.forEach((encoding) => {
+          encoding.maxBitrate = Math.floor(bitrate / params.encodings.length);
+          if (!video) return;
+          /* Never pinned: this is the knob the encoder needs when the picture
+             moves, and holding it at 1 is what turned a motion spike into
+             dropped frames. degradationPreference above decides what it may
+             trade, which is the right place for that decision. */
+          /* The pixel budget. At step 0 nothing is set, so the engine may still
+             scale down on a motion spike -- that freedom is what keeps
+             movement smooth. Above step 0 it is held there, because the reason
+             for being above it is that the device could not manage more. */
+          if (SCALE_STEPS[state.scale] > 1) encoding.scaleResolutionDownBy = SCALE_STEPS[state.scale];
+          else delete encoding.scaleResolutionDownBy;
+          if (topRung) {
+            encoding.maxFramerate = 30;
+            /* Video is what a call is watching. Saying so lets the stack put it
+               ahead of whatever else this page is sending when the two compete
+               -- a file transfer in another conversation most of all, which
+               otherwise takes its share out of the picture. */
+            encoding.networkPriority = 'high';
+          } else {
+            delete encoding.maxFramerate;
+          }
+        });
         if (video) params.degradationPreference = preference;
         try { await sender.setParameters(params); }
         catch (error) {
@@ -1492,6 +1804,20 @@ async function readCallQuality(pc, key = '') {
      a call: the calls list now reports both directions, and on a metered
      connection the uploaded half is the one people are asked about. */
   let bytesOut = 0;
+  /* Set when the encoder says it is the bottleneck, and the lowest frame rate
+     any video sender is managing. Both are about this side's hardware rather
+     than the link. */
+  let limitedByCpu = false;
+  let limitReason = '';
+  let sentFps = null;
+  let sentSize = '';
+  let sentCodec = '';
+  /* The same three for the inbound picture: what is arriving, how fast, and
+     in what. A call that looks fine going out and poor coming in is a
+     different problem, and the panel could not tell them apart. */
+  let recvFps = null;
+  let recvSize = '';
+  let recvCodec = '';
   let kinds = new Set();
   /* The other direction, as the OTHER SIDE experiences it. `remote-inbound-rtp`
      is the remote receiver's own report about our outbound stream — its loss,
@@ -1521,6 +1847,19 @@ async function readCallQuality(pc, key = '') {
     }
     if (report.type === 'inbound-rtp' && !report.isRemote) {
       if (report.kind) kinds.add(report.kind);
+      if (report.kind === 'video') {
+        if (Number.isFinite(report.framesPerSecond)) {
+          recvFps = recvFps === null ? report.framesPerSecond : Math.min(recvFps, report.framesPerSecond);
+        }
+        if (Number.isFinite(report.frameWidth) && Number.isFinite(report.frameHeight)) {
+          recvSize = `${report.frameWidth}x${report.frameHeight}`;
+        }
+        if (report.codecId) {
+          const codec = stats.get(report.codecId);
+          const mime = String(codec?.mimeType || '');
+          if (mime) recvCodec = mime.replace(/^video\//i, '');
+        }
+      }
       lost += Number(report.packetsLost || 0);
       received += Number(report.packetsReceived || 0);
       bytes += Number(report.bytesReceived || 0);
@@ -1533,6 +1872,42 @@ async function readCallQuality(pc, key = '') {
     }
     if (report.type === 'outbound-rtp' && !report.isRemote) {
       bytesOut += Number(report.bytesSent || 0);
+      /* Why the encoder is sending less than it was asked for.
+       *
+       * The ladder decided on RTT, loss and the bandwidth estimate alone --
+       * all three of which describe the LINK. None of them moves when the
+       * encoder is the thing that cannot keep up: a phone that cannot encode
+       * 1080p in real time drops frames while the round trip stays low, the
+       * loss stays zero and the estimate stays high, so the ladder saw a
+       * flawless connection and went on demanding a resolution the device had
+       * already given up on. That is what "it lags on the high setting" is,
+       * and nothing here could see it.
+       *
+       * 'cpu' is the encoder saying so in as many words. Taken across every
+       * video sender, because one struggling stream is enough. */
+      if (report.kind === 'video') {
+        if (report.qualityLimitationReason === 'cpu') limitedByCpu = true;
+        /* Kept verbatim as well, because 'cpu' and 'bandwidth' have opposite
+           remedies and the panel is where somebody looks to tell them apart:
+           one says the device cannot encode this, the other says the link
+           cannot carry it. */
+        if (report.qualityLimitationReason && report.qualityLimitationReason !== 'none') {
+          limitReason = report.qualityLimitationReason;
+        }
+        if (Number.isFinite(report.framesPerSecond)) {
+          sentFps = sentFps === null ? report.framesPerSecond : Math.min(sentFps, report.framesPerSecond);
+        }
+        /* What is actually leaving, which is not what the camera was asked for
+           once degradationPreference has traded some of it away. */
+        if (Number.isFinite(report.frameWidth) && Number.isFinite(report.frameHeight)) {
+          sentSize = `${report.frameWidth}x${report.frameHeight}`;
+        }
+        if (report.codecId) {
+          const codec = stats.get(report.codecId);
+          const mime = String(codec?.mimeType || '');
+          if (mime) sentCodec = mime.replace(/^video\//i, '');
+        }
+      }
     }
     if (report.type === 'remote-inbound-rtp') {
       if (typeof report.roundTripTime === 'number') {
@@ -1567,6 +1942,18 @@ async function readCallQuality(pc, key = '') {
     bytes,
     bytesOut,
     kinds: Array.from(kinds),
+    limitedByCpu,
+    limitReason,
+    /* What the ladder settled on for this connection, so the panel can show
+       the decision beside the reason for it. */
+    pixelBudget: callAdaptationState.get(pc)?.scale
+      ? [1, 1.5, 2, 3][callAdaptationState.get(pc).scale] : 1,
+    sentFps: sentFps === null ? null : Math.round(sentFps),
+    sentSize,
+    sentCodec,
+    recvFps: recvFps === null ? null : Math.round(recvFps),
+    recvSize,
+    recvCodec,
     mine,
   };
 }

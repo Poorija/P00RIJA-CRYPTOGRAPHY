@@ -802,6 +802,11 @@ function saveChatPrefs() {
 saveEncrypted(CHAT_PREFS_STORAGE_KEY, {
 autoDownloadLimitBytes: chatAutoDownloadLimitBytes(),
 relayOnboardAsked: Boolean(chatState.prefs?.relayOnboardAsked),
+/* The pixel step the last video call settled at, so the next one starts near
+   an answer that held instead of asking for 1080p and walking down through
+   the opening seconds. A number, and one this device worked out about itself:
+   it says nothing about who was called or when. */
+callPixelStep: Number(chatState.prefs?.callPixelStep ?? 0),
 });
 }
 /* The webview's internal origin is never a relay.

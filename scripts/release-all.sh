@@ -130,6 +130,37 @@ if ! node tools/check-relay-parity.cjs > "$LOGS/00-check-relay-parity.log" 2>&1;
 fi
 good "$(grep -m1 'both relays' "$LOGS/00-check-relay-parity.log" | sed 's/^ *//')"
 
+# The relay image pins its dependencies in its own RUN line rather than from
+# package.json, so the repository and the running server can disagree without
+# anything saying so. An audit once found ws upgraded here and still pinned
+# there -- a HIGH advisory reachable through frames the relay reads from
+# untrusted clients all day. The fix lived in the repository and never reached
+# a server.
+if ! node tools/check-relay-pins.cjs > "$LOGS/00-check-relay-pins.log" 2>&1; then
+    bad "the relay image's pinned dependencies disagree with the repository"
+    tail -12 "$LOGS/00-check-relay-pins.log" | sed 's/^/      /'
+    exit 1
+fi
+good "$(grep -m1 'agree with the repository' "$LOGS/00-check-relay-pins.log" | sed 's/^ *//')"
+
+# The suites that need no browser and no relay: they read a function out of the
+# source and exercise it, so they cost seconds and they cover the parts most
+# recently rewritten -- the quality ladder's arithmetic, what the SDP transform
+# asks for, what a push failure says, and that an arriving message never
+# reaches the system notification surface. A release should not be built on a
+# tree where those are wrong.
+say "Checking the logic the packages will carry"
+for suite in callladder callcodec pusherrors notifyprivacy; do
+    if ! npm run -s "test:$suite" > "$LOGS/00-test-$suite.log" 2>&1; then
+        bad "test:$suite failed — nothing was built"
+        grep -E 'FAIL|checks failed' "$LOGS/00-test-$suite.log" | head -8 | sed 's/^/      /'
+        exit 1
+    fi
+    printf "  ${OK}ok${NC}   %-16s %s\n" "$suite" \
+        "$(grep -oE '[0-9]+ checks passed' "$LOGS/00-test-$suite.log" | tail -1)"
+done
+echo
+
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     warn "the working tree has uncommitted changes — they WILL go into these packages"
 fi

@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.44.2-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.44.6-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -275,15 +275,15 @@ To check it: `curl -k https://localhost:8585/chat-health` should answer `ok`.
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA Cryptography_2.44.2_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.44.2_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA Cryptography_2.44.6_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.44.6_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.44.2-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.44.6-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
 The desktop and Android builds ship knowing the public relay, so a fresh install
@@ -957,15 +957,15 @@ docker compose --env-file .env -f config/docker-compose.yaml up -d --build
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA Cryptography_2.44.2_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.44.2_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA Cryptography_2.44.6_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.44.6_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.44.2-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.44.6-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
 نسخه‌های دسکتاپ و اندروید با آدرس رلهٔ عمومی ساخته می‌شوند، پس نصب تازه بدون

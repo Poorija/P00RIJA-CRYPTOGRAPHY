@@ -1,7 +1,7 @@
 {
   "name": "app",
-  "version": "2.44.2",
-  "buildTag": "chat-v71",
+  "version": "2.44.6",
+  "buildTag": "chat-v75",
   "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
   "main": "scripts/server.js",
   "directories": {
@@ -151,7 +151,8 @@
     "test:pusherrors": "node tests/e2e/pusherrors.mjs",
     "test:callcodec": "node tests/e2e/callcodec.mjs",
     "test:relay:both": "RELAY_SERVER=$R npm run -s test:throughput && RELAY_SERVER=$R npm run -s test:maildelivery && RELAY_SERVER=$R npm run -s test:offlinesize && RELAY_SERVER=$R npm run -s test:unifiedpush && RELAY_SERVER=$R npm run -s test:allowlist",
-    "test:relays": "R=standalone-relay/server.js npm run -s test:relay:both && R=scripts/server.js npm run -s test:relay:both"
+    "test:relays": "R=standalone-relay/server.js npm run -s test:relay:both && R=scripts/server.js npm run -s test:relay:both",
+    "test:callladder": "node tests/e2e/callladder.mjs"
   },
   "repository": {
     "type": "git",
