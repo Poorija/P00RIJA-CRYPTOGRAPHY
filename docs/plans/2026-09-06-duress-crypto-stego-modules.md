@@ -197,4 +197,4 @@ Split by responsibility, not by layer, into `js/chat/`:
 - `tests/e2e/stego.mjs` — recompression survival matrix.
 - `tests/e2e/legacypurge.mjs` — greps the shipped payload and fails if RC4,
   TripleDES, Rabbit, CFB, OFB or CryptoJS appear anywhere.
-- Full sweep `npm run test:e2e`, then `bash scripts/deploy-remote.sh`.
+- Full sweep `npm run test:e2e`, then `bash scripts/sync-to-server.sh`.
