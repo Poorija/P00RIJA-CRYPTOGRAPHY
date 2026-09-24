@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.44.1';
+const APP_VERSION_SEMVER = '2.44.2';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v70';
+  return 'chat-v71';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -6534,7 +6534,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.44.1-chat-v70';
+const reloadKey = 'poorija-sw-reload-2.44.2-chat-v71';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6547,7 +6547,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.44.1-chat-v70', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.44.2-chat-v71', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -11632,7 +11632,21 @@ function describeMediaError(error, want = 'both') {
     : `Could not open ${thing}${name ? ` (${name})` : ''}.`;
 }
 
-function showNotification(message, type = 'info') {
+/* An in-app toast, and by default a system notification beside it.
+ *
+ * Those are two different surfaces with two different audiences. A toast is
+ * drawn inside a window the person already has open and unlocked; a system
+ * notification can land on a lock screen, in a shade the whole room can see,
+ * or on a paired watch. Anything carrying what somebody wrote or the name of
+ * a file they were sent must pass `system: false` and, if the arrival is
+ * worth announcing at all, raise its own contentless notification.
+ *
+ * This was not separated, and every native shell is a desktop runtime --
+ * Android included. An arriving message showed "Name: <the message>" on the
+ * lock screen while the same build's PWA showed only that something encrypted
+ * had arrived, because the PWA has no such mirror and takes the contentless
+ * push from the service worker instead. */
+function showNotification(message, type = 'info', { system = true } = {}) {
 if (!state.settings.notifications) return;
 const colors = {
 success: 'linear-gradient(135deg, rgba(16,185,129,0.95), rgba(5,150,105,0.95))',
@@ -11663,7 +11677,7 @@ div.style.background = colors[type] || colors.info;
 div.innerHTML = `<i class="fas fa-${icons[type] || icons.info}-circle"></i><div class="app-toast-message"></div>`;
 div.querySelector('.app-toast-message').textContent = String(message || '');
 stack.appendChild(div);
-void sendDesktopSystemNotification(message, type);
+if (system) void sendDesktopSystemNotification(message, type);
 setTimeout(() => {
 div.remove();
 if (!stack.children.length) stack.remove();

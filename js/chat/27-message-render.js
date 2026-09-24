@@ -1645,15 +1645,21 @@ const label = notificationMessageLabel(entry).slice(0, 80) || t('پیام جدی
 const appLocked = Boolean(appState()?.isLocked);
 const chatScreenLocked = typeof chatLockEnabled === 'function' && chatLockEnabled() && !chatState.chatUnlocked;
 const conversationLockedNow = typeof conversationLocked === 'function' && conversationLocked(conversationId);
-if (appLocked) {
+/* The system surface gets the same line whatever the lock state, because
+   it is the same surface in all three: a lock screen, a notification shade,
+   a watch on somebody else's wrist. The preview below is for the toast,
+   which is drawn inside a window this person already has open. Saying
+   `system: false` there is what keeps the two apart -- without it every
+   arriving message put "Name: <the message>" on the lock screen of every
+   native build, Android included. */
 if (typeof sendDesktopSystemNotification === 'function') {
-sendDesktopSystemNotification(t('پیام جدید در چت امن', 'New message in Secure Chat'), 'info');
+sendDesktopSystemNotification(t('پیام رمزنگاری‌شدهٔ تازه رسید.', 'Encrypted chat update received.'), 'info');
 }
-} else if (!chatScreenLocked) {
+if (!appLocked && !chatScreenLocked) {
 const text = conversationLockedNow
 ? `${senderName}: ${t('پیام جدید', 'New message')}`
 : `${senderName}: ${label}`;
-app().showNotification?.(text, 'info');
+app().showNotification?.(text, 'info', { system: false });
 }
 window.dispatchEvent(new CustomEvent('poorija:chat-unread', {
 detail: {

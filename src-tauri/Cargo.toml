@@ -1,6 +1,6 @@
 [package]
 name = "p00rija-cryptography"
-version = "2.44.1"
+version = "2.44.2"
 description = "P00RIJA Cryptography native desktop shell"
 authors = ["P00RIJA"]
 license = "AGPL-3.0-only"

@@ -1,7 +1,7 @@
 {
   "name": "poorija-relay",
-  "version": "2.44.1",
-  "buildTag": "chat-v70",
+  "version": "2.44.2",
+  "buildTag": "chat-v71",
   "description": "Standalone signalling relay for P00RIJA Cryptography: presence, WebRTC signalling, sealed offline mailboxes and Web Push. Carries no plaintext and holds no keys.",
   "main": "server.js",
   "type": "commonjs",

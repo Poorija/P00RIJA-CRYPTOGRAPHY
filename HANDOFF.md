@@ -69,19 +69,23 @@ docker cp js/chat.js     Poorija-Cryptography_App:/usr/share/nginx/html/js/chat.
 ```
 
 **Bump the version tag whenever you do this.** Every asset in `index.html`
-carries `?v=<TAG>` — right now `2.44.0-chat-v69` — and `sw.js` puts the
-same string in `CACHE_NAME`. Without a bump the service worker serves the old
-file and you debug a build that is not running:
+carries `?v=<TAG>` and `sw.js` puts the same string in `CACHE_NAME`. Without a
+bump the service worker serves the old file and you debug a build that is not
+running:
 
 ```bash
 OLD_TAG=$(grep -o "?v=[^\"']*" index.html | head -1 | cut -c4-)
-NEW_TAG="2.44.0-chat-v70"
+NEW_TAG="<semver>-chat-v<n>"        # e.g. the next build number along
 sed -i "" "s/$OLD_TAG/$NEW_TAG/g" index.html sw.js js/app.js
 sed -i "" "s/return '${OLD_TAG#*-}';/return '${NEW_TAG#*-}';/" js/app.js
 ```
 
-`OLD_TAG` is read out of `index.html` rather than written out, because an example that
-spells a real tag gets rewritten by the next bump's own `sed` and stops working.
+Neither tag is spelled out here. `OLD_TAG` is read out of `index.html` because
+an example that names a real tag gets rewritten by the next bump's own `sed`
+and stops working — and `NEW_TAG` was spelled out anyway, which left this file
+naming a version the tree had moved past. `node tools/check-versions.cjs` is
+what says where the tree actually is; it reads all eleven declarations and
+refuses a release where they disagree.
 
 Then verify what is actually being served — this catches more mistakes than any
 other single command:
