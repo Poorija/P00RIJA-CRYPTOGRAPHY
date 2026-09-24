@@ -139,7 +139,19 @@
     "check:collisions": "node tools/global-collisions.cjs",
     "test:release36": "node tests/e2e/release36.mjs",
     "test:local": "node tests/e2e/_local-stack.mjs",
-    "test:release37": "node tests/e2e/release37.mjs"
+    "test:release37": "node tests/e2e/release37.mjs",
+    "check:assets": "node tools/check-assets.cjs",
+    "check:relay-parity": "node tools/check-relay-parity.cjs",
+    "test:throughput": "node tests/e2e/relaythroughput.mjs",
+    "test:maildelivery": "node tests/e2e/maildelivery.mjs",
+    "test:offlinesize": "node tests/e2e/offline-file-size.mjs",
+    "test:unifiedpush": "node tests/e2e/unifiedpush.mjs",
+    "test:allowlist": "node tests/e2e/allowlist.mjs",
+    "test:notifyprivacy": "node tests/e2e/notificationprivacy.mjs",
+    "test:pusherrors": "node tests/e2e/pusherrors.mjs",
+    "test:callcodec": "node tests/e2e/callcodec.mjs",
+    "test:relay:both": "RELAY_SERVER=$R npm run -s test:throughput && RELAY_SERVER=$R npm run -s test:maildelivery && RELAY_SERVER=$R npm run -s test:offlinesize && RELAY_SERVER=$R npm run -s test:unifiedpush && RELAY_SERVER=$R npm run -s test:allowlist",
+    "test:relays": "R=standalone-relay/server.js npm run -s test:relay:both && R=scripts/server.js npm run -s test:relay:both"
   },
   "repository": {
     "type": "git",

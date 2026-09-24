@@ -55,7 +55,18 @@ const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.d
 const SELF_DESTRUCT_STORE_PATH = process.env.CHAT_SELF_DESTRUCT_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'self-destruct-records.json');
 
 const TURN_URL = process.env.CHAT_TURN_URL || `turn:${DOMAIN}:3478?transport=udp,turn:${DOMAIN}:3478?transport=tcp,turns:${DOMAIN}:5349?transport=tcp`;
-const TURN_USERNAME = process.env.CHAT_TURN_USERNAME || process.env.TURN_USER || 'poorija';
+/* No default worth shipping.
+ *
+ * This fell back to one deployment's own TURN username, so any relay whose
+ * .env did not set TURN_USER handed that name out to every client through
+ * /turn-config -- a credential half belonging to somebody else, on somebody
+ * else's server, offered to everyone who opened the app.
+ *
+ * Empty is the honest answer for a relay nobody has configured TURN on. The
+ * client already refuses a turn: entry that has no username or no credential
+ * and says so, which is better than a name that will fail authentication
+ * somewhere the failure reads as "calls do not work". */
+const TURN_USERNAME = process.env.CHAT_TURN_USERNAME || process.env.TURN_USER || '';
 const TURN_CREDENTIAL = process.env.CHAT_TURN_CREDENTIAL || process.env.TURN_PASSWORD || '';
 const PRESENCE_TTL_MS = Number(process.env.CHAT_PRESENCE_TTL_MS || 90000);
 /* A fingerprint arrived as a claim and nothing else, so hello now has to prove

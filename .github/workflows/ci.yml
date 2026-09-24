@@ -36,6 +36,21 @@ jobs:
       - name: Every file agrees on the version and the cache tag
         run: npm run check:versions
 
+      # The service worker names every asset it precaches, so a script added to
+      # index.html and not to sw.js is missing offline after each version bump
+      # -- the one condition this app exists to work in, and the one a runner
+      # with a network never reproduces.
+      - name: Everything index.html loads is precached
+        run: npm run check:assets
+
+      # Two relays live here and only one is deployed: the Dockerfile builds
+      # scripts/server.js. Everything added after 2.26.95 went into the other
+      # one and no suite noticed, because every suite spawned that one too --
+      # so a release shipped a phone an Express 404 page where it expected
+      # JSON. A route in one and not the other stops the build.
+      - name: Both relays answer the same calls
+        run: npm run check:relay-parity
+
       - name: Nothing private is tracked
         run: |
           ! git ls-files | grep -E '^(\.env$|certs/|data/)' || { echo "A private file is tracked"; exit 1; }
@@ -139,6 +154,21 @@ jobs:
           npm run test:qrtext
           npm run test:lang
           npm run test:langpanels
+
+          # No browser needed: two read a function out of the source and
+          # exercise it, the third runs the notification path against a stub.
+          # They cover what a push call says when the answer is not JSON, what
+          # the call transform asks Opus for, and that an arriving message
+          # never reaches the system notification surface.
+          npm run test:notifyprivacy
+          npm run test:pusherrors
+          npm run test:callcodec
+
+          # Every relay suite against BOTH relays. The deployed one and the
+          # distribution are different programs, and running the suites
+          # against only one of them is how they came apart. About two
+          # minutes; each spawns its own relay on a loopback port.
+          npm run test:relays
           npm run audit
           npm run test:perf
           npm run native:prepare

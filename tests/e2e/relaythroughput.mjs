@@ -147,9 +147,21 @@ for (let i = 0; i < CHUNKS; i += 1) {
 }
 
 const band = Math.floor(CHUNKS / 8);
-const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
-const first = mean(timings.slice(0, band));
-const last = mean(timings.slice(-band));
+/* The median, not the mean.
+ *
+ * What is being measured is whether the cost per chunk grows with the mailbox,
+ * and a mean is moved by one outlier: on a shared runner a single scheduling
+ * stall in the last band is enough to fail a relay that is behaving perfectly.
+ * A median ignores it. The regression this guards does not hide from a median
+ * -- it makes every chunk in the band slower, not one of them -- so nothing is
+ * given up by refusing to listen to outliers. */
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+const first = median(timings.slice(0, band));
+const last = median(timings.slice(-band));
 const spread = last / first;
 const seconds = timings.reduce((sum, value) => sum + value, 0) / 1000;
 
