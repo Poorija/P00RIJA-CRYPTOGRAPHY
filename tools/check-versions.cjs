@@ -76,6 +76,10 @@ const tagMatch = /\?v=(\d+\.\d+\.\d+)(-[\w.-]+)?/.exec(read('index.html')) || []
 const tag = tagMatch[1];
 if (tag) found['index.html asset tag'] = tag;
 
+/* What the tree says its version is: every declaration agrees by the time
+   this runs, so any one of them answers. */
+const semver = String(found['package.json'] || '');
+
 const values = new Set(Object.values(found));
 
 /* The asset tag is the semver plus a build suffix — 2.99.97-nocam-v1 — and it
@@ -129,6 +133,50 @@ if (fullTag) {
     process.exit(1);
   }
 }
+/* The documentation states the version too, and it goes stale in a way
+   nothing here was watching: the README badge said 2.44.0 while the tree was
+   two releases past it, INSTALL.md named download files that were not in the
+   release, and three bump examples spelled out BOTH a current version and a
+   target, so they were wrong twice over.
+
+   Only the places that claim to be THIS release are checked. A document
+   recording what shipped in an older one is a record, not a drift, and
+   rewriting it would be falsifying it -- so this looks at the badge, at the
+   lines that say what this package is, and at download filenames, and leaves
+   prose alone. */
+const docClaims = [
+  ['README.md', /!\[version\]\(https:\/\/img\.shields\.io\/badge\/version-([0-9][0-9A-Za-z.\-]*?)-/, 'the version badge'],
+  ['HANDOFF.md', /نسخهٔ این پکیج: \*\*([0-9][0-9A-Za-z.]*)\*\*/, 'the package version it states'],
+  ['INSTALL-LINUX-SERVER.md', /P00RIJA Cryptography v([0-9][0-9A-Za-z.]*)/, 'the version it names'],
+];
+const docDrift = [];
+for (const [file, pattern, what] of docClaims) {
+  if (!exists(file)) continue;
+  const found = pattern.exec(read(file));
+  if (!found) { docDrift.push(`${file}: ${what} is not where this expects it`); continue; }
+  if (found[1] !== semver) docDrift.push(`${file}: ${what} says ${found[1]}, not ${semver}`);
+}
+
+/* A download table naming a file the release does not contain sends somebody
+   looking for an artefact that was never built. */
+for (const file of ['README.md', 'INSTALL.md']) {
+  if (!exists(file)) continue;
+  const named = new Set();
+  for (const match of read(file).matchAll(/`[^`]*?([0-9]+\.[0-9]+\.[0-9]+)[^`]*?\.(exe|dmg|deb|rpm|apk|aab|AppImage|tar\.gz|zst)`/g)) {
+    if (match[1] !== semver) named.add(match[1]);
+  }
+  for (const stale of named) docDrift.push(`${file}: names download files for ${stale}, not ${semver}`);
+}
+
+if (docDrift.length) {
+  console.error(`\n  the documentation disagrees with the tree:`);
+  docDrift.forEach((line) => console.error(`    ${line}`));
+  console.error('\n  These are what somebody reads to find out what this release is and');
+  console.error('  which file to download. A stale one sends them to a file that does');
+  console.error('  not exist.');
+  process.exit(1);
+}
+
 Object.entries(found).forEach(([where, value]) => {
   console.log(`  ${String(value).padEnd(10)} ${where}`);
 });
