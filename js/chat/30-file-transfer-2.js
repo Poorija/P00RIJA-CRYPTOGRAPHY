@@ -346,11 +346,34 @@ return;
 chatState.clientId = message.clientId || '';
 renderStaticUi();
 broadcastHello();
+/* The relay is up and answering, which is the cheap moment to re-read its
+   TURN block. An operator who re-runs the relay setup gets a fresh TURN
+   password, and until now a client holding the old one lost every relayed
+   call with nothing on screen to say why — the credentials were fetched once
+   and then kept forever. Not awaited: the connection is already up, and a
+   relay that has nothing new to say costs two small requests at most once
+   every five minutes. */
+hydrateRelayTurnConfig({ force: true }).catch(() => {});
 return;
 }
 if (message.type === 'peers') {
+/* Everyone this relay did not mention goes offline -- EXCEPT somebody whose
+   presence is not this relay's business.
+ *
+ * A relay lists its own clients and nobody else's, so a contact on another relay
+ * is absent from every one of these broadcasts. Marking them offline here and
+ * waiting for the transit answer to mark them back made the status flicker, and
+ * flicker towards offline, because the broadcast arrives far more often than the
+ * question is asked. It is also simply wrong: this relay has not said that person
+ * is away, it has said nothing about them at all.
+ *
+ * So presence for a contact with a routable home relay elsewhere is owned by the
+ * answer from that relay, and is left alone here. staleTransitPresence is what
+ * stops that becoming a status that never goes offline again. */
 chatState.peers.forEach((peer) => {
-if (!peer.type) peer.status = 'offline';
+if (peer.type) return;
+if (typeof presenceAnsweredElsewhere === 'function' && presenceAnsweredElsewhere(peer)) return;
+peer.status = 'offline';
 });
 /* Every record is checked against its own key before it is believed. */
 Promise.all((message.peers || []).map((peer) => withVerifiedFingerprint(peer)))
@@ -381,9 +404,31 @@ if (entry) {
 markMessageStatus(entry.conversationKey, entry.messageId, 'relayed');
 chatState.pendingRelayTags.delete(String(message.tag || ''));
 }
+/* A carried message that was accepted needs no fallback copy kept for it. */
+chatState.pendingTransit?.delete(String(message.tag || ''));
+return;
+}
+/* The far relay answered a question about one of its own clients. */
+if (message.type === 'presence' && message.toFingerprint) {
+chatState.pendingTransit?.delete(String(message.tag || ''));
+notePeerPresenceAnswer(String(message.toFingerprint), message.up === true);
 return;
 }
 if (message.type === 'error') {
+/* The carrier could not take it: no link to that relay, or the far relay
+   would not open it. The message is not lost — it goes the ordinary way and
+   the conversation is told, because "this went through your own relay after
+   all" changes who can see that the two of you are talking. */
+if (String(message.reason || '').startsWith('transit-')) {
+const waiting = chatState.pendingTransit?.get(String(message.tag || ''));
+if (waiting) {
+chatState.pendingTransit.delete(String(message.tag || ''));
+const peerRecord = chatState.peers.find((peer) => peer.peerId === waiting.peerId) || null;
+console.warn(`[Transit] ${message.reason}; falling back to the direct path`);
+fallBackToDirect(waiting.frame, peerRecord, message.reason);
+return;
+}
+}
 if (message.reason === 'identity-unverified') {
 notify(t(
 'سرور این نسخه از برنامه را تأیید نمی‌کند؛ لطفاً برنامه را دوباره بارگذاری یا به‌روزرسانی کنید.',
@@ -530,6 +575,16 @@ if (!payload) {
 ackRelayMessage(message.relayId);
 return;
 }
+/* Somebody on another relay told us their name, their photograph and their
+   prekey -- everything a hello would have carried if a relay broadcast reached
+   across. */
+if (payload.type === 'profile-card') {
+const known = findPeerByAnyKey(payload.fingerprint || payload.peerId || message.fromClientId || '');
+noteProfileCard(payload, known);
+ackRelayMessage(message.relayId);
+return;
+}
+
 if (payload.type === 'call-invite') {
 const queuedAt = message.queuedAt ? Date.parse(message.queuedAt) : 0;
 if (queuedAt && Date.now() - queuedAt > CALL_RING_TIMEOUT_MS) {
@@ -662,6 +717,29 @@ return;
 }
 if (payload.type === 'call-ice') {
 handleCallRemoteCandidate(payload, message).catch(console.error);
+ackRelayMessage(message.relayId);
+return;
+}
+/* The offer, the answer and the candidates of a call whose two ends are on
+   different relays. They travel this way because a PeerJS id is only meaningful
+   on the server that issued it; see js/chat/39-relay-call.js. Handled before
+   anything that could mistake them for chat, and named call-relay-* rather than
+   reusing call-ice so a build that predates them ignores them instead of
+   feeding a candidate to a negotiation that has none. */
+if (String(payload.type || '').startsWith('call-relay-')) {
+/* An offer that was waiting in a mailbox is not a call, it is a recording of
+   one. Three defences stop it being stored at all -- the client marks these
+   ephemeral, and both relays refuse to queue them -- and this is the fourth,
+   for an envelope queued by a build that predates those. call-invite has had
+   the same check since the offline ring was written; without it here, a
+   reconnect rang the phone with a dead description behind it: declining logged
+   a missed call that never happened, answering gave a call with no sound. */
+const queuedAt = message.queuedAt ? Date.parse(message.queuedAt) : 0;
+if (queuedAt && Date.now() - queuedAt > CALL_RING_TIMEOUT_MS) {
+ackRelayMessage(message.relayId);
+return;
+}
+if (typeof handleRelayCallSignal === 'function') handleRelayCallSignal(message);
 ackRelayMessage(message.relayId);
 return;
 }

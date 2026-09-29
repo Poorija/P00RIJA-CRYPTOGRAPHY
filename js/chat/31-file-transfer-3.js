@@ -952,6 +952,9 @@ try {
 const wantsVideo = call.metadata?.mode === 'video';
 const stream = await requestCallMedia(wantsVideo ? 'video' : 'voice');
 attachLocalStream(stream);
+/* Answering builds the peer connection too, so the reorder belongs here as
+   well — and the caller is known by now, which is what makes it per contact. */
+prepareIceForContact(activeCallPeerRecord() || findPeerByAnyKey(call.peer));
 call.answer(stream, { sdpTransform: preferCallCodecs });
 appendCall({
 name: call.metadata?.username || call.peer,
@@ -1116,6 +1119,22 @@ function renderCallQualityCard() {
     return member?.username || member?.name || reading.key;
   };
 
+  /* The path, in words rather than ICE vocabulary. It answers the question the
+     round trip alone cannot: a slow call that is going direct is a slow link,
+     while a slow call that fell back to a TURN half a world away is a routing
+     problem with a different fix. 'through both TURNs' is the two-hop path --
+     each end on its own nearby server, the long leg between the two. */
+  const routeLabel = (reading) => {
+    if (reading.route === 'direct') return t('مستقیم', 'direct');
+    if (reading.route === 'both') return t('از TURN هر دو طرف', 'through both TURNs');
+    if (reading.route === 'local') return t('از TURN شما', 'through your TURN');
+    if (reading.route === 'remote') return t('از TURN طرف مقابل', 'through their TURN');
+    return '';
+  };
+  const relayLabel = (reading) => (reading.relayServer && reading.relayProtocol
+    ? `${reading.relayServer} · ${reading.relayProtocol}`
+    : reading.relayServer || '');
+
   const rows = readings.map((reading) => {
     const level = callQualityLevel(reading);
     const stat = (label, value) =>
@@ -1135,6 +1154,8 @@ function renderCallQualityCard() {
         ${reading.recvFps === null || reading.recvFps === undefined
           ? '' : stat(t('فریم', 'frame rate'), `${reading.recvFps}/s`)}
         ${reading.recvCodec ? stat(t('کدک', 'codec'), reading.recvCodec) : ''}
+        ${routeLabel(reading) ? stat(t('مسیر', 'route'), routeLabel(reading)) : ''}
+        ${relayLabel(reading) ? stat(t('سرور TURN شما', 'your TURN'), relayLabel(reading)) : ''}
       </div>
     </article>`;
   });
@@ -1564,6 +1585,215 @@ function preferCallCodecs(sdp) {
   }).join('');
 }
 
+/* ===================== انتخاب بین دو TURN ===================== */
+/* Which TURN server to relay a call through, when this device has more than
+ * one.
+ *
+ * ICE measures every candidate pair for real — a connectivity check is a
+ * round trip that actually happened — and then picks by a PRIORITY FORMULA
+ * rather than by what it measured. So there is a number in front of it that
+ * it does not use, and with two TURN servers the one it picks can be the
+ * slower one for this particular contact.
+ *
+ * Per contact, not globally. A device with a TURN near it and one far away
+ * has two different right answers: the near one for somebody on the same
+ * side of the world, and sometimes the far one for somebody beside it. A
+ * single global choice cannot be right for both.
+ *
+ * What is remembered is a round trip and a loss rate against a server
+ * address, per contact. The call log already records who was called and
+ * when, so this adds no fact about the conversation that was not already on
+ * this device; what it adds is how the network behaved.
+ *
+ * Two places it acts, and they are not equally strong:
+ *
+ *   at the start, by putting the remembered server first in the list ICE is
+ *   given. That is a nudge — ICE weights order, it does not obey it.
+ *
+ *   in the middle, by reconfiguring and restarting ICE when the call is
+ *   actually bad. That one decides, and it costs a short gap in the audio,
+ *   which is why it waits for several poor samples in a row and happens at
+ *   most once in a call.
+ */
+const TURN_MEMORY_CONTACTS = 40;
+const TURN_MEMORY_SERVERS = 4;
+/* Five consecutive poor samples at the monitor's cadence. The same shape of
+   hysteresis the video ladder uses, for the same reason: one bad sample is a
+   hiccup, and acting on it costs more than it fixes. */
+const TURN_SWITCH_AFTER_BAD = 5;
+/* Loss against round trip, in the same proportion callQualityLevel already
+   treats them: it calls a call good below 250 ms AND below 2% loss, so at
+   the edge of "good" one percent of loss is worth about 125 ms. Derived from
+   a threshold that was already there rather than invented here. */
+const TURN_LOSS_WEIGHT = 125;
+/* How fast a new measurement displaces the old. A server does not become bad
+   because of one call, and must not stay good forever either. */
+const TURN_MEMORY_WEIGHT = 0.3;
+
+function turnMemory() {
+chatState.prefs = chatState.prefs || {};
+if (!chatState.prefs.turnChoices || typeof chatState.prefs.turnChoices !== 'object') {
+chatState.prefs.turnChoices = {};
+}
+return chatState.prefs.turnChoices;
+}
+function turnScore(entry) {
+if (!entry || !Number.isFinite(entry.rtt)) return Infinity;
+return entry.rtt + (Number(entry.loss) || 0) * TURN_LOSS_WEIGHT;
+}
+/* Oldest contacts first, so a long address book does not grow this without
+   bound. */
+function pruneTurnMemory(memory) {
+const keys = Object.keys(memory);
+if (keys.length <= TURN_MEMORY_CONTACTS) return;
+keys
+.sort((a, b) => (newestTurnEntry(memory[a]) - newestTurnEntry(memory[b])))
+.slice(0, keys.length - TURN_MEMORY_CONTACTS)
+.forEach((key) => { delete memory[key]; });
+}
+function newestTurnEntry(byServer) {
+return Math.max(0, ...Object.values(byServer || {}).map((entry) => Date.parse(entry?.at || 0) || 0));
+}
+function rememberTurnResult(fingerprint, label, reading) {
+if (!fingerprint || !label || !Number.isFinite(reading?.rtt)) return;
+const memory = turnMemory();
+const byServer = memory[fingerprint] || (memory[fingerprint] = {});
+const previous = byServer[label];
+const loss = Number(reading.lossPercent) || 0;
+byServer[label] = previous && Number.isFinite(previous.rtt)
+? {
+rtt: Math.round(previous.rtt * (1 - TURN_MEMORY_WEIGHT) + reading.rtt * TURN_MEMORY_WEIGHT),
+loss: Math.round((previous.loss * (1 - TURN_MEMORY_WEIGHT) + loss * TURN_MEMORY_WEIGHT) * 10) / 10,
+samples: (previous.samples || 0) + 1,
+at: new Date().toISOString(),
+}
+: { rtt: Math.round(reading.rtt), loss, samples: 1, at: new Date().toISOString() };
+/* Only the few this device actually uses; a contact reached through five
+   different servers is a contact whose oldest answer no longer matters. */
+const servers = Object.keys(byServer);
+if (servers.length > TURN_MEMORY_SERVERS) {
+servers
+.sort((a, b) => (Date.parse(byServer[a].at) || 0) - (Date.parse(byServer[b].at) || 0))
+.slice(0, servers.length - TURN_MEMORY_SERVERS)
+.forEach((key) => { delete byServer[key]; });
+}
+pruneTurnMemory(memory);
+saveChatPrefs();
+}
+/* The best remembered server for this contact, or '' when nothing is known.
+   One sample is enough to prefer something over nothing — it is a nudge, and
+   waiting for certainty means never using what was measured. */
+function bestTurnLabelFor(fingerprint) {
+const byServer = turnMemory()[String(fingerprint || '')];
+if (!byServer) return '';
+let best = '';
+let bestScore = Infinity;
+for (const [label, entry] of Object.entries(byServer)) {
+const score = turnScore(entry);
+if (score < bestScore) { bestScore = score; best = label; }
+}
+return best;
+}
+/* A TURN url reduced to the form turnServerLabel() produces, so a measured
+   candidate and a configured url can be compared. */
+function turnUrlLabel(url) {
+const match = String(url || '').match(/^(turns?):([^?]+)/i);
+return match ? `${match[1].toLowerCase()}:${match[2]}` : '';
+}
+/* Reorders the urls inside each TURN entry so the remembered server comes
+   first. Nothing is ever removed: a server that was slow last week is still
+   better than no call at all. */
+function orderIceServersFor(fingerprint, iceServers) {
+const preferred = bestTurnLabelFor(fingerprint);
+if (!preferred || !Array.isArray(iceServers)) return iceServers;
+let moved = false;
+const ordered = iceServers.map((entry) => {
+const urls = Array.isArray(entry?.urls) ? entry.urls : (entry?.urls ? [entry.urls] : []);
+if (urls.length < 2 || !urls.some((url) => turnUrlLabel(url) === preferred)) return entry;
+const first = urls.filter((url) => turnUrlLabel(url) === preferred);
+const rest = urls.filter((url) => turnUrlLabel(url) !== preferred);
+if (!rest.length) return entry;
+moved = true;
+return { ...entry, urls: [...first, ...rest] };
+});
+/* The original array when nothing moved — a remembered server that is no
+   longer configured must not look like a change, or prepareIceForContact
+   rewrites an identical list and reports that it did something. */
+return moved ? ordered : iceServers;
+}
+/* PeerJS builds the peer connection — and its first offer — inside call() and
+   answer(), before it hands the connection back, so there is no moment
+   afterwards at which the server list can still be reordered. It reads the
+   list from peer.options.config at that instant, which is why this writes
+   there and does it just before dialling.
+   Guarded on the shape rather than assumed: a vendored library that changes
+   this loses the nudge and keeps the call. */
+function prepareIceForContact(peerRecord) {
+const config = chatState.peer?.options?.config;
+if (!config || !Array.isArray(config.iceServers)) return false;
+/* Ordered from the CONFIGURED list, not from whatever the last call left
+   behind. The peer object is shared across every call, so reordering it in
+   place and never putting it back meant a call to somebody with no history
+   started on the previous contact's preference — which is not per contact at
+   all, it is last-contact-wins. */
+let canonical;
+try {
+canonical = peerOptions().config.iceServers;
+} catch (_error) {
+canonical = config.iceServers;
+}
+const ordered = orderIceServersFor(peerRecord?.fingerprint, canonical);
+config.iceServers = ordered;
+return ordered !== canonical;
+}
+const callRouteState = new WeakMap();
+/* Runs on every quality sample beside the video ladder. It records what this
+   server is doing for this contact, and — only when the call is genuinely bad
+   and there is somewhere else to go — moves it. */
+async function adaptCallRoute(pc, reading) {
+if (!pc || !reading) return;
+const peerRecord = activeCallPeerRecord();
+const fingerprint = peerRecord?.fingerprint || '';
+if (!fingerprint) return;
+const relayed = reading.route === 'local' || reading.route === 'both';
+if (relayed && reading.relayServer) rememberTurnResult(fingerprint, reading.relayServer, reading);
+
+const state = callRouteState.get(pc) || { bad: 0, switched: false };
+callRouteState.set(pc, state);
+if (state.switched || !relayed || !reading.relayServer) { state.bad = 0; return; }
+state.bad = callQualityLevel(reading) === 'bad' ? state.bad + 1 : 0;
+if (state.bad < TURN_SWITCH_AFTER_BAD) return;
+
+const config = pc.getConfiguration?.();
+if (!config || !Array.isArray(config.iceServers)) return;
+/* Somewhere else to go: a configured TURN this call is not already using. */
+const others = config.iceServers.flatMap((entry) => {
+const urls = Array.isArray(entry?.urls) ? entry.urls : (entry?.urls ? [entry.urls] : []);
+return urls.map(turnUrlLabel).filter((label) => label && label !== reading.relayServer);
+});
+if (!others.length) return;
+/* Marked before the attempt, not after: a restart that fails must not lead
+   to a second one, because the gap is the cost and two gaps are worse than a
+   poor call. */
+state.switched = true;
+state.bad = 0;
+const target = others.find((label) => turnScore(turnMemory()[fingerprint]?.[label]) < turnScore(turnMemory()[fingerprint]?.[reading.relayServer]))
+|| others[0];
+try {
+pc.setConfiguration({ ...config, iceServers: orderIceServersFor(fingerprint, config.iceServers).map((entry) => {
+const urls = Array.isArray(entry?.urls) ? entry.urls : (entry?.urls ? [entry.urls] : []);
+if (!urls.some((url) => turnUrlLabel(url) === target)) return entry;
+const first = urls.filter((url) => turnUrlLabel(url) === target);
+return { ...entry, urls: [...first, ...urls.filter((url) => turnUrlLabel(url) !== target)] };
+}) });
+pc.restartIce?.();
+console.log(`[Call] the relay path was poor through ${reading.relayServer}; trying ${target}`);
+notify(t('کیفیت تماس ضعیف بود؛ مسیر دیگری امتحان می‌شود.',
+'The call path was poor; trying another route.'), 'info');
+} catch (error) {
+console.warn('[Call] could not change the relay path:', error?.message || error);
+}
+}
 const callAdaptationState = new WeakMap();
 const callQualitySamples = new WeakMap();
 function callIntervalLoss(pc, stats) {
@@ -1791,6 +2021,16 @@ async function adaptCallSenders(pc, reading) {
  * ratio came out as a clean 0%, and a call breaking up reported itself as
  * perfect. A wrong number is worse than no number: it ends the investigation.
  */
+/* The TURN server a relayed candidate came through, named the way somebody
+   would recognise it. `url` is the ICE server the browser allocated from and
+   is the precise answer; Firefox leaves it off, and there the relayed address
+   is the TURN's own address, which names it just as well. */
+function turnServerLabel(candidate) {
+  const url = String(candidate?.url || '');
+  const match = url.match(/^(turns?):([^?]+)/i);
+  if (match) return `${match[1].toLowerCase()}:${match[2]}`;
+  return String(candidate?.address || candidate?.ip || '');
+}
 async function readCallQuality(pc, key = '') {
   if (!pc?.getStats) return null;
   const stats = await pc.getStats();
@@ -1838,6 +2078,36 @@ async function readCallQuality(pc, key = '') {
   const selectedPair = (selectedPairId && stats.get(selectedPairId))
     || succeededPairs.find((pair) => pair.nominated === true)
     || (succeededPairs.length === 1 ? succeededPairs[0] : null);
+  /* WHERE the picture and the sound are going, which nothing here could see.
+   *
+   * Call media never touches the signalling relay: it is either peer to peer
+   * or it goes through a TURN server. Those two have very different round
+   * trips and very different bills, and the panel reported neither -- so a
+   * call that quietly fell back to a TURN on another continent looked exactly
+   * like a direct one that happened to be slow.
+   *
+   * The selected pair names its two candidates; each candidate says what kind
+   * it is. 'relay' on a side means that side's media is going through a TURN.
+   * Both sides relayed is the two-hop path: each end reaches its own nearby
+   * TURN and the long leg runs between the two servers. That is ordinary ICE,
+   * and it is the thing a second TURN closer to one of the two is FOR -- but
+   * only a reading like this one can say whether it actually happened. */
+  const localCandidate = selectedPair?.localCandidateId ? stats.get(selectedPair.localCandidateId) : null;
+  const remoteCandidate = selectedPair?.remoteCandidateId ? stats.get(selectedPair.remoteCandidateId) : null;
+  const localType = String(localCandidate?.candidateType || '');
+  const remoteType = String(remoteCandidate?.candidateType || '');
+  const relayServer = localType === 'relay' ? turnServerLabel(localCandidate) : '';
+  /* udp, tcp or tls -- how this device reaches its TURN. For media the three
+     are not equivalent: TCP and TLS put a reliable, ordered stream under
+     something that would rather drop a late packet than wait for it, so a
+     call on either sounds worse than the same call on udp. Worth showing,
+     because the remedy is a firewall change and not an app setting. */
+  const relayProtocol = localType === 'relay' ? String(localCandidate?.relayProtocol || '') : '';
+  const route = (!localType && !remoteType) ? ''
+    : (localType === 'relay' && remoteType === 'relay') ? 'both'
+      : localType === 'relay' ? 'local'
+        : remoteType === 'relay' ? 'remote'
+          : 'direct';
   stats.forEach((report) => {
     if (report.id === selectedPair?.id && report.type === 'candidate-pair'
       && (report.state === 'succeeded' || report.nominated === true)
@@ -1942,6 +2212,10 @@ async function readCallQuality(pc, key = '') {
     bytes,
     bytesOut,
     kinds: Array.from(kinds),
+    /* '' until ICE settles, then one of: direct, local, remote, both. */
+    route,
+    relayServer,
+    relayProtocol,
     limitedByCpu,
     limitReason,
     /* What the ladder settled on for this connection, so the panel can show
@@ -1974,6 +2248,9 @@ async function collectCallQuality() {
       if (reading) {
         readings.push(reading);
         await adaptCallSenders(pc, reading);
+        /* Beside the ladder, not inside it: one decides how much picture to
+           send, the other decides which way to send it. */
+        await adaptCallRoute(pc, reading);
       }
     } catch (_error) { /* a connection that closed mid-read */ }
   }

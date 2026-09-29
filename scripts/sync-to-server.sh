@@ -124,7 +124,20 @@ verify_assets() {
             printf "  ${ERR}DIFF${NC}  %s\n" "$f"
             mismatched=$((mismatched + 1))
         fi
-    done < <(printf '%s\n' index.html sw.js manifest.webmanifest css/styles.css js/app.js js/chat.js js/dialogs.js js/desktop-bridge.js js/ssh-keys.js js/backup.js js/advanced-crypto.js js/crypto-config.js)
+    /* The chat parts are in here, all of them.
+     *
+     * The list used to be twelve fixed names and not one of them was under
+     * js/chat/, which is where the messenger actually lives -- the relay
+     * routing, the receipts, the calls, the carrier, every one of them. So a
+     * stale Docker layer could leave the application serving last week's chat
+     * while this function said all eleven assets matched, and it did: the file
+     * was on the server's disk and the container held the old one, and the
+     * deployment reported success. deploy.sh already fetches every chat part to
+     * count the 200s; the missing half was comparing what came back. */
+    done < <({
+        printf '%s\n' index.html sw.js manifest.webmanifest css/styles.css js/app.js js/chat.js js/dialogs.js js/desktop-bridge.js js/ssh-keys.js js/backup.js js/advanced-crypto.js js/crypto-config.js
+        ls js/chat/*.js 2>/dev/null
+    })
     if [ "$mismatched" -eq 0 ]; then
         ok "all $checked web assets match the working tree"
         return 0
@@ -219,17 +232,26 @@ log "Restarting the stack"
 # host file had the new location blocks, the freshly built image did not, and
 # the deployment reported success. Compare what is inside the container with
 # what was just shipped, and say so if they differ.
+#
+# The TEMPLATE is what gets compared, not conf.d/default.conf. The file the
+# image now carries is /etc/nginx/templates/default.conf.template, and the
+# entrypoint renders it into conf.d with this deployment's domain substituted in
+# -- so the rendered file is SUPPOSED to differ from the repository's copy, and
+# comparing against it declared every deployment stale and forced a --no-cache
+# rebuild of the web image on each run. The template is the file COPY put there,
+# which is the thing this check was ever about.
 APP_CONTAINER="${APP_CONTAINER:-Poorija-Cryptography_App}"
-if docker exec "$APP_CONTAINER" test -f /etc/nginx/conf.d/default.conf 2>/dev/null; then
+NGINX_IN_IMAGE=/etc/nginx/templates/default.conf.template
+if docker exec "$APP_CONTAINER" test -f "$NGINX_IN_IMAGE" 2>/dev/null; then
     shipped_sum="$(sha256sum config/nginx.conf 2>/dev/null | cut -d' ' -f1)"
-    running_sum="$(docker exec "$APP_CONTAINER" sha256sum /etc/nginx/conf.d/default.conf 2>/dev/null | cut -d' ' -f1)"
+    running_sum="$(docker exec "$APP_CONTAINER" sha256sum "$NGINX_IN_IMAGE" 2>/dev/null | cut -d' ' -f1)"
     if [ -n "$shipped_sum" ] && [ "$shipped_sum" != "$running_sum" ]; then
         warn "The running container's nginx config is not the one just shipped."
         echo "        Forcing a clean rebuild of the web image."
         "${COMPOSE_CMD[@]}" build --no-cache --pull poorija-cryptography \
             && "${COMPOSE_CMD[@]}" up -d --force-recreate poorija-cryptography
         sleep 3
-        running_sum="$(docker exec "$APP_CONTAINER" sha256sum /etc/nginx/conf.d/default.conf 2>/dev/null | cut -d' ' -f1)"
+        running_sum="$(docker exec "$APP_CONTAINER" sha256sum "$NGINX_IN_IMAGE" 2>/dev/null | cut -d' ' -f1)"
         if [ "$shipped_sum" != "$running_sum" ]; then
             fail "The container still is not serving the shipped nginx config."
             exit 1

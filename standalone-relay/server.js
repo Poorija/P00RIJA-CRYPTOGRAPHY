@@ -21,6 +21,10 @@ const webpush = require('web-push');
    — while scripts/server.js had grown group, voice-or-video and, now, Persian.
    Dockerfile.relay copies the module in beside this server. */
 const { pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions } = require('./lib/push-wording.js');
+const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey } = require('./lib/relay-identity.js');
+const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
+const { openTransit, transitFacts } = require('./lib/relay-transit.js');
+const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
 // Simple .env loader for native runs
@@ -51,6 +55,80 @@ const defaultDataDir = fs.existsSync('/data') && (function() { try { fs.accessSy
 
 const PUSH_STORE_PATH = process.env.CHAT_PUSH_STORE_PATH || path.join(defaultDataDir, 'push-subscriptions.json');
 const OFFLINE_STORE_PATH = process.env.CHAT_OFFLINE_STORE_PATH || path.join(defaultDataDir, 'offline-messages.json');
+/* What build this relay is, so a deployment can be verified rather than
+   assumed. Two relays that carry for each other have to be kept in step, and
+   until now nothing a relay said identified which tree it was built from —
+   which made "are they in step?" a question with no answer.
+   Read from the package.json that ships beside the server, and tolerant of it
+   being absent: an unknown version is worth reporting as unknown, not worth
+   refusing to start over. */
+const RELAY_BUILD = (() => {
+  /* A buildTag is what distinguishes the tree's own package.json from
+     config/relay-overrides.json, which the deployed image copies to
+     package.json and which carries a placeholder version of 1.0.0. Reporting
+     that as the build would be worse than reporting nothing, so a candidate
+     without a buildTag is not the one being looked for.
+     The two images lay the file out differently — the deployed relay runs from
+     /app/scripts, the distribution from /app — so both shapes are tried. */
+  for (const candidate of ['../app-version.json', './app-version.json',
+    './package.json', '../package.json']) {
+    try {
+      const pkg = require(candidate);
+      if (pkg?.version && pkg?.buildTag) {
+        return { version: String(pkg.version), buildTag: String(pkg.buildTag) };
+      }
+    } catch (_error) { /* try the next one */ }
+  }
+  return { version: '', buildTag: '' };
+})();
+
+/* This relay's own name, and the private half it proves with. See
+   scripts/lib/relay-identity.js for why it is an X25519 key and why the id
+   covers that key alone. */
+/* Beside the rest of the server state rather than in the default data
+   directory, which is the same rule the policy and self-destruct stores
+   follow: a deployment that moved its data somewhere else moved ALL of it,
+   and an identity left behind is a relay that silently renames itself the
+   first time somebody runs it with a different store path. */
+const RELAY_IDENTITY_PATH = process.env.CHAT_RELAY_IDENTITY_PATH
+  || path.join(path.dirname(OFFLINE_STORE_PATH), 'relay-identity.json');
+const relayIdentity = loadOrCreateRelayIdentity(RELAY_IDENTITY_PATH);
+if (relayIdentity.source !== 'file') {
+  console.log(`[Relay] Relay identity ${formatRelayId(relayIdentity.id)}`);
+}
+/* Transit peers: the other relays this one will hand traffic to, and take it
+   from. Named by identity with an address attached, because an address alone
+   names whoever holds the hostname today.
+   Empty means transit is off, which is the default. A relay that carried for
+   anyone who asked would be an open relay — somebody else's traffic at this
+   operator's expense — and the arrangement this exists for is between two
+   operators who have already agreed with each other. */
+const TRANSIT_PEERS = parseTransitPeers(process.env.CHAT_TRANSIT_PEERS || '');
+/* Off by default, and it matters less than it looks: the link is
+   authenticated by relay identity whatever the transport says. See the note
+   above makeIdentityFetcher. */
+const TRANSIT_VERIFY_TLS = process.env.CHAT_TRANSIT_INSECURE_TLS !== '1';
+const relayPrivate = relayPrivateKey(relayIdentity);
+const relayPeers = createRelayPeers({
+  identity: publicRelayIdentity(relayIdentity),
+  privateKey: relayPrivate,
+  pqPrivateKey: relayPqPrivateKey(relayIdentity),
+  allowlist: TRANSIT_PEERS.map((peer) => peer.id),
+  WebSocketImpl: WebSocket,
+  fetchIdentity: makeIdentityFetcher({ verifyTls: TRANSIT_VERIFY_TLS }),
+  verifyTls: TRANSIT_VERIFY_TLS,
+  onFrame: (payload, link) => handleTransitFrame(payload, link),
+});
+if (relayPeers.enabled()) {
+  console.log(`[Transit] enabled for ${TRANSIT_PEERS.length} relay(s)`);
+  /* Dialled once at start and redialled on its own backoff afterwards. An
+     entry with no address is one this relay will answer but never call. */
+  for (const peer of TRANSIT_PEERS) {
+    if (peer.origin) setTimeout(() => relayPeers.dial(peer.id, peer.origin).catch(() => {}), 500).unref?.();
+  }
+}
+
+
 const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'server-policy.json');
 const SELF_DESTRUCT_STORE_PATH = process.env.CHAT_SELF_DESTRUCT_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'self-destruct-records.json');
 
@@ -2372,10 +2450,27 @@ app.get('/chat-health', (req, res) => {
     service: 'poorija-chat-signal',
     peers: presence.size,
     turnEnabled: TURN_URLS.length > 0,
+    /* So a client learns the relay's name in the probe it already makes. */
+    relayId: relayIdentity.id,
+    /* Which tree this relay was built from, so a deploy can check it. */
+    version: RELAY_BUILD.version,
+    buildTag: RELAY_BUILD.buildTag,
+    /* How many other relays this one can actually hand traffic to right now,
+       which is the only honest measure of transit being up. */
+    transit: relayPeers.status(),
     peerOrigin: publicUrls.relayOrigin,
     presenceUrl: publicUrls.presenceUrl,
     timestamp: new Date().toISOString(),
   });
+});
+
+/* Who this relay is. Public on purpose: it is a name, the same way a TLS
+   certificate is, and a client that cannot read it cannot pin it. Nothing
+   private is in the bundle -- publicRelayIdentity builds it from the public
+   half alone. */
+app.get('/relay-identity', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  res.json({ ok: true, ...publicRelayIdentity(relayIdentity) });
 });
 
 app.get('/turn-config', (req, res) => {
@@ -2703,6 +2798,12 @@ app.post('/self-destruct/records/:id/open', (req, res) => {
   res.json({ ok: true, ...publicSelfDestructRecord(record) });
 });
 
+/* PeerJS installs its own 'upgrade' listener, and a listener cannot be asked
+   politely to ignore a path: whatever it does not recognise, it answers 400.
+   Taking its listeners off the server and calling them from the router below
+   is the same arrangement the deployed relay already uses, and it is what
+   lets a second WebSocket path exist here at all. */
+const upgradeListenersBeforePeer = new Set(server.listeners('upgrade'));
 const peerServer = ExpressPeerServer(server, {
   path: '/',
   proxied: true,
@@ -2710,6 +2811,11 @@ const peerServer = ExpressPeerServer(server, {
   key: 'peerjs',
 });
 app.use('/peerjs', peerServer);
+const peerUpgradeListeners = server.listeners('upgrade')
+  .filter((listener) => !upgradeListenersBeforePeer.has(listener));
+for (const listener of peerUpgradeListeners) {
+  server.off('upgrade', listener);
+}
 
 const offlineBoxes = loadOfflineBoxes();
 const pushSubscriptions = loadPushSubscriptions();
@@ -3787,6 +3893,298 @@ function beginIdentityChallenge(record) {
   }
 }
 
+/* The socket another relay arrives on.
+ *
+ * 24 MB rather than the 12 MB a client frame gets: a transit envelope wraps
+ * one of those and the wrapping is base64, which costs a third, and the frame
+ * around it costs a little more. A ceiling below what the inner path allows
+ * would drop the largest legitimate messages and nothing would say why.
+ *
+ * Nothing is accepted at all while transit is off, and the handshake decides
+ * the rest — see relay-peers.js. */
+const relayLinkServer = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
+relayLinkServer.on('error', (error) => console.error('[Transit] link server error:', error));
+relayLinkServer.on('connection', (ws) => relayPeers.accept(ws));
+function handleRelayLinkUpgrade(request, socket, head) {
+  if (!relayPeers.enabled()) { socket.destroy(); return; }
+  relayLinkServer.handleUpgrade(request, socket, head, (ws) => {
+    relayLinkServer.emit('connection', ws, request);
+  });
+}
+/* The one upgrade listener on this server, because PeerJS's were taken off
+   above. Anything that is not a relay link is handed to them exactly as it
+   would have been, including the 400 they answer for a path they do not
+   know. */
+server.on('upgrade', (request, socket, head) => {
+  let pathname = '';
+  try {
+    pathname = new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname;
+  } catch (_error) { socket.destroy(); return; }
+  if (pathname === '/relay-link') {
+    handleRelayLinkUpgrade(request, socket, head);
+    return;
+  }
+  for (const listener of peerUpgradeListeners) {
+    listener.call(server, request, socket, head);
+  }
+});
+
+/* Signals that are meaningless once the moment passes: never stored, never
+   pushed. The full relay in scripts/server.js holds the identical set; a call
+   frame that is stored is a call that rings again later with nothing behind it,
+   and this relay trusted the client's `persist` flag alone until that happened.
+   call-invite is deliberately absent: it is the one call frame meant to wait for
+   somebody who was away. */
+const EPHEMERAL_PAYLOADS = new Set([
+  'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
+  'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
+  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+]);
+
+/* Delivering one envelope to one recipient on this relay.
+ *
+ * Lifted out of the socket handler unchanged so that a message arriving over
+ * a transit link takes exactly this path and not a second one written to
+ * resemble it. Retention, the push wording, the ephemeral and pushable lists,
+ * the store-and-forward for a connected-but-asleep app: all of it is decided
+ * here once, and a transit envelope gets the same decisions because it is the
+ * same code.
+ *
+ * `reply` is how the sender is answered — a socket send for a local client, a
+ * frame back down the link for a carried one. `fromFingerprint` is whoever
+ * wrote it, which for a carried envelope the inner payload carries anyway:
+ * this relay is the RECIPIENT'S relay, and it already knows everything about
+ * its own users. What transit withholds is the carrying relay learning the
+ * pair, not this one. */
+/* ---- carrying somebody else's envelope ------------------------------- */
+/* What a client hands over when its contact lives on another relay, and what
+   comes back. This relay is the CARRIER here: it cannot open the envelope, so
+   it cannot know who the message is for — which is the whole arrangement.
+ *
+ * It keeps one thing, in memory, for as long as it takes to answer: which
+ * socket asked. Not the envelope, not the recipient's relay against the
+ * sender, nothing on disk. A relay that stores nothing has nothing to hand
+ * over, which is a security property and a legal one at the same time. */
+const TRANSIT_WAIT_MS = 60000;
+const transitWaiting = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [ref, waiting] of transitWaiting) {
+    if (waiting.expiresAt <= now) transitWaiting.delete(ref);
+  }
+}, 15000).unref?.();
+
+function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
+  const facts = transitFacts(envelope);
+  if (!facts.toRelay) {
+    reply({ type: 'error', reason: 'transit-no-relay', tag });
+    return;
+  }
+  if (facts.toRelay === relayIdentity.id) {
+    /* Addressed to this relay, which means the sender worked out the route
+       wrongly. Saying so is better than opening it here and quietly making
+       the transit layer meaningless for that message. */
+    reply({ type: 'error', reason: 'transit-loop', tag });
+    return;
+  }
+  const link = relayPeers.linkFor(facts.toRelay);
+  if (!link) {
+    /* The sender is told, and that matters: somebody who believes they are
+       sending through a carrier and is not would make a different decision
+       about what to send. */
+    reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+    return;
+  }
+  /* The carrier's own correlation id, not the client's tag. The tag belongs
+     to the client and there is no reason for another relay to see it. */
+  const ref = crypto.randomUUID();
+  transitWaiting.set(ref, { clientId, tag, reply, expiresAt: Date.now() + TRANSIT_WAIT_MS });
+  if (!link.send({ kind: 'transit', ref, envelope })) {
+    transitWaiting.delete(ref);
+    reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+    return;
+  }
+  console.log(`[Transit] carried ${facts.bytes} bytes for ${facts.toRelay.slice(0, 12)}`);
+}
+
+/* A frame off a relay link. Two kinds: an envelope to deliver here, and the
+   answer to one this relay carried. */
+/* At most this many presence questions from one peer relay in one minute.
+   Generous for a person opening conversations, useless for a sweep. */
+const PRESENCE_QUERY_PER_MINUTE = 60;
+const presenceQueryCounts = new WeakMap();
+function presenceQueryAllowed(link) {
+  const now = Date.now();
+  const seen = presenceQueryCounts.get(link);
+  if (!seen || now - seen.since > 60000) {
+    presenceQueryCounts.set(link, { since: now, count: 1 });
+    return true;
+  }
+  seen.count += 1;
+  return seen.count <= PRESENCE_QUERY_PER_MINUTE;
+}
+
+function handleTransitFrame(payload, link) {
+  if (payload?.kind === 'transit') {
+    let inner;
+    try {
+      inner = openTransit(relayPrivate, relayIdentity.id, payload.envelope);
+    } catch (error) {
+      /* Every refusal looks the same from the other side. Saying WHY an
+         envelope did not open tells a carrier something about what was in
+         it. */
+      link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-rejected' } });
+      return;
+    }
+    /* A question about one of this relay's own clients, rather than something
+     * to hand to one.
+     *
+     * Presence is per relay -- a relay broadcasts its own clients and nobody
+     * else's -- so somebody on the far side is shown as offline for ever, which
+     * is ignorance dressed up as knowledge. This answers for exactly ONE
+     * fingerprint at a time, and only one already known to the asker: a
+     * fingerprint is 256 bits, so it cannot be guessed, and holding one means
+     * holding that person's card. It is also strictly less than this relay
+     * already gives its own clients, who are handed every other client's
+     * presence unasked.
+     *
+     * The rate limit is per link and per minute, so a peer relay cannot turn
+     * this into a sweep even for fingerprints it does somehow hold.
+     */
+    if (inner?.type === 'presence-query') {
+      if (!presenceQueryAllowed(link)) {
+        link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-rejected' } });
+        return;
+      }
+      const asked = String(inner.toFingerprint || '').slice(0, 128);
+      link.send({
+        kind: 'transit-result',
+        ref: payload.ref,
+        answer: { type: 'presence', toFingerprint: asked, up: Boolean(findOpenPresenceByFingerprint(asked)) },
+      });
+      return;
+    }
+    deliverRelayMessage(inner, {
+      clientId: '',
+      /* Deliberately blank. For a local client this field is the fingerprint
+         the relay CHALLENGED and the client proved; nothing was proved here,
+         so presenting the sender's claim in the same field would be this
+         relay vouching for something it did not check. The recipient reads
+         the sender out of the sealed payload, where it can verify it. */
+      fromFingerprint: '',
+      reply: (answer) => link.send({ kind: 'transit-result', ref: payload.ref, answer }),
+    });
+    return;
+  }
+  if (payload?.kind === 'transit-result') {
+    const waiting = transitWaiting.get(String(payload.ref || ''));
+    if (!waiting) return;
+    transitWaiting.delete(String(payload.ref));
+    waiting.reply({ ...transitAnswerForClient(payload.answer), tag: waiting.tag });
+  }
+}
+
+/* What a linked relay is allowed to say to one of this relay's clients.
+ *
+ * The answer to a carried envelope is written by the OTHER relay and arrives
+ * on this relay's socket to that client, which means passing it through
+ * unchanged hands a peer relay a frame injector: 'server-kicked',
+ * 'id-challenge', anything the client acts on. It is rebuilt here from the
+ * two shapes a delivery can actually produce, field by field, and everything
+ * else becomes a plain refusal. */
+function transitAnswerForClient(answer) {
+  const type = String(answer?.type || '');
+  if (type === 'queued') {
+    return {
+      type: 'queued',
+      toFingerprint: String(answer.toFingerprint || '').slice(0, 128),
+      count: Number.isFinite(answer.count) ? answer.count : 0,
+    };
+  }
+  if (type === 'presence') {
+    return {
+      type: 'presence',
+      toFingerprint: String(answer.toFingerprint || '').slice(0, 128),
+      up: answer.up === true,
+    };
+  }
+  if (type === 'error') {
+    /* The reason is echoed only when it is one this relay would have sent
+       itself, so a peer cannot invent a reason a client has a special path
+       for. */
+    const known = new Set(['target-offline', 'target-restricted', 'transit-rejected']);
+    const reason = String(answer.reason || '');
+    return { type: 'error', reason: known.has(reason) ? reason : 'transit-rejected' };
+  }
+  return { type: 'error', reason: 'transit-rejected' };
+}
+
+function deliverRelayMessage(message, { clientId = '', fromFingerprint = '', reply = () => {} } = {}) {
+totalRelays++;
+  const toFingerprint = String(message.toFingerprint || '').slice(0, 128);
+  /* Echoed back on every reply so the sender can line a refusal or a
+     queue confirmation up with the message it was sent for. */
+  const tag = String(message.tag || '').slice(0, 96);
+  /* clientId routing is positional; fingerprint routing additionally
+     requires the target to have proven the identity it claims. */
+  const target = presence.get(String(message.toClientId || '')) ||
+    findOpenPresenceByFingerprint(toFingerprint);
+
+  const payloadType = String(message.payload?.type || 'unknown');
+
+  const targetRestriction = target
+    ? getRestrictionForIdentity(target)
+    : (toFingerprint ? getRestrictionForIdentity({ fingerprint: toFingerprint }) : null);
+  if (targetRestriction) {
+    console.warn(`[Relay] Blocked delivery to restricted target ${toFingerprint || message.toClientId}`);
+    reply({ type: 'error', reason: 'target-restricted', toClientId: message.toClientId || '', toFingerprint, tag });
+    return;
+  }
+
+  if (!target) {
+    /* Judged by what the envelope carries, not the word on the outside: every
+       sealed envelope arrives as 'offline-chat', so the inner name is the one
+       that decides. This is the server half, so an out-of-date client cannot
+       fill a mailbox with signals either. */
+    const innerType = String(message.payload?.inner || '');
+    if (EPHEMERAL_PAYLOADS.has(payloadType) || EPHEMERAL_PAYLOADS.has(innerType)) {
+      reply({ type: 'error', reason: 'target-offline', toClientId: message.toClientId || '', tag });
+      return;
+    }
+    if (message.persist && toFingerprint) {
+      console.log(`[Relay] Target offline, queuing ${payloadType} for ${toFingerprint}`);
+      const queued = offlineBoxes.get(toFingerprint) || [];
+      queued.push({
+        type: 'relay',
+        relayId: crypto.randomUUID(),
+        fromClientId: clientId,
+        fromFingerprint: fromFingerprint,
+        payload: message.payload || null,
+        queuedAt: new Date().toISOString(),
+      });
+      offlineBoxes.set(toFingerprint, queued);
+      /* Retention and the caps decide what stays — media bytes first,
+         then the text tail — and the sweep logs anything it drops. */
+      sweepRetention(toFingerprint);
+      saveOfflineBoxes();
+      const remaining = offlineBoxes.get(toFingerprint);
+      reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag });
+      sendPushNotification(toFingerprint, payloadType).catch((error) => console.error(error));
+      return;
+    }
+    console.warn(`[Relay] Target not found for ${payloadType} to ${message.toClientId || toFingerprint}`);
+    reply({ type: 'error', reason: 'target-offline', toClientId: message.toClientId || '', tag });
+    return;
+  }
+
+  safeSend(target.ws, {
+    type: 'relay',
+    fromClientId: clientId,
+    fromFingerprint: fromFingerprint,
+    payload: message.payload || null,
+  });
+}
+
 /* Same ceiling as the relay frames: a hello carries an avatar but nothing
    near this size, and an unbounded frame is buffered before it is parsed. */
 const wsServer = new WebSocketServer({ server: presenceServer, path: '/chat-signal', maxPayload: 12 * 1024 * 1024 });
@@ -3965,65 +4363,33 @@ wsServer.on('connection', (ws, req) => {
       return;
     }
 
+    /* An envelope for somebody on another relay. This relay cannot open it and
+       will not try: it looks at the one field it is meant to read, finds the
+       link, and passes it on. Nothing about it is written down. */
+    if (message.type === 'transit') {
+      const senderRestriction = getRestrictionForIdentity(record);
+      if (senderRestriction) {
+        disconnectRestrictedPeer(record, senderRestriction);
+        return;
+      }
+      carryTransitEnvelope(message, {
+        clientId,
+        tag: String(message.tag || '').slice(0, 96),
+        reply: (payload) => safeSend(ws, payload),
+      });
+      return;
+    }
+
     if (message.type === 'relay') {
       const senderRestriction = getRestrictionForIdentity(record);
       if (senderRestriction) {
         disconnectRestrictedPeer(record, senderRestriction);
         return;
       }
-      totalRelays++;
-      const toFingerprint = String(message.toFingerprint || '').slice(0, 128);
-      /* Echoed back on every reply so the sender can line a refusal or a
-         queue confirmation up with the message it was sent for. */
-      const tag = String(message.tag || '').slice(0, 96);
-      /* clientId routing is positional; fingerprint routing additionally
-         requires the target to have proven the identity it claims. */
-      const target = presence.get(String(message.toClientId || '')) ||
-        findOpenPresenceByFingerprint(toFingerprint);
-
-      const payloadType = String(message.payload?.type || 'unknown');
-
-      const targetRestriction = target
-        ? getRestrictionForIdentity(target)
-        : (toFingerprint ? getRestrictionForIdentity({ fingerprint: toFingerprint }) : null);
-      if (targetRestriction) {
-        console.warn(`[Relay] Blocked delivery to restricted target ${toFingerprint || message.toClientId}`);
-        safeSend(ws, { type: 'error', reason: 'target-restricted', toClientId: message.toClientId || '', toFingerprint, tag });
-        return;
-      }
-
-      if (!target) {
-        if (message.persist && toFingerprint) {
-          console.log(`[Relay] Target offline, queuing ${payloadType} for ${toFingerprint}`);
-          const queued = offlineBoxes.get(toFingerprint) || [];
-          queued.push({
-            type: 'relay',
-            relayId: crypto.randomUUID(),
-            fromClientId: clientId,
-            fromFingerprint: record.fingerprint,
-            payload: message.payload || null,
-            queuedAt: new Date().toISOString(),
-          });
-          offlineBoxes.set(toFingerprint, queued);
-          /* Retention and the caps decide what stays — media bytes first,
-             then the text tail — and the sweep logs anything it drops. */
-          sweepRetention(toFingerprint);
-          saveOfflineBoxes();
-          const remaining = offlineBoxes.get(toFingerprint);
-          safeSend(ws, { type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag });
-          sendPushNotification(toFingerprint, payloadType).catch((error) => console.error(error));
-          return;
-        }
-        console.warn(`[Relay] Target not found for ${payloadType} to ${message.toClientId || toFingerprint}`);
-        safeSend(ws, { type: 'error', reason: 'target-offline', toClientId: message.toClientId || '', tag });
-        return;
-      }
-
-      safeSend(target.ws, {
-        type: 'relay',
-        fromClientId: clientId,
+      deliverRelayMessage(message, {
+        clientId,
         fromFingerprint: record.fingerprint,
-        payload: message.payload || null,
+        reply: (payload) => safeSend(ws, payload),
       });
       return;
     }

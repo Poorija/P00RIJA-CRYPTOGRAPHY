@@ -4,11 +4,17 @@ FROM node:20-alpine
 WORKDIR /app
 COPY standalone-relay/package.json .
 RUN npm install --production
+# Named the same as in the deployed image, so the server looks in one place.
+COPY standalone-relay/package.json ./app-version.json
 COPY standalone-relay/server.js .
 # What a notification is allowed to say, shared with scripts/server.js rather
 # than written twice. The copy that used to live inside this server had drifted
 # to one call verb, no group, no voice-or-video and English only.
-COPY scripts/lib/push-wording.js ./lib/push-wording.js
+# The whole directory, not one file. Every module the two relays share lives
+# here, and naming them one at a time is how a new one reaches the deployed
+# relay and not this one — which is the drift tools/check-relay-parity.cjs
+# exists because of.
+COPY scripts/lib ./lib
 COPY vendor ./vendor
 EXPOSE 9000 9001
 CMD ["node", "--expose-gc", "server.js"]

@@ -252,6 +252,10 @@ const opened = await page.evaluate(async ({ seal, payload }) => {
     return {
       text: inner ? new TextDecoder().decode(inner).slice(0, 120) : '',
       type: message?.type || '',
+      /* v2 wraps the message together with the session key and with where to
+         write back. v1 held the message alone. */
+      shape: ('message' in (message || {})) ? 'v2' : 'v1',
+      homeRelay: message?.homeRelay || null,
     };
   } catch (error) {
     return { error: String(error).slice(0, 120) };
@@ -261,6 +265,17 @@ console.log('  unsealed: ' + JSON.stringify(opened));
 check('the absent contact\'s private key opens it',
   String(opened.text || '').includes('should survive until you return'),
   opened.error || String(opened.text).slice(0, 60));
+
+/* Where to write back rides inside the seal, so that two people who met
+   through one person's code can talk in both directions — and so that no
+   relay on the way can read it or change it. Only the v2 shape carries it. */
+if (opened.shape === 'v2') {
+  check('the sealed body says where to write back',
+    Boolean(opened.homeRelay) && typeof opened.homeRelay.origin === 'string',
+    JSON.stringify(opened.homeRelay));
+} else {
+  console.log(`  (v1 envelope shape — the return route rides in v2 bodies only)`);
+}
 
 check('no script threw while doing it', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 

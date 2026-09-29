@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.44.6';
+const APP_VERSION_SEMVER = '2.77.0';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v75';
+  return 'chat-v85';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -849,7 +849,7 @@ updateWizardHtml: '<b>Smart Wizard & Secure Notes:</b> سناریوهای آما
 updateSecureChatHtml: '<b>Secure Chat:</b> چت امن با طراحی موبایل‌محور، رله رمزنگاری‌شده، TURN، Web Push، پیام صوتی، پیام زمان‌دار، تیک‌ها و تماس صوتی/تصویری.',
 updateDesktopHtml: '<b>PWA:</b> نصب‌پذیری وب، service worker و داشبورد واکنش‌گرا.',
 secureChatGuideTitle: 'راهنمای چت امن',
-chatGuideConnectHtml: '<b>اتصال:</b> Server URL همان دامنه HTTPS برنامه است. اگر Docker با profile TURN اجرا شده باشد، برنامه TURN URL/User/Password را از /turn-config می‌گیرد.',
+chatGuideConnectHtml: '<b>اتصال:</b> Server URL همان دامنه HTTPS برنامه است. اگر Docker با profile TURN اجرا شده باشد، برنامه TURN URL/User/Password را از /turn-config همان رله می‌گیرد — و با عوض شدن رله دوباره می‌گیرد، تا تماس از TURN نزدیکِ همان رله برود. اگر این سه را خودتان کامل پر کنید، دیگر جایگزین نمی‌شود.',
 chatGuideSessionHtml: '<b>ارسال پیام:</b> هنگام اولین ارسال، برنامه سشن RSA -> AES-GCM را خودکار می‌سازد؛ دیگر لازم نیست کاربر جداگانه دکمه کلید را بزند.',
 chatGuideOfflineHtml: '<b>آفلاین:</b> رله فقط payload رمزنگاری‌شده و اعلان عمومی Push را نگه می‌دارد؛ متن پیام روی سرور قابل خواندن نیست.',
 chatGuideCallsHtml: '<b>تماس‌ها:</b> برای اینترنت واقعی TURN را با دامنه/IP عمومی تنظیم کنید. قطع لحظه‌ای ICE فوراً تماس را نمی‌بندد و فقط در حالت failed/closed پایان می‌دهد.',
@@ -1039,6 +1039,22 @@ callRingtone: 'زنگ تماس',
 messageSound: 'صدای پیام',
 turnServerUrl: 'آدرس TURN',
 turnUsername: 'نام کاربری TURN',
+carrierSend: 'ارسال از راه دیگر',
+carrierTitle: 'ارسال از راه دیگر',
+carrierIntro: 'وقتی رله در دسترس نیست: پیام برای مخاطب رمز می‌شود و داخل یک عکس معمولی پنهان می‌شود. عکس را با هر پیام‌رسانی که کار می‌کند بفرستید — آن پیام‌رسان می‌بیند که عکسی فرستادید، ولی نمی‌تواند بخواند.',
+carrierMake: 'ساخت عکس',
+carrierRead: 'خواندن عکس',
+carrierFor: 'برای',
+carrierTextPlaceholder: 'پیام خود را بنویسید…',
+carrierPickFirst: 'ابتدا یک عکس انتخاب کنید',
+carrierPickImage: 'انتخاب عکس',
+carrierMakeBtn: 'ساخت عکس برای ارسال',
+carrierHowToSend: 'عکس را همان‌طور که همیشه عکس می‌فرستید بفرستید. بُرش یا تغییر اندازه پیام را از بین می‌برد؛ فشرده‌سازی خودکار پیام‌رسان نه.',
+carrierPickReceived: 'انتخاب عکس دریافتی',
+carrierReadPlaceholder: 'پیام خوانده‌شده این‌جا نشان داده می‌شود…',
+carrierKeep: 'افزودن به گفتگو',
+sendReceipts: 'ارسال رسید خواندن',
+sendReceiptsHint: 'رسید خواندن یک پاسخ فوری و تضمین‌شده به هر پیامی است که می‌رسد — و همین آن را برای کسی که بیرونِ ترافیک را می‌بیند سودمند می‌کند: بدون خواندن هیچ محتوایی، می‌شود از روی همان پاسخ فهمید چه کسانی با هم حرف می‌زنند. خاموش: این پاسخ خودکار فرستاده نمی‌شود، و طرف مقابل تیک دوم را نمی‌بیند.',
 turnCredential: 'رمز TURN',
 turnHelpNote: 'نام کاربری و رمز TURN همان `TURN_USER` و `TURN_PASSWORD` داخل فایل `.env` یا `docker-compose.env.example` هستند. برای کاربران بیرون از شبکه، Server URL و TURN باید دامنه/IP قابل دسترس عمومی باشند.',
 connect: 'اتصال',
@@ -1884,7 +1900,7 @@ updateWizardHtml: '<b>Smart Wizard & Secure Notes:</b> Guided scenarios for comm
 updateSecureChatHtml: '<b>Secure Chat:</b> Mobile-first encrypted chat with relay queues, TURN, Web Push, voice messages, timed messages, ticks, and voice/video calls.',
 updateDesktopHtml: '<b>PWA:</b> Installable web app support, service worker caching, and responsive dashboard navigation.',
 secureChatGuideTitle: 'Secure Chat Guide',
-chatGuideConnectHtml: '<b>Connection:</b> Server URL is the same HTTPS origin that serves the app. When Docker runs with the TURN profile, the app can read TURN URL/User/Password from /turn-config.',
+chatGuideConnectHtml: '<b>Connection:</b> Server URL is the same HTTPS origin that serves the app. When Docker runs with the TURN profile, the app reads TURN URL/User/Password from that relay\'s /turn-config — and reads them again when the relay changes, so a call uses the TURN beside the relay in use. Fill all three in yourself and nothing replaces them.',
 chatGuideSessionHtml: '<b>Sending:</b> The first message automatically creates the RSA -> AES-GCM secure session; users do not need to press the key button first.',
 chatGuideOfflineHtml: '<b>Offline:</b> The relay stores only encrypted payloads and generic Push alerts; message text is not readable by the server.',
 chatGuideCallsHtml: '<b>Calls:</b> For real internet use, configure TURN with a public domain/IP. Temporary ICE disconnects no longer end calls immediately; only failed/closed states do.',
@@ -2074,6 +2090,22 @@ callRingtone: 'Call Ringtone',
 messageSound: 'Message Sound',
 turnServerUrl: 'TURN Address',
 turnUsername: 'TURN Username',
+carrierSend: 'Send another way',
+carrierTitle: 'Send another way',
+carrierIntro: 'For when the relay cannot be reached: the message is encrypted to your contact and hidden inside an ordinary photograph. Send the photo with whatever messenger still works — it sees that you sent a picture, and cannot read it.',
+carrierMake: 'Make a photo',
+carrierRead: 'Read a photo',
+carrierFor: 'For',
+carrierTextPlaceholder: 'Write your message…',
+carrierPickFirst: 'Pick a photo first',
+carrierPickImage: 'Pick a photo',
+carrierMakeBtn: 'Make the photo to send',
+carrierHowToSend: 'Send the photo the way you always send photos. Cropping or resizing destroys the message; the messenger\'s own compression does not.',
+carrierPickReceived: 'Pick the photo you received',
+carrierReadPlaceholder: 'The message read out of it appears here…',
+carrierKeep: 'Add to the conversation',
+sendReceipts: 'Send read receipts',
+sendReceiptsHint: 'A read receipt is a guaranteed, immediate reply to every message that arrives — which is exactly what makes it useful to somebody watching the outside of the traffic: without reading any content, the pairs who are talking can be worked out from that reply alone. Off: the automatic reply is not sent, and the other side does not see the second tick.',
 turnCredential: 'TURN Password',
 turnHelpNote: 'TURN username and password are the same as `TURN_USER` and `TURN_PASSWORD` in your `.env` or `docker-compose.env.example`. For users outside the network, Server URL and TURN must be public accessible domains/IPs.',
 connect: 'Connect',
@@ -6534,7 +6566,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.44.6-chat-v75';
+const reloadKey = 'poorija-sw-reload-2.77.0-chat-v85';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6547,7 +6579,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.44.6-chat-v75', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.77.0-chat-v85', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -7426,10 +7458,31 @@ const attempts = isCoarsePointerDevice()
 () => ({ ...baseRequest(), authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' } }),
 () => ({ ...bareRequest(), authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' } })
 ]
+/* On a desktop the FIRST attempt asks for the authenticator built into this
+   machine, and says so twice.
+ *
+ * Without authenticatorAttachment a Chromium browser has to assume every
+   transport is possible, so it opens the full "use a passkey" chooser — and on
+   macOS that chooser leads with scanning a QR code or reaching a phone over
+   Bluetooth. Safari goes straight to Touch ID because it has only one
+   authenticator to offer. The platform attempt existed here but was THIRD, a
+   fallback after two failures, and the first attempt never failed: it succeeded
+   at showing the wrong sheet. Somebody with a fingerprint sensor was told to
+   fetch their phone.
+ *
+ * `hints` is the WebAuthn L3 way of saying the same thing to a client that
+   understands it, and an unknown member of the dictionary is ignored by one that
+   does not, so it costs nothing to say both.
+ *
+ * The attachment-free shape stays last, for a desktop whose only authenticator
+   is a security key on USB. The coarse-pointer branch above is untouched: the
+   comment there records that a platform hint can wedge the FIDO2 path Google
+   Play services serves, and that is still true. */
 : [
+() => ({ ...baseRequest(), hints: ['client-device'], authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required' } }),
+() => ({ ...baseRequest(), hints: ['client-device'], authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'preferred' } }),
 () => ({ ...baseRequest(), authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' } }),
-() => ({ ...baseRequest(), authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' } }),
-() => ({ ...baseRequest(), authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required' } })
+() => ({ ...baseRequest(), authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' } })
 ];
 let credential = null;
 let lastError = null;

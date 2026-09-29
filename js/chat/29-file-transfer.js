@@ -607,32 +607,58 @@ pending.slice(-SEEN_RECEIPT_BURST_LIMIT).forEach((entry) => {
    render pass tries again — the sender's ✓✓ must not depend on luck. */
 const sent = session
 ? sendDeliveryAck(session, entry.id, 'seen')
-: relaySessionEvent(peer, {
+: (!receiptsEnabled() || relaySessionEvent(peer, {
 type: 'receipt',
 messageId: entry.id,
 status: 'seen',
 createdAt: new Date().toISOString(),
-});
+}));
 if (sent) entry.seenAckSent = true;
 });
 storeHistory();
 }
+/* How long a 'delivered' receipt waits before it goes.
+ *
+ * The attack receiptsEnabled() describes works on the reply being IMMEDIATE
+ * and guaranteed: arrival and answer land close enough together to be paired
+ * by an observer who can read neither. A few seconds of jitter does not
+ * defeat somebody watching both ends — nothing here does, and the design says
+ * so plainly — but it stops the pairing being free.
+ *
+ * Only on 'delivered'. A 'seen' receipt already waits for a render pass that
+ * checks visibility and burst-limits, so its timing is loose already, and its
+ * caller reads the return value to decide whether to try again — which a
+ * delayed send cannot answer honestly. */
+const DELIVERED_RECEIPT_JITTER_MS = 4000;
 function sendDeliveryAck(session, messageId, status) {
 if (!session || !messageId) return false;
+/* Turned off means the automatic reply does not happen, not that it happens
+   and is hidden — see receiptsEnabled(). Answered as "sent", so the caller
+   marks it done and does not retry on every render. */
+if (!receiptsEnabled()) return true;
 const payload = {
 type: 'receipt',
 messageId,
 status,
 createdAt: new Date().toISOString(),
 };
+const put = () => {
+/* Re-checked at the moment of sending: the switch may have been turned off
+   while this was waiting, and a receipt that goes out after that would make
+   the setting a lie. */
+if (!receiptsEnabled()) return false;
 if (session.connection?.open) {
 return safeConnectionSend(session.connection, payload, 'delivery-ack');
 }
 const peerRecord = findPeerBySession(session);
-if (peerRecord) {
-return relaySessionEvent(peerRecord, payload);
-}
+if (peerRecord) return relaySessionEvent(peerRecord, payload);
 return false;
+};
+if (status === 'delivered') {
+setTimeout(put, Math.floor(Math.random() * DELIVERED_RECEIPT_JITTER_MS));
+return true;
+}
+return put();
 }
 function safeConnectionSend(connection, payload, context = 'data') {
 if (!connection?.open) return false;
@@ -678,6 +704,26 @@ kex = null;
 }
 }
 const seal = kex ? '' : await sealSessionKeyFor(session, peerRecord).catch(() => '');
+/* Where to write back, inside whichever seal is used.
+ *
+ * Without it a reply can only be sent by somebody who already holds the
+ * sender's card, so two people who met through one person's code could talk in
+ * one direction and not the other. It rides INSIDE the seal rather than on the
+ * envelope, so no relay on the way can read it or write it.
+ *
+ * It used to ride only in the prekey envelope, and that is precisely the one
+ * that a cross-relay contact never gets: the prekey travels with presence, in
+ * the hello frame, and a relay broadcasts its own clients and nobody else's. So
+ * for the only pair of people who actually need a return route, there was never
+ * one -- messages went one way, and the receipts, the files and the calls that
+ * all route the same way went nowhere at all.
+ *
+ * Not on media. A file is a stream of chunks, each its own sealed envelope, so
+ * repeating this on all of them would add a few hundred bytes per chunk -- most
+ * of a megabyte on a large file -- to say the same thing thousands of times.
+ * Every ordinary message carries it, which includes the text that goes with a
+ * file. */
+const returnRoute = messageClass === 'media' ? undefined : myHomeRelay();
 /* Encrypt the envelope's own contents, not just what is inside it. With no
    seal there is no key to do it with, and the message then travels the way it
    always did rather than not at all. */
@@ -706,8 +752,10 @@ sessionKeyRaw = '';
 }
 }
 const iv = app().generateSecureRandomBytes(12);
+/* What the return route cannot do is prove who sent it; see the trust
+   ladder in 18-file-manager-2.js for what that means and why a card wins. */
 const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, envelopeKey,
-new TextEncoder().encode(JSON.stringify({ message, sessionKeyRaw })));
+new TextEncoder().encode(JSON.stringify({ message, sessionKeyRaw, homeRelay: returnRoute })));
 body = { iv: Array.from(iv), cipher: app().arrayBufferToBase64(cipher), v: 2 };
 } catch (error) {
 console.warn('[Chat] could not encrypt under the envelope key; falling back', error);
@@ -717,7 +765,16 @@ kex = null;
 }
 if (!body && seal && session?.cryptoKey) {
 try {
-body = await encryptForSession(session, new TextEncoder().encode(JSON.stringify(message)));
+/* The same wrapper the prekey path uses, and marked v2 for the same reason:
+   the receiver decides by the shape and the version, and a build that predates
+   the return route reads this correctly as well -- it takes the v2 branch,
+   finds no sessionKeyRaw, and the guard on that is already an `if`. What it
+   does not do is carry the session key, because on this path the body is
+   encrypted with the session key itself; enclosing it would be telling
+   somebody who already has it. */
+body = await encryptForSession(session,
+new TextEncoder().encode(JSON.stringify({ message, homeRelay: returnRoute })));
+body.v = 2;
 } catch (error) {
 console.warn('[Chat] could not seal the envelope metadata; sending it plainly', error);
 body = null;
@@ -735,13 +792,353 @@ const relayTag = sanitizeRemoteId(message?.id || message?.messageId || '');
 if (relayTag) envelope.tag = relayTag;
 return sendRelayEnvelope(peerRecord, envelope);
 }
+/* Everything the hello frame carries, sent to somebody the hello frame cannot
+   reach.
+ *
+ * A relay turns hello into its presence broadcast, and that broadcast is how a
+ * contact learns your display name, your photograph, your mood, your public key
+ * and your prekey. A relay broadcasts its own clients and nobody else's, so a
+ * contact on another relay received none of it: no picture, no name changes, and
+ * -- the expensive one -- no prekey, which is what the forward-secret envelope is
+ * built from.
+ *
+ * The requirement is that two people on two relays notice no difference from two
+ * people on one, so the same facts travel the same distance by another road: a
+ * relay payload, sealed to their relay, carried by ours.
+ *
+ * What it is NOT is proof. A relay payload is not signed, exactly as a hello is
+ * not signed, so the name and the picture are worth what they are worth on one
+ * relay too -- and the KEY goes through mergePeerRecord, which pins on first
+ * sight and holds a differing one as pending rather than replacing it. Nothing
+ * here can quietly change who you are talking to. */
+const PROFILE_CARD_MIN_MS = 60000;
+const profileCardSentAt = new Map();
+
+/* The prekey is NOT in here, and that is the point of this comment.
+ *
+ * It was, for one deployment, because the prekey rides the hello frame with
+ * everything else this card carries. The result was that cross-relay messages
+ * stopped arriving at all: with a prekey in hand the sender builds the
+ * forward-secret envelope instead of the RSA-sealed one, and when the recipient
+ * cannot open that envelope the code does the careful thing -- says nothing,
+ * acknowledges nothing, and leaves it queued for redelivery, on the reasoning
+ * that a recent envelope failing to open is usually something local and
+ * temporary. Across relays it was neither: every message went into that queue
+ * and none of them ever came out, silently.
+ *
+ * A prekey is only safe to act on when its freshness is guaranteed, which is
+ * what presence gives it on one relay and what an unsigned relay payload cannot
+ * give it across two. So this card carries the things whose worst case is a
+ * stale display name, and the RSA seal -- which has no window and cannot go
+ * stale -- keeps carrying the messages. */
+function myProfileCard(askForTheirs = false) {
+  return {
+    type: 'profile-card',
+    /* Named the way the presence record names them, so the receiving side can
+       hand the whole thing to mergePeerRecord untouched. */
+    username: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
+    avatarData: chatState.profile.avatarData || '',
+    mood: String(chatState.profile.mood || '').slice(0, 40),
+    publicKeyData: chatState.identity?.publicKeyData || '',
+    fingerprint: chatState.identity?.fingerprint || '',
+    peerId: chatState.peerId || chatState.profile.stablePeerId || '',
+    homeRelay: myHomeRelay(),
+    /* One round trip, not a conversation: the first card asks for one back, the
+       reply does not ask again. */
+    pleaseReply: askForTheirs === true,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaRoute = null } = {}) {
+  if (!peerRecord?.fingerprint && !peerRecord?.clientId) return false;
+  const known = transitRouteFor(peerRecord);
+  /* viaRoute is for the REPLY, and only for the reply.
+   *
+   * Somebody answering a card on a first contact has nothing routable for the
+   * person who sent it -- that is the whole reason they were sent a card -- so
+   * without this the exchange is one-sided and the photograph only ever travels
+   * in the direction that already worked. The route comes out of the card being
+   * answered and is used once, for that answer; it is never written onto the
+   * record, because a relay payload is not signed and the trust ladder exists to
+   * stop an unproved claim becoming durable. What a forged one would receive is a
+   * display name, a photograph and a prekey -- the same things the card says to
+   * anybody who asks. */
+  const route = known || viaRoute;
+  if (!route) return false;
+  const key = peerRecord.fingerprint || peerRecord.clientId;
+  const last = profileCardSentAt.get(key) || 0;
+  if (!force && Date.now() - last < PROFILE_CARD_MIN_MS) return false;
+  profileCardSentAt.set(key, Date.now());
+  const card = myProfileCard(askForTheirs);
+  if (known) return sendRelayEnvelope(peerRecord, card);
+  sendViaTransit({
+    type: 'relay',
+    toClientId: peerRecord.clientId || '',
+    toFingerprint: peerRecord.fingerprint || '',
+    payload: card,
+    persist: false,
+  }, route, peerRecord);
+  return true;
+}
+
+/* One that arrived. Merged the same way a presence record is, so the photograph,
+   the name and the prekey land where every part of the interface already looks
+   for them -- and the key lands through the same pinning. Status is deliberately
+   NOT touched: whether they are there is answered by their relay, not claimed by
+   them. */
+function noteProfileCard(payload, peerRecord) {
+  if (!payload) return;
+  const merged = mergePeerRecord({
+    peerId: payload.peerId || peerRecord?.peerId || '',
+    clientId: peerRecord?.clientId || payload.peerId || '',
+    username: payload.username || peerRecord?.username || '',
+    publicKeyData: payload.publicKeyData || peerRecord?.publicKeyData || '',
+    fingerprint: payload.fingerprint || peerRecord?.fingerprint || '',
+    avatarData: payload.avatarData || '',
+    mood: payload.mood || '',
+    /* Deliberately no prekey. One arriving here is ignored rather than stored:
+       acting on a prekey whose freshness nothing guarantees is what silently
+       swallowed every cross-relay message. */
+    homeRelay: payload.homeRelay || peerRecord?.homeRelay || null,
+    /* The claim came through a relay and nothing about it is proved, so it is
+       filed at the bottom of the ladder. If a session already raised this to
+       something routable, betterHomeRelay keeps that. */
+    homeRelaySource: 'presence',
+    status: peerRecord?.status || 'offline',
+  }, { online: false });
+  saveContacts();
+  renderPeers?.();
+  renderActivePeer?.();
+  /* Answer once, so the two sides end up knowing the same amount -- and answer it
+     down the road the card itself named, since on a first contact there is no
+     other. normalizeHomeRelay is what decides the claim is even shaped like a
+     route; it returns null for anything that is not. */
+  if (payload.pleaseReply && merged) {
+    const replyRoute = typeof normalizeHomeRelay === 'function'
+      ? normalizeHomeRelay(payload.homeRelay, 'session')
+      : null;
+    sendProfileCard(merged, { askForTheirs: false, force: true, viaRoute: replyRoute });
+  }
+}
+
+/* Asking the other relay whether somebody is there.
+ *
+ * Presence is per relay: a relay hands every one of ITS clients to every other
+ * one, and knows nothing about anybody else's. So a contact on another relay
+ * was shown offline for ever -- not because they were, but because nobody had
+ * asked. The application read that as knowledge and acted on it, which is how a
+ * cross-relay call rang for thirty seconds and logged itself as missed while
+ * the other person sat looking at it.
+ *
+ * The question goes the way a message goes: sealed to THEIR relay, carried by
+ * ours, which cannot read it. The far relay answers for that one fingerprint.
+ * Nothing new is given away — the relay that answers already sees that
+ * fingerprint every time a message is carried to it, and asking requires
+ * holding the fingerprint, which means holding the card.
+ *
+ * Asked when a conversation is opened and then on a slow timer while it stays
+ * open. Not on a global sweep: polling every contact on every relay, for ever,
+ * would say far more about who talks to whom than any single answer does. */
+/* How often the same contact may be asked about.
+ *
+ * Twelve seconds, not twenty-five. The relay this device is connected to pushes
+ * its own presence the instant it changes, so a contact on it turns green with
+ * no delay at all; a contact elsewhere only changes when we ask, and at
+ * twenty-five seconds plus a thirty-second timer somebody could be gone for the
+ * better part of a minute while the interface still said they were there. The
+ * cost is one small sealed frame per contact in view per twelve seconds, which
+ * is the same order as the typing indicator. */
+const PRESENCE_ASK_MIN_MS = 12000;
+
+/* At most this many contacts are asked about in one sweep of the list.
+ *
+ * A sweep is bounded because it is the one thing here that scales with the
+ * address book: asking about everybody, for ever, tells the far relay far more
+ * about who this person knows than any single answer does. The ones in view are
+ * the ones that matter, and the list is already ordered with them first. */
+const PRESENCE_SWEEP_MAX = 12;
+const presenceAsked = new Map();
+
+function askIfPeerIsThere(peerRecord, { force = false } = {}) {
+  const home = transitRouteFor(peerRecord);
+  if (!home) return false;
+  const fingerprint = String(peerRecord?.fingerprint || '');
+  if (!fingerprint) return false;
+  const last = presenceAsked.get(fingerprint) || 0;
+  if (!force && Date.now() - last < PRESENCE_ASK_MIN_MS) return false;
+  presenceAsked.set(fingerprint, Date.now());
+  keepAskingAboutTheOpenConversation();
+  /* And hand them ours, asking for theirs, when something is missing. Opening a
+     conversation is the moment a missing photograph is noticed, so it is the
+     moment to fix it. */
+  if (!peerRecord.avatarData) {
+    sendProfileCard(peerRecord, { askForTheirs: true });
+  }
+  const tag = `presence-${fingerprint.slice(0, 12)}-${Date.now().toString(36)}`;
+  sendViaTransit({ type: 'presence-query', toFingerprint: fingerprint, tag }, home, peerRecord);
+  return true;
+}
+
+/* Everybody the list is currently showing, asked about together.
+ *
+ * Until this existed the question was only asked from renderActivePeer, so a
+ * contact on another relay stayed grey until their conversation was opened --
+ * which on a phone means the list is wrong every time the application starts.
+ * The answer was always available; nobody had asked for it.
+ *
+ * Throttled per contact by askIfPeerIsThere and capped per sweep, so a long
+ * address book costs the same as a short one. */
+function askAboutTheVisibleContacts() {
+  const peers = Array.isArray(chatState.peers) ? chatState.peers : [];
+  let asked = 0;
+  for (const peer of peers) {
+    if (asked >= PRESENCE_SWEEP_MAX) break;
+    if (!peer || peer.type) continue;
+    if (!transitRouteFor(peer)) continue;
+    if (askIfPeerIsThere(peer)) asked += 1;
+  }
+  return asked;
+}
+
+/* A conversation that stays open is asked about again, slowly.
+ *
+ * One interval for the whole application, started the first time it is needed
+ * and asking only about the conversation that is open. A sweep over every
+ * contact on every relay would say far more about who talks to whom than any
+ * single answer does, and it would say it continuously. */
+let presenceTimer = null;
+function keepAskingAboutTheOpenConversation() {
+  if (presenceTimer) return;
+  presenceTimer = setInterval(() => {
+    const peer = typeof getActiveConversation === 'function' ? getActiveConversation() : null;
+    if (peer && !peer.type) askIfPeerIsThere(peer);
+    /* And the list behind it, so closing a conversation does not freeze every
+       other contact at whatever they were when it was opened. */
+    askAboutTheVisibleContacts();
+  }, PRESENCE_ASK_MIN_MS);
+  presenceTimer.unref?.();
+}
+
+/* Everybody on another relay, told that this profile changed.
+ *
+ * `force`, because a profile change is exactly the moment the throttle is wrong:
+ * it exists to stop a card being re-sent for no reason, and this is the reason.
+ * It asks for nothing back -- the other side already has whatever it needs from
+ * us, and a reply would turn one save into a round trip per contact. */
+function announceProfileToFarContacts() {
+  for (const peer of chatState.peers || []) {
+    if (peer?.type) continue;
+    if (!transitRouteFor(peer)) continue;
+    sendProfileCard(peer, { askForTheirs: false, force: true });
+  }
+}
+
+/* Whether this contact's presence is somebody else's relay to answer.
+ *
+ * Used by the peers broadcast, which marks everybody it did not mention offline.
+ * A relay lists its own clients and nobody else's, so doing that to a contact
+ * elsewhere made the status flicker -- and flicker towards offline, because the
+ * broadcast arrives far more often than the question is asked. */
+function presenceAnsweredElsewhere(peer) {
+  return Boolean(peer && typeof transitRouteFor === 'function' && transitRouteFor(peer));
+}
+
+/* What came back, kept OUT of `status`.
+ *
+ * This looked like the same fact presence carries and it is not. In this
+ * application `status` does not mean "they are there", it means "you can reach
+ * them from here": scheduleSessionWarmup opens a direct PeerJS data channel the
+ * moment a contact reads online, and every path that prefers the direct route
+ * over the relay asks the same field. Writing the far relay's answer into it
+ * told the application it could dial a PeerJS id that only exists on the other
+ * server -- so the moment cross-relay presence started working, cross-relay
+ * MESSAGES stopped, which is a bad trade for a coloured dot.
+ *
+ * It lives in its own field. Whoever draws the dot reads it; nothing that routes
+ * does. remotePresenceOf is the one place that decides, so there is one answer
+ * rather than nine. */
+const REMOTE_PRESENCE_STALE_MS = 120000;
+
+function notePeerPresenceAnswer(fingerprint, up) {
+  const peer = chatState.peers.find((record) => record.fingerprint === fingerprint);
+  if (!peer) return;
+  const next = up ? 'online' : 'offline';
+  if (peer.remotePresence === next && peer.remotePresenceAt) {
+    peer.remotePresenceAt = Date.now();
+    return;
+  }
+  peer.remotePresence = next;
+  peer.remotePresenceAt = Date.now();
+  renderPeers?.();
+  renderActivePeer?.();
+}
+
+/* Whether to show this contact as being there, and where that belief came from.
+ *
+ * A contact on this relay is answered by this relay's own presence, which is
+ * authoritative and constant. A contact elsewhere is answered by their relay,
+ * and that answer goes stale: if nothing has come back for two minutes the
+ * honest thing is to stop claiming they are there. */
+function remotePresenceOf(peer) {
+  if (!peer || peer.type) return null;
+  if (!peer.remotePresence || !peer.remotePresenceAt) return null;
+  if (Date.now() - peer.remotePresenceAt > REMOTE_PRESENCE_STALE_MS) return null;
+  return peer.remotePresence;
+}
+
+/* The one question every dot, every sort and every label should ask. */
+function peerLooksOnline(peer) {
+  const remote = remotePresenceOf(peer);
+  if (remote) return remote === 'online';
+  return peer?.status === 'online';
+}
+
+/* The sender said where to reach them. Written straight onto the record
+   through the ladder rather than through mergePeerRecord: a partial record
+   run through the merge would carry blocked, muted and archived as false and
+   quietly clear all three. */
+function noteSenderHomeRelay(payload, homeRelay) {
+const fingerprint = String(payload?.fromFingerprint || '');
+const peerId = String(payload?.fromPeerId || '');
+const peer = chatState.peers.find((record) => (fingerprint && record.fingerprint === fingerprint)
+|| (peerId && record.peerId === peerId));
+if (!peer) return;
+const next = betterHomeRelay(peer.homeRelay, { ...homeRelay, source: 'session' });
+if (!next) return;
+/* Compared field by field rather than as JSON: betterHomeRelay hands back a
+   NORMALISED copy even when it kept what was already there, which differs
+   from the stored object by key order and by a filled-in timestamp. Writing
+   on that would save the contact book on every message that changed
+   nothing. */
+const same = (left, right) => Boolean(left) && Boolean(right)
+&& left.origin === right.origin && left.id === right.id
+&& left.key === right.key && left.source === right.source;
+if (same(next, peer.homeRelay)) return;
+peer.homeRelay = next;
+saveContacts();
+}
 /* Signals that only mean something in the moment. Storing them is pointless —
    nobody wants to be told, on returning, that someone was typing an hour ago —
    and asking the relay to store them is what made it wake the other device for
    every keystroke burst. The relay enforces this too; this is the client half
    so an up-to-date app never even asks. */
+/* Everything about a call that is meaningless once the moment passes.
+ *
+ * A call frame that is STORED is a call that rings again later. It happened: two
+ * people on different relays finished a call, one of them reconnected, and the
+ * relay redelivered the offer from its mailbox -- so the phone rang with nothing
+ * behind it. Declining logged a missed call that never happened; answering
+ * produced a call with no sound, because the description it was built from had
+ * been dead for minutes.
+ *
+ * call-invite is deliberately NOT here: it is the one call frame that is worth
+ * keeping, because it is what rings somebody who was away and it carries its own
+ * staleness check on arrival. */
 const EPHEMERAL_RELAY_TYPES = new Set([
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
+  'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
+  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
 ]);
 function sendRelayEnvelope(peerRecord, payload) {
 if (hasActiveServerRestriction()) {
@@ -764,7 +1161,7 @@ while (chatState.pendingRelayTags.size > 500) {
 chatState.pendingRelayTags.delete(chatState.pendingRelayTags.keys().next().value);
 }
 }
-chatState.ws.send(JSON.stringify({
+const frame = {
 type: 'relay',
 toClientId: peerRecord.clientId || '',
 toFingerprint: peerRecord.fingerprint || '',
@@ -774,8 +1171,89 @@ payload,
    every one of them says 'offline-chat', so asking the outer name whether it
    was worth keeping kept the receipts and typing flags too. */
 persist,
-}));
+};
+/* Somebody whose relay is not this one cannot be reached by handing this to
+   the relay: it has never heard of them. The frame above is sealed to THEIR
+   relay instead and this one carries it without being able to open it —
+   which is the point, because the relay that can see who a message is for is
+   the relay that can assemble who talks to whom. */
+const home = transitRouteFor(peerRecord);
+if (home) {
+/* Sealing is asynchronous and every caller of this function expects an
+   answer now. What is returned is "this has been taken on", the same
+   promise the direct path makes: the relay's own reply arrives later as a
+   queued or error frame either way. */
+sendViaTransit(frame, home, peerRecord);
 return true;
+}
+chatState.ws.send(JSON.stringify(frame));
+return true;
+}
+/* The relay a contact's messages have to end up at, when that is not the one
+   this device is connected to. Null means the ordinary path.
+ *
+ * routableHomeRelay is the part that decides whether the claim is worth
+ * acting on at all -- a hello is not an address; see 18-file-manager-2.js. */
+function transitRouteFor(peerRecord) {
+const home = typeof routableHomeRelay === 'function' ? routableHomeRelay(peerRecord) : null;
+if (!home) return null;
+const mine = relayPinFor(chatServerOrigin())?.id || '';
+/* Without a pinned id for the relay in hand there is nothing to compare, and
+   guessing wrong sends a message the long way round for no reason. */
+if (!mine || home.id === mine) return null;
+return home;
+}
+/* Kept only long enough for the relay to answer. A refusal has to be able to
+   find the frame it was about, and nothing else reads this. */
+function rememberTransit(tag, frame, peerRecord) {
+if (!tag) return;
+chatState.pendingTransit = chatState.pendingTransit || new Map();
+chatState.pendingTransit.set(tag, { frame, peerId: peerRecord?.peerId || '' });
+while (chatState.pendingTransit.size > 200) {
+chatState.pendingTransit.delete(chatState.pendingTransit.keys().next().value);
+}
+}
+async function sendViaTransit(frame, home, peerRecord) {
+try {
+const envelope = await sealTransitEnvelope(home.id, home.key, frame);
+if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) throw new Error('the relay went away');
+/* A question is not kept for retry. Only frames that carry something worth
+   delivering are remembered, because the fallback for a remembered frame is to
+   send it down the ordinary path and write a note in the conversation saying
+   the relay can now see who you are talking to. That note is true and worth
+   saying about a message; about a presence question that simply went
+   unanswered it is alarming and wrong. An unanswered question is answered by
+   the next one. */
+if (!String(frame.type || '').endsWith('-query')) rememberTransit(frame.tag || '', frame, peerRecord);
+chatState.ws.send(JSON.stringify({ ...envelope, ...(frame.tag ? { tag: frame.tag } : {}) }));
+} catch (error) {
+console.warn('[Transit] could not seal for the far relay:', error?.message || error);
+fallBackToDirect(frame, peerRecord, error?.message || '');
+}
+}
+/* Going direct when transit was meant to be used is a real change in who can
+   see what, so it is never silent. Once per conversation per session: a note
+   on every message would be noise, and noise is how a warning stops being
+   read. */
+function fallBackToDirect(frame, peerRecord, reason = '') {
+if (chatState.ws?.readyState === WebSocket.OPEN) chatState.ws.send(JSON.stringify(frame));
+const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
+if (!conversationId) return;
+chatState.transitFallbackNoted = chatState.transitFallbackNoted || new Set();
+if (chatState.transitFallbackNoted.has(conversationId)) return;
+chatState.transitFallbackNoted.add(conversationId);
+appendHistory(conversationId, {
+id: `transit-fallback-${Date.now()}`,
+type: 'system-note',
+direction: 'in',
+noteKind: 'transit-fallback',
+text: t(
+'این گفتگو قرار بود از مسیر رلهٔ دیگری برود، ولی آن مسیر در دسترس نبود و پیام از رلهٔ خودتان رفت. رلهٔ شما در این حالت می‌بیند که با چه کسی حرف می‌زنید. محتوای پیام همچنان رمزنگاری‌شده است.',
+'This conversation was meant to go through another relay, but that route was unavailable and the message went through your own. Your relay can see who you are talking to when that happens. The contents are still encrypted.',
+),
+createdAt: new Date().toISOString(),
+});
+renderPeers();
 }
 function relaySessionEvent(peerRecord, message) {
 if (!peerRecord || !message) return false;
@@ -906,7 +1384,24 @@ const key = payload.kex
 	   exactly that). Destroying it here is irreversible, so instead: say
 	   nothing, ACK NOTHING, and leave it in the mailbox — it is redelivered on
 	   the next connect, by which time whatever was unreadable usually is not. */
-	console.warn('[Chat] a recent sealed envelope could not be opened yet; leaving it queued for redelivery.');
+	/* Counted, and said out loud once it stops looking temporary.
+	 *
+	 * "Leave it queued and say nothing" is right for an envelope that fails once
+	 * because something local was not ready. It is wrong for one that will never
+	 * open, and the two are indistinguishable from here -- so the count is what
+	 * tells them apart. A message that has failed to open five times is not a
+	 * hiccup, and a person who is told nothing concludes the application is
+	 * working and the other person is not writing. */
+	chatState.unopenedEnvelopes = (chatState.unopenedEnvelopes || 0) + 1;
+	console.warn('[Chat] a recent sealed envelope could not be opened yet; leaving it queued for redelivery.'
+	  + ` (${chatState.unopenedEnvelopes} so far)`);
+	if (chatState.unopenedEnvelopes === 5 && !chatState.unopenedEnvelopesTold) {
+	chatState.unopenedEnvelopesTold = true;
+	notify(t(
+	'چند پیام رسیده که باز نمی‌شوند. اگر ادامه داشت، یک بار برنامه را ببندید و باز کنید.',
+	'Several messages have arrived that cannot be opened. If it continues, close and reopen the app once.',
+	), 'warning');
+	}
 	}
 	/* Genuinely stale envelopes stay acknowledged — the relay redelivering
 	   them forever, to a device that can never open them, served nobody. */
@@ -925,6 +1420,7 @@ const opened = JSON.parse(new TextDecoder().decode(plain));
 if (payload.body.v === 2 && opened && typeof opened === 'object' && 'message' in opened) {
 innerMessage = opened.message;
 enclosedSessionKeyRaw = String(opened.sessionKeyRaw || '');
+if (opened.homeRelay) noteSenderHomeRelay(payload, opened.homeRelay);
 } else {
 innerMessage = opened;
 }
@@ -1935,6 +2431,12 @@ mood: String(chatState.profile.mood || '').slice(0, 40),
 prekeyId: prekey?.id || '',
 prekeyPublic: prekey?.publicKeyData || '',
 prekeyExpiresAt: prekey?.expiresAt || '',
+/* A hint, and marked as one at the other end. A hello is not signed, so the
+   relay forwarding it can write whatever it likes here -- which is exactly
+   why the receiving side files it under the lowest rank and will not route
+   on it. It is still worth sending: it is how somebody learns their contact
+   has moved, and prompts them to ask for a fresh card. */
+homeRelay: myHomeRelay(),
 }));
 /* Push is NOT armed from here any more. Subscribing on every hello meant the
    relay was handed a device record before the user had been told that a push

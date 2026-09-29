@@ -516,6 +516,12 @@ chatState.prefs.relayOnboardAsked = Boolean(savedPrefs.relayOnboardAsked);
 /* Clamped on the way in: a stored value outside the ladder's own steps would
    start a call at a size that does not exist. */
 chatState.prefs.callPixelStep = Math.max(0, Math.min(3, Number(savedPrefs.callPixelStep) || 0));
+/* Absent means on: a profile written before the switch existed was one that
+   sent receipts, and reading it as "off" would quietly change what an
+   existing conversation does. */
+chatState.prefs.sendReceipts = savedPrefs.sendReceipts !== false;
+chatState.prefs.turnChoices = savedPrefs.turnChoices && typeof savedPrefs.turnChoices === 'object'
+? savedPrefs.turnChoices : {};
 }
 /* Last step of every unlock: whatever the chat received while the vault was
    shut is sitting in the store cache marked dirty — land it in localStorage
@@ -558,6 +564,13 @@ chatState.profile = profile;
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, profile);
 renderStaticUi();
 broadcastHello();
+/* broadcastHello is how everybody learns a profile changed, and it reaches
+   exactly the people this relay can see. Contacts on another relay are told the
+   same thing the only way it can reach them -- the card goes to each of them
+   individually, because there is no broadcast that crosses a relay link and
+   there should not be: a relay that announced its clients to its peers would be
+   handing over the one thing it is not supposed to know about them together. */
+announceProfileToFarContacts();
 notify(t('پروفایل چت ذخیره شد', 'Chat profile saved'), 'success');
 }
 function sessionSecurityText(session) {
@@ -859,7 +872,10 @@ const pwaButton = document.getElementById('chatCallsPwaBtn');
 if (pwaButton) pwaButton.disabled = !isUsableRelayOrigin(chatState.profile.serverUrl);
 }
 document.getElementById('chatShowSuspensionCountdown').checked = chatState.profile.showSuspensionCountdown !== false;
+const receiptsToggle = document.getElementById('chatSendReceipts');
+if (receiptsToggle) receiptsToggle.checked = receiptsEnabled();
 syncChatToggleStates();
+renderRelayIdentityRow();
 if (!isBeingEdited('chatTurnUrl')) document.getElementById('chatTurnUrl').value = chatState.profile.turnUrl || '';
 if (!isBeingEdited('chatTurnUsername')) document.getElementById('chatTurnUsername').value = chatState.profile.turnUsername || '';
 if (!isBeingEdited('chatTurnCredential')) document.getElementById('chatTurnCredential').value = chatState.profile.turnCredential || '';

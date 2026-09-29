@@ -32,12 +32,13 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { relayTestIdentity, answerRelayChallenge } from './_relay-identity.mjs';
+import { mirrorRelayLib } from './_relay-lib.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SIGNAL_PORT = 9711;
@@ -64,12 +65,10 @@ function ok(condition, label) {
 }
 
 const work = mkdtempSync(join(tmpdir(), 'poorija-size-'));
-const libDir = join(ROOT, 'standalone-relay', 'lib');
-const libWasMissing = !existsSync(join(libDir, 'push-wording.js'));
-if (libWasMissing) {
-  mkdirSync(libDir, { recursive: true });
-  copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), join(libDir, 'push-wording.js'));
-}
+/* The relay reads its shared modules from ./lib, which only the image has.
+   Mirrored by name would break the day a second module appeared; see
+   tests/e2e/_relay-lib.mjs. */
+const restoreRelayLib = mirrorRelayLib();
 
 const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
@@ -86,7 +85,7 @@ const relay = spawn(process.execPath, [RELAY_SERVER], {
 process.on('exit', () => {
   try { relay.kill(); } catch (_error) { /* gone */ }
   try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch (_error) { /* ignore */ }
-  if (libWasMissing) { try { rmSync(libDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ } }
+  restoreRelayLib();
 });
 
 for (let i = 0; i < 60; i += 1) {

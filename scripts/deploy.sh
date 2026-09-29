@@ -13,7 +13,8 @@
 # after that just deploys. Nothing about any particular server is baked into
 # this file, so it is the same script for everybody who self-hosts.
 #
-#   bash scripts/deploy.sh                 # copy, rebuild, verify
+#   bash scripts/deploy.sh                 # copy, rebuild, verify — EVERY server
+#   bash scripts/deploy.sh --server ir     # only that one
 #   bash scripts/deploy.sh --check         # verify what is live, change nothing
 #   bash scripts/deploy.sh --dry-run       # show what would be copied
 #   bash scripts/deploy.sh --skip-bump     # server/config-only change
@@ -58,6 +59,8 @@ Deploy this working tree to your own server.
 
 Options
   (none)          Copy the tree, rebuild the containers, verify what is served.
+                  With more than one server configured, all of them in turn.
+  --server NAME   Only that server, by the name it has in SERVERS.
   --check         Only report what the server is serving. Changes nothing.
   --dry-run       Show what rsync would copy. Changes nothing.
   --skip-bump     Skip the version bump on the server; for a change that
@@ -91,17 +94,28 @@ USAGE
 MODE="deploy"
 SKIP_BUMP=""
 WANT_RECONFIGURE=0
-for arg in "$@"; do
-    case "$arg" in
+ONLY_SERVER=""
+# A while loop rather than `for arg in "$@"`, because --server takes a value
+# and `shift` inside a for loop does not move what the for loop is walking:
+# the value came back round as an option of its own and was rejected as
+# unknown.
+while [ $# -gt 0 ]; do
+    case "$1" in
         --check) MODE="check" ;;
         --dry-run) MODE="dry-run" ;;
         --skip-bump) SKIP_BUMP="--skip-bump" ;;
         --reconfigure|--configure) WANT_RECONFIGURE=1 ;;
+        --server)
+            ONLY_SERVER="${2:-}"
+            [ -n "$ONLY_SERVER" ] || { fail "--server needs a name."; exit 2; }
+            shift ;;
+        --server=*) ONLY_SERVER="${1#*=}" ;;
         --edit) MODE="edit" ;;
         --where|--config) MODE="where" ;;
         --help|-h) usage; exit 0 ;;
-        *) fail "Unknown option: $arg"; echo; usage; exit 2 ;;
+        *) fail "Unknown option: $1"; echo; usage; exit 2 ;;
     esac
+    shift
 done
 
 if [ "$MODE" = "where" ]; then
@@ -139,6 +153,28 @@ REMOTE_DIR='$REMOTE_DIR'
 # What the app is served as, used to verify the deployment afterwards.
 PUBLIC_URL='$PUBLIC_URL'
 CONF
+    # More than one server, written back rather than dropped.
+    #
+    # This function used to emit only the six single-server keys, so anybody
+    # who ran --reconfigure on a two-server setup silently lost the second
+    # server and every deployment afterwards went to one of them. A settings
+    # file that a settings command can destroy is worse than no settings file.
+    if [ -n "${SERVERS:-}" ]; then
+        {
+            echo
+            echo "# Every server this tree deploys to, in the order they are done."
+            echo "# The keys for each are prefixed with its name in upper case."
+            echo "SERVERS='$SERVERS'"
+            for name in $SERVERS; do
+                upper="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]' | tr -c '[:alnum:]' '_')"
+                echo
+                for field in ROLE SSH_HOST SSH_USER SSH_PORT SSH_KEY REMOTE_DIR PUBLIC_URL; do
+                    eval "value=\${${upper}_${field}:-}"
+                    printf "%s_%s='%s'\n" "$upper" "$field" "$value"
+                done
+            done
+        } >> "$CONFIG_FILE"
+    fi
     chmod 600 "$CONFIG_FILE"
 }
 
@@ -185,7 +221,106 @@ configure() {
 }
 
 SSH_HOST=""; SSH_USER=""; SSH_PORT=""; SSH_KEY=""; REMOTE_DIR=""; PUBLIC_URL=""
+SERVERS=""
 load_config
+
+# --------------------------------------------------------------- more than one
+#
+# Two servers that are meant to stay in step have to be deployed from one tree
+# in one run, or they drift — and drift between two relays that carry for each
+# other is the kind that shows up as messages not arriving rather than as an
+# error.
+#
+# This is a dispatcher and nothing more. It re-runs THIS script once per
+# server with that server's details in the environment, which the body below
+# already reads. The deployment, the snapshot and the verification are the same
+# code they have always been; only the number of times they run has changed.
+#
+# A config with no SERVERS line is a single server and takes the old path
+# untouched.
+if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
+    WANTED="$SERVERS"
+    if [ -n "$ONLY_SERVER" ]; then
+        case " $SERVERS " in
+            *" $ONLY_SERVER "*) WANTED="$ONLY_SERVER" ;;
+            *) fail "No server called '$ONLY_SERVER'. Configured: $SERVERS"; exit 2 ;;
+        esac
+    fi
+
+    # Rebuilt from what was actually understood rather than from "$@", which
+    # the parser above has already consumed. --server is not passed on: the
+    # child run is one server by construction.
+    # Expanded as ${ARGS[@]+"${ARGS[@]}"} below, not "${ARGS[@]}": under
+    # `set -u` bash 3.2 — which is what macOS ships — treats an empty array
+    # expansion as an unbound variable and dies. A plain deployment passes no
+    # extra arguments at all, so the empty case is the common one.
+    ARGS=()
+    [ "$MODE" = "check" ] && ARGS+=(--check)
+    [ "$MODE" = "dry-run" ] && ARGS+=(--dry-run)
+    [ -n "$SKIP_BUMP" ] && ARGS+=("$SKIP_BUMP")
+
+    OVERALL=0
+    SERVED=""
+    for name in $WANTED; do
+        upper="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]' | tr -c '[:alnum:]' '_')"
+        eval "s_host=\${${upper}_SSH_HOST:-}"
+        eval "s_user=\${${upper}_SSH_USER:-}"
+        eval "s_port=\${${upper}_SSH_PORT:-}"
+        eval "s_key=\${${upper}_SSH_KEY:-}"
+        eval "s_dir=\${${upper}_REMOTE_DIR:-}"
+        eval "s_url=\${${upper}_PUBLIC_URL:-}"
+        eval "s_role=\${${upper}_ROLE:-app}"
+        if [ -z "$s_host" ]; then
+            fail "SERVERS names '$name' but ${upper}_SSH_HOST is not set in $CONFIG_FILE"
+            OVERALL=1
+            continue
+        fi
+        echo
+        printf "${INFO}════ %s  (%s) ════${NC}\n" "$name" "$s_host"
+        POORIJA_SERVER_NAME="$name" \
+        POORIJA_SSH_HOST="$s_host" \
+        POORIJA_SSH_USER="${s_user:-$USER}" \
+        POORIJA_SSH_PORT="${s_port:-22}" \
+        POORIJA_SSH_KEY="$s_key" \
+        POORIJA_REMOTE_DIR="$s_dir" \
+        POORIJA_PUBLIC_URL="${s_url:-https://$s_host:8585}" \
+        POORIJA_ROLE="$s_role" \
+            bash "$0" ${ARGS[@]+"${ARGS[@]}"} || OVERALL=1
+        SERVED="$SERVED $name|$s_role|${s_url:-https://$s_host:8585}"
+    done
+
+    # The point of deploying together: afterwards they have to agree. Asked of
+    # the servers rather than assumed from the fact that the copies succeeded.
+    echo
+    log "Are they in step?"
+    TREE_TAG="$(grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' index.html | head -1 | sed 's/^?v=//')"
+    MISMATCH=0
+    TREE_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
+    for entry in $SERVED; do
+        n="${entry%%|*}"; rest="${entry#*|}"; r="${rest%%|*}"; u="${rest#*|}"
+        if [ "$r" = "relay" ]; then
+            live="$(curl -sk --max-time 20 "$u/chat-health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+            want="$TREE_VERSION"
+        else
+            live="$(curl -sk --max-time 20 "$u/index.html" \
+                | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
+            want="$TREE_TAG"
+        fi
+        if [ "$live" = "$want" ]; then
+            printf "  %-14s %-7s %s\n" "$n" "$r" "$live"
+        else
+            printf "  %-14s %-7s %s  (tree is %s)\n" "$n" "$r" "${live:-no answer}" "$want"
+            MISMATCH=1
+        fi
+    done
+    if [ "$MISMATCH" -eq 0 ] && [ "$OVERALL" -eq 0 ]; then
+        ok "every server is serving $TREE_TAG"
+    else
+        fail "the servers are not all serving the same build"
+        OVERALL=1
+    fi
+    exit $OVERALL
+fi
 
 if [ "$MODE" = "edit" ]; then
     [ -f "$CONFIG_FILE" ] || { SSH_USER="${SSH_USER:-$USER}"; SSH_PORT="${SSH_PORT:-22}"; save_config; }
@@ -208,6 +343,21 @@ PORT="${POORIJA_SSH_PORT:-${SSH_PORT:-22}}"
 KEY="${POORIJA_SSH_KEY:-${SSH_KEY:-}}"
 REMOTE_DIR="${POORIJA_REMOTE_DIR:-${REMOTE_DIR:-}}"
 PUBLIC_URL="${POORIJA_PUBLIC_URL:-${PUBLIC_URL:-https://$HOST:8585}}"
+# What this server is FOR, which decides what gets copied to it and what is
+# rebuilt there. Two servers that carry for each other do not have to be — and
+# in the case this was built for should not be — running the same thing:
+#
+#   app     the full stack. It serves the application as well as relaying, so
+#           it also serves the JavaScript that does the encrypting. That is a
+#           different class of trust from carrying traffic, and it is the
+#           reason the other role exists. See docs/RELAY-NETWORK.md.
+#   relay   standalone-relay/ only. Carries traffic and runs a TURN server;
+#           serves no application at all.
+ROLE="${POORIJA_ROLE:-${ROLE:-app}}"
+case "$ROLE" in
+    app|relay) ;;
+    *) fail "Unknown role '$ROLE'. Use 'app' or 'relay'."; exit 2 ;;
+esac
 
 if [ -z "$HOST" ]; then
     fail "No server configured."
@@ -215,12 +365,55 @@ if [ -z "$HOST" ]; then
     exit 2
 fi
 
-SSH_OPTS=(-p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+# ServerAlive is the difference between a deployment that fails and one that
+# never returns. ConnectTimeout only covers opening the connection; once a
+# transfer is under way a connection that dies silently -- which is what a long
+# rsync over a path that is being interfered with does -- leaves ssh waiting for
+# data that will never come, with no timeout at all. One deployment sat on
+# `rsync tests/` for hours with nothing running on the far side.
+#
+# Four missed probes at fifteen seconds gives a minute of real silence before it
+# gives up, which no working link will hit and no dead one will survive.
+SSH_OPTS=(-p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 [ -n "$KEY" ] && [ -f "$KEY" ] && SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
 remote() { ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" "$@"; }
 
 # ---------------------------------------------------------- what is live now
+# A relay server has no index.html, no js/ and no service worker; checking for
+# them there would fail every time and prove nothing. What it does have is a
+# health endpoint that now says which build it is, and an identity.
+relay_check() {
+    local health version tag id want status=0
+    health="$(curl -sk --max-time 20 "$PUBLIC_URL/chat-health")"
+    if ! printf '%s' "$health" | grep -q '"ok":true'; then
+        printf "  %-34s %s\n" "relay /chat-health" "FAILED - no answer"
+        return 1
+    fi
+    version="$(printf '%s' "$health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+    tag="$(printf '%s' "$health" | sed -n 's/.*"buildTag":"\([^"]*\)".*/\1/p')"
+    printf "  %-34s %s\n" "relay build" "${version:-unknown}${tag:+ - $tag}"
+    want="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
+    if [ "$version" = "$want" ]; then
+        printf "  %-34s %s\n" "matches this working tree" "yes"
+    else
+        printf "  %-34s %s\n" "matches this working tree" "no (tree is $want)"
+        status=1
+    fi
+    id="$(curl -sk --max-time 15 "$PUBLIC_URL/relay-identity" | sed -n 's/.*"id":"\([a-f0-9]*\)".*/\1/p')"
+    if [ -n "$id" ]; then
+        printf "  %-34s %s...\n" "relay identity" "${id:0:12}"
+    else
+        printf "  %-34s %s\n" "relay identity" "FAILED"
+        status=1
+    fi
+    printf "  %-34s %s\n" "transit between relays" \
+        "$(printf '%s' "$health" | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p')"
+    return $status
+}
+
 live_check() {
+    [ "$ROLE" = "relay" ] && { relay_check; return $?; }
     local tag dialogs sealing health status=0
     tag="$(curl -sk --max-time 20 "$PUBLIC_URL/index.html" | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
     printf "  %-34s %s\n" "asset tag being served" "${tag:-<unreachable>}"
@@ -284,6 +477,72 @@ live_check() {
         printf "  %-34s %s\n" "relay /chat-health" "FAILED"
         status=1
     fi
+
+    # The relay's own name, and that it is really the hash of the key it
+    # publishes. A relay that merely asserts an id has a label; one whose id
+    # the client can derive from the key has a name it cannot lie about, and
+    # every transit envelope is sealed to that key.
+    local identity relay_id relay_key derived
+    identity="$(curl -sk --max-time 15 "$PUBLIC_URL/relay-identity")"
+    relay_id="$(printf '%s' "$identity" | sed -n 's/.*"id":"\([a-f0-9]*\)".*/\1/p')"
+    relay_key="$(printf '%s' "$identity" | sed -n 's/.*"publicKey":"\([^"]*\)".*/\1/p')"
+    if [ -n "$relay_id" ] && [ -n "$relay_key" ]; then
+        derived="$(printf '%s' "$relay_key" | base64 -d 2>/dev/null | shasum -a 256 2>/dev/null | cut -d' ' -f1)"
+        [ -n "$derived" ] || derived="$(printf '%s' "$relay_key" | base64 -d 2>/dev/null | sha256sum | cut -d' ' -f1)"
+        if [ "$derived" = "$relay_id" ]; then
+            printf "  %-34s %s\n" "relay identity" "${relay_id:0:12}… (id is the hash of its key)"
+        else
+            printf "  %-34s %s\n" "relay identity" "MISMATCH — the id is not the hash of the published key"
+            status=1
+        fi
+        printf "  %-34s %s\n" "post-quantum key published" \
+            "$(printf '%s' "$identity" | grep -q '"pqAlgorithm":"ml-kem-768"' && echo 'ml-kem-768' || echo 'no')"
+    else
+        printf "  %-34s %s\n" "relay identity" "FAILED — /relay-identity did not answer"
+        status=1
+    fi
+
+    # Transit between relays, and whether any link is actually up. Off is a
+    # valid answer and not a failure: it is the default, and a relay carries
+    # for nobody until an operator names who it carries for.
+    #
+    # Configured-but-not-yet-up is given a moment before it is printed. A
+    # deployment restarts the relay, which drops every link it held, and the
+    # other end re-dials on a backoff that starts at a second — so asking
+    # immediately after a restart reliably reported "up":0 on a link that was
+    # about to come back. Printing that on every single deployment is how an
+    # operator learns to ignore the line that exists to warn them.
+    local transit waited
+    transit="$(printf '%s' "$health" | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p')"
+    waited=0
+    while [ "$waited" -lt 45 ] \
+        && printf '%s' "$transit" | grep -q '"enabled":true' \
+        && printf '%s' "$transit" | grep -q '"up":0'; do
+        sleep 5
+        waited=$((waited + 5))
+        transit="$(curl -sk --max-time 20 "$PUBLIC_URL/chat-health" | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p')"
+    done
+    if [ -n "$transit" ]; then
+        printf "  %-34s %s%s\n" "transit between relays" "$transit" \
+            "$([ "$waited" -gt 0 ] && printf '  (settled after %ss)' "$waited")"
+        # A link that is configured and still down after the wait is a fault
+        # worth failing on: it means the far relay is unreachable or refusing.
+        if printf '%s' "$transit" | grep -q '"enabled":true' \
+            && printf '%s' "$transit" | grep -q '"up":0'; then
+            fail "transit is configured but no link came up within ${waited}s."
+            status=1
+        fi
+    else
+        printf "  %-34s %s\n" "transit between relays" "not reported — relay predates it"
+        status=1
+    fi
+
+    # The carrier flow's own file, which is the one thing a shutdown makes the
+    # difference between a working app and a useless one.
+    local carrier
+    carrier="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/chat/38-carrier.js")"
+    printf "  %-34s %s\n" "carrier flow served" "$carrier"
+    [ "$carrier" = "200" ] || status=1
 
     local expected
     expected="$(grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' index.html | head -1 | sed 's/^?v=//')"
@@ -434,8 +693,16 @@ ok "install directory: $REMOTE_DIR"
 #
 # data/, certs/ and .env are never touched — they hold the offline mailboxes,
 # the TLS material and the secrets, none of which live in this repository.
-SYNC_DIRS=(js css assets fonts vendor scripts config tests)
-SYNC_FILES=(index.html sw.js manifest.webmanifest monitor-client.html package.json)
+if [ "$ROLE" = "relay" ]; then
+    # Everything the relay's own image is built from and nothing else. The
+    # Dockerfile's build context reaches scripts/lib and vendor, so both have
+    # to be there even though nothing serves them.
+    SYNC_DIRS=(standalone-relay scripts/lib vendor)
+    SYNC_FILES=(package.json)
+else
+    SYNC_DIRS=(js css assets fonts vendor scripts config tests)
+    SYNC_FILES=(index.html sw.js manifest.webmanifest monitor-client.html package.json)
+fi
 
 RSYNC_BASE=(-az --human-readable --exclude '.DS_Store' --exclude '*.bak'
             --exclude 'e2e/screenshots' --exclude 'e2e/tmp' -e "ssh ${SSH_OPTS[*]}")
@@ -511,7 +778,14 @@ if ! remote 'docker ps >/dev/null 2>&1'; then
     echo "      bash scripts/deploy.sh --check"
     exit 1
 fi
-remote "cd '$REMOTE_DIR' && bash scripts/sync-to-server.sh $SKIP_BUMP" 2>&1 | sed 's/^/  /'
+if [ "$ROLE" = "relay" ]; then
+    # The relay's own compose file, from its own directory: its build context
+    # is the parent, which is why the whole tree is not needed here but the
+    # parent path is.
+    remote "cd '$REMOTE_DIR/standalone-relay' && docker compose up -d --build" 2>&1 | sed 's/^/  /'
+else
+    remote "cd '$REMOTE_DIR' && bash scripts/sync-to-server.sh $SKIP_BUMP" 2>&1 | sed 's/^/  /'
+fi
 deploy_status=${PIPESTATUS[0]}
 
 echo

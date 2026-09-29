@@ -16,6 +16,94 @@
    The local file manager
 */
 
+/* ===================== رلهٔ خانگی مخاطب ===================== */
+/* Where a contact lives, and how much that claim is worth.
+ *
+ * Routing across relays is a decision the CLIENT has to make. The relay a
+ * message is handed to cannot be told who it is for -- that is the whole
+ * point of blind transit -- so it cannot work out which relay to pass it on
+ * to. Only the sender can, and only if each contact record says where that
+ * person's messages have to end up.
+ *
+ * Which makes the claim worth attacking, so it is ranked by the channel it
+ * arrived on rather than taken at face value:
+ *
+ *   card      a QR or a pasted identity card. The same out-of-band channel
+ *             that carries the public key, and no more forgeable than that
+ *             key is.
+ *   session   inside the sealed body of a message. Encrypted end to end, so
+ *             no relay wrote it and no relay can read it. It does NOT prove
+ *             the sender is who the envelope says: anybody holding the
+ *             recipient's public key or current prekey can seal an envelope
+ *             claiming to be somebody else, which is what the safety number
+ *             exists to catch. That is exactly why a card outranks it — a
+ *             claim like this can introduce a home relay for a contact who
+ *             has none, and can never displace one that was established out
+ *             of band.
+ *   presence  a hello, through a relay. The hello is NOT signed: the client
+ *             checks that the fingerprint matches the key it came with, and
+ *             nothing more. Every other field in it is whatever the relay
+ *             chose to forward. A hint, and never anything more.
+ *
+ * The ladder only goes up. A presence hint cannot displace a value from a
+ * card, and no amount of repetition promotes it -- an attacker who can
+ * rewrite presence can repeat it as often as they like. When transit starts
+ * routing in step five, it will require one of the top two ranks: a wrong
+ * home relay does not expose a message, which stays end-to-end encrypted, but
+ * it does hand the metadata to a relay of somebody else's choosing, and that
+ * metadata is exactly what this design exists to withhold. */
+const HOME_RELAY_TRUST = { presence: 1, session: 2, card: 3 };
+/* A home relay is an origin, the id of the relay that must be there, and
+   that relay's public key.
+ *
+ * The origin alone repeats the problem relay identities were added to solve:
+ * a hostname is whoever holds the hostname today. The KEY travels too, and
+ * that is not redundancy — it is what makes transit work at all in the case
+ * it exists for. A client could fetch the key from the far relay and check it
+ * against the id, but the whole reason it is sending through a carrier is
+ * that it may not be able to reach that relay: if it could, it would not need
+ * transit. So the key comes down the same out-of-band channel as the id, and
+ * is checked against it at the moment it is used. */
+function normalizeHomeRelay(value, source = '') {
+if (!value || typeof value !== 'object') return null;
+const rank = HOME_RELAY_TRUST[String(source || value.source || '')] ? String(source || value.source) : '';
+if (!rank) return null;
+let origin = '';
+try {
+origin = isUsableRelayOrigin(value.origin) ? normalizeRelayOrigin(value.origin, '') : '';
+} catch (_error) {
+origin = '';
+}
+if (!origin) return null;
+const id = /^[a-f0-9]{64}$/i.test(String(value.id || '')) ? String(value.id).toLowerCase() : '';
+/* Kept as it arrived and checked where it is used: the check is a hash, which
+   is asynchronous in a browser, and this function is called from the record
+   merge where everything else is a plain comparison. A key that does not hash
+   to the id is refused at seal time, which is the moment it matters. */
+const key = /^[A-Za-z0-9+/=]{40,400}$/.test(String(value.key || '')) ? String(value.key) : '';
+return { origin, id, key, source: rank, updatedAt: value.updatedAt || new Date().toISOString() };
+}
+/* Which of the two to keep. Equal rank means the newer one, because a person
+   who moves relays re-shares a card; lower rank never displaces higher. */
+function betterHomeRelay(existing, incoming) {
+const current = normalizeHomeRelay(existing);
+const offered = normalizeHomeRelay(incoming);
+if (!offered) return current;
+if (!current) return offered;
+const currentRank = HOME_RELAY_TRUST[current.source] || 0;
+const offeredRank = HOME_RELAY_TRUST[offered.source] || 0;
+if (offeredRank < currentRank) return current;
+if (offeredRank > currentRank) return offered;
+return offered.origin === current.origin && offered.id === current.id && offered.key === current.key
+? current : offered;
+}
+/* What routing is allowed to use. A hint is not an address, and an address
+   with nothing to seal to is not one either. */
+function routableHomeRelay(peer) {
+const home = normalizeHomeRelay(peer?.homeRelay);
+if (!home || !home.id || !home.key) return null;
+return (HOME_RELAY_TRUST[home.source] || 0) >= HOME_RELAY_TRUST.session ? home : null;
+}
 function normalizePeerRecord(peer = {}) {
 return {
 clientId: String(peer.clientId || peer.peerId || ''),
@@ -38,6 +126,10 @@ avatarData: sanitizeAvatarData(peer.avatarData),
 /* What they say they are doing, in their own words, from their hello. */
 mood: String(peer.mood || '').slice(0, 40),
 conversationId: peer.conversationId || '',
+/* Kept with its provenance rather than flattened to an address: the merge
+   below has to know which channel it came on to decide whether it may
+   replace what is already there. */
+homeRelay: normalizeHomeRelay(peer.homeRelay, peer.homeRelaySource || peer.homeRelay?.source || ''),
 lastSeenAt: peer.lastSeenAt || '',
 type: peer.type || '',
 members: Array.isArray(peer.members) ? [...peer.members] : undefined,
@@ -96,7 +188,7 @@ return conversationHistory(peer).length > 0;
 function discoveredPeers() {
 return (chatState.peers || []).filter((peer) => (
 peer.peerId && !isSelfPeerRecord(peer) && !peer.type && !peer.system
-&& peer.status === 'online' && !isStoredContact(peer)
+&& peerLooksOnline(peer) && !isStoredContact(peer)
 ));
 }
 function saveContacts() {
@@ -118,19 +210,25 @@ saveEncrypted(CHAT_CONTACTS_STORAGE_KEY, contacts);
    match. Recompute it here from the key that actually arrived, and use that.
    A record whose claimed fingerprint disagrees with its key is not repaired
    quietly — the computed one wins, which is what the pinning check then sees. */
+/* Everything a relay hands over passes through here, which makes it the one
+   place that can say where a record came from. The check itself is narrow --
+   the fingerprint matches the key or it does not -- and naming the channel
+   is what stops the REST of the record being read as though it had been
+   checked too. */
 async function withVerifiedFingerprint(peer = {}) {
-  const publicKeyData = String(peer.publicKeyData || '');
-  if (!publicKeyData) return peer;
+  const fromRelay = peer.homeRelay ? { ...peer, homeRelaySource: 'presence' } : peer;
+  const publicKeyData = String(fromRelay.publicKeyData || '');
+  if (!publicKeyData) return fromRelay;
   try {
     const raw = app().base64ToArrayBuffer(publicKeyData);
     const computed = await sha256Hex(raw);
-    if (peer.fingerprint && peer.fingerprint !== computed) {
+    if (fromRelay.fingerprint && fromRelay.fingerprint !== computed) {
       console.warn('[chat] presence record claimed a fingerprint its key does not produce; using the computed one');
     }
-    return { ...peer, fingerprint: computed };
+    return { ...fromRelay, fingerprint: computed };
   } catch (error) {
     /* An unreadable key is not a usable contact. */
-    return { ...peer, publicKeyData: '', fingerprint: peer.fingerprint || '' };
+    return { ...fromRelay, publicKeyData: '', fingerprint: fromRelay.fingerprint || '' };
   }
 }
 
@@ -278,6 +376,10 @@ keyChangedAt: keyConflict ? (existing.keyChangedAt || new Date().toISOString()) 
 pendingKey: keyConflict ? offered : (existing.pendingKey || ''),
 pendingFingerprint: keyConflict ? (normalized.fingerprint || '') : (existing.pendingFingerprint || ''),
 avatarData: normalized.avatarData || existing.avatarData,
+/* Ranked, not overwritten. A record arriving without one -- an identity card
+   pasted by hand, a hello from an older build -- must not blank what a card
+   established, which is the same mistake the prekey fields above had. */
+homeRelay: betterHomeRelay(existing.homeRelay, normalized.homeRelay),
 mood: normalized.mood !== undefined && normalized.mood !== '' ? normalized.mood : existing.mood,
 username: normalized.username || existing.username,
 name: normalized.name || existing.name,
@@ -498,7 +600,7 @@ const panel = document.getElementById(id);
 if (!panel) return;
 const peers = chatState.peers
 .filter((peer) => peer.peerId && !peer.type && !isSelfPeerRecord(peer))
-.sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online'));
+.sort((a, b) => Number(peerLooksOnline(b)) - Number(peerLooksOnline(a)));
 if (!peers.length) {
 panel.innerHTML = `<div class="chat-member-picker-empty">${t('برای انتخاب عضو، ابتدا کاربر آنلاین یا مخاطب داشته باشید.', 'Add or discover contacts before choosing members.')}</div>`;
 return;
@@ -509,8 +611,8 @@ ${peers.map((peer) => {
 const name = peer.username || peer.name || peer.peerId;
 return `
 <label class="chat-member-option">
-<input type="checkbox" value="${app().escapeHTML(getConversationKey(peer))}" ${peer.status === 'online' ? 'checked' : ''}>
-<span class="chat-peer-presence-dot ${peer.status === 'online' ? 'online' : 'offline'}"></span>
+<input type="checkbox" value="${app().escapeHTML(getConversationKey(peer))}" ${peerLooksOnline(peer) ? 'checked' : ''}>
+<span class="chat-peer-presence-dot ${peerLooksOnline(peer) ? 'online' : 'offline'}"></span>
 <span>${app().escapeHTML(name)}</span>
 </label>
 `;
@@ -555,7 +657,7 @@ return;
 }
 const peers = chatState.peers
 .filter((peer) => peer.peerId && !peer.type && !isSelfPeerRecord(peer))
-.sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online'));
+.sort((a, b) => Number(peerLooksOnline(b)) - Number(peerLooksOnline(a)));
 const normalizedMembers = normalizeSpaceMembers(space.members);
 const members = new Set(normalizedMembers);
 const memberPeers = peers.filter((peer) => (
@@ -583,9 +685,9 @@ panel.innerHTML = `
 <div class="chat-space-current-members">
 ${memberPeers.length ? memberPeers.map((peer) => `
 <div class="chat-space-current-member">
-<span class="chat-peer-presence-dot ${peer.status === 'online' ? 'online' : 'offline'}"></span>
+<span class="chat-peer-presence-dot ${peerLooksOnline(peer) ? 'online' : 'offline'}"></span>
 <span>${app().escapeHTML(peer.username || peer.name || peer.peerId)}</span>
-<small>${peer.status === 'online' ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')}</small>
+<small>${peerLooksOnline(peer) ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')}</small>
 </div>
 `).join('') : `<div class="chat-member-picker-empty">${t('هنوز عضوی برای این گروه انتخاب نشده است.', 'No members are selected for this group yet.')}</div>`}
 </div>
@@ -598,9 +700,9 @@ const checked = members.has(key) || members.has(peer.peerId) || members.has(peer
 return `
 <label class="chat-member-option">
 <input type="checkbox" value="${app().escapeHTML(key)}" ${checked ? 'checked' : ''}>
-<span class="chat-peer-presence-dot ${peer.status === 'online' ? 'online' : 'offline'}"></span>
+<span class="chat-peer-presence-dot ${peerLooksOnline(peer) ? 'online' : 'offline'}"></span>
 <span>${app().escapeHTML(peer.username || peer.name || peer.peerId)}</span>
-<small>${peer.status === 'online' ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')}</small>
+<small>${peerLooksOnline(peer) ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')}</small>
 </label>
 `;
 }).join('') : `<div class="chat-member-picker-empty">${t('هنوز مخاطبی برای مدیریت اعضا وجود ندارد.', 'No contacts are available for member management yet.')}</div>`}

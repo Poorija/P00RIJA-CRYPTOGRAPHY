@@ -43,7 +43,31 @@ if [[ ${#MONITOR_PASS} -lt 12 ]]; then
     exit 1
 fi
 TURN_PASS=$(openssl rand -base64 32 | tr -d '\n')
+# coturn's long-term credential is a PAIR and the compose file requires both
+# halves, so a .env with only the password stopped the stack from starting at
+# all: "required variable TURN_USER is missing a value". Generated rather than
+# fixed, because a username shared between deployments is how one relay ends
+# up handing out another's name.
+TURN_USER="relay-$(openssl rand -hex 4)"
 DISPLAY_HOST="${DOMAIN:-${EXT_IP:-localhost}}"
+
+# The address clients are told to reach TURN at, which is not always the one
+# this host calls itself. A relay set up without a domain still has a public
+# IP, and "turn:localhost" is useless to everyone but the machine it runs on.
+if [[ "$DOMAIN" == "localhost" && "$EXT_IP" != "127.0.0.1" ]]; then
+    TURN_HOST="$EXT_IP"
+else
+    TURN_HOST="$DOMAIN"
+fi
+# UDP first, and it matters more here than anywhere else in the stack: TURN
+# carries the media itself, and TCP puts a reliable ordered stream under
+# something that would rather drop a late packet than wait for it. A call
+# relayed over TCP sounds worse than the same call over UDP. The TLS entry is
+# offered only for a named host, since a certificate cannot match a bare IP.
+CHAT_TURN_URL="turn:$TURN_HOST:3478?transport=udp,turn:$TURN_HOST:3478?transport=tcp"
+if [[ "$TURN_HOST" != "$EXT_IP" ]]; then
+    CHAT_TURN_URL="$CHAT_TURN_URL,turns:$TURN_HOST:5349?transport=tcp"
+fi
 if [[ "$DISPLAY_HOST" == "localhost" ]]; then
     CHAT_ALLOWED_ORIGINS="http://localhost:9000,http://127.0.0.1:9000,http://localhost:8585,http://127.0.0.1:8585"
 elif [[ "$DISPLAY_HOST" == "$EXT_IP" ]]; then
@@ -66,7 +90,9 @@ cat > "$ROOT/.env" <<EOF
 DOMAIN=$DOMAIN
 EXTERNAL_IP=$EXT_IP
 MONITOR_PASSWORD=$MONITOR_PASS
+TURN_USER=$TURN_USER
 TURN_PASSWORD=$TURN_PASS
+CHAT_TURN_URL=$CHAT_TURN_URL
 SSL_CERT_PATH=./certs/cert.pem
 SSL_KEY_PATH=./certs/key.pem
 CHAT_ALLOWED_ORIGINS=$CHAT_ALLOWED_ORIGINS

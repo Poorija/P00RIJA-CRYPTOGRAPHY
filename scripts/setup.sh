@@ -32,6 +32,10 @@ QUICK_EMAIL=""
 QUICK_MONITOR_PASS=""
 QUICK_CERT="self-signed"
 QUICK_START=true
+# Relays this one may carry for, as "<id>@<origin>" separated by commas. Empty
+# is the default and means this relay carries for nobody, which is the only safe
+# default: a relay that carries for anyone who asks is an open relay.
+QUICK_PEERS=""
 if [[ "${1:-}" == "--quick" || "${1:-}" == "quick" ]]; then
     QUICK_INSTALL=true
     NONINTERACTIVE_UPDATE=true   # same effect: never reach for whiptail
@@ -42,6 +46,7 @@ if [[ "${1:-}" == "--quick" || "${1:-}" == "quick" ]]; then
             --email)    QUICK_EMAIL="${2:-}"; shift 2 ;;
             --password) QUICK_MONITOR_PASS="${2:-}"; shift 2 ;;
             --letsencrypt) QUICK_CERT="letsencrypt"; shift ;;
+            --peers)    QUICK_PEERS="${2:-}"; shift 2 ;;
             --no-start) QUICK_START=false; shift ;;
             *) echo "Unknown option for --quick: $1" >&2; exit 2 ;;
         esac
@@ -359,6 +364,14 @@ validate_env_value() {
 
 write_env_file() {
     local port="${APP_PORT:-8585}"
+    # coturn's command line and chat-signal's CHAT_TURN_USERNAME both interpolate
+    # TURN_USER, and docker-compose.yaml demands it with :?. This function never
+    # wrote it, so a fresh install produced an .env that could not start the
+    # stack at all -- "required variable TURN_USER is missing a value" -- and the
+    # only installs that worked were ones whose .env predated the requirement.
+    # A name, not a secret: TURN_PASSWORD is the secret, and a fixed username
+    # would still be a username every deployment shared.
+    local turn_user="${TURN_USER:-relay-$(openssl rand -hex 4)}"
     local allowed_origins="https://$DOMAIN:$port,https://$DOMAIN"
     if [[ "$DOMAIN" == "localhost" ]]; then
         allowed_origins="https://localhost:$port,http://localhost:$port,https://127.0.0.1:$port,http://127.0.0.1:$port"
@@ -373,51 +386,24 @@ APP_PORT=${APP_PORT:-8585}
 SSL_CERT_PATH=$ROOT/certs/cert.pem
 SSL_KEY_PATH=$ROOT/certs/key.pem
 MONITOR_PASSWORD=$MONITOR_PASS
+TURN_USER=$turn_user
 TURN_PASSWORD=$TURN_PASS
 CHAT_ALLOWED_ORIGINS=$allowed_origins
+# The relays this one links to, as "<id>@<origin>", comma separated. Empty means
+# transit is off and /relay-link is refused outright -- a relay with no peers
+# configured cannot be talked into carrying anything. See docs/RELAY-NETWORK.md,
+# or let scripts/link-relays.sh fill this in for two servers that are already up.
+CHAT_TRANSIT_PEERS=${QUICK_PEERS:-${CHAT_TRANSIT_PEERS:-}}
 EOF
 }
 
-set_nginx_server_name() {
-    local server_name="$1"
-    local nginx_conf="$ROOT/config/nginx.conf"
-    local tmp_conf
-
-    if [[ ! -f "$nginx_conf" ]]; then
-        warn_log "Nginx config not found: $nginx_conf"
-        return 0
-    fi
-
-    tmp_conf="$(mktemp)"
-    awk -v name="$server_name" '
-        /^[[:space:]]*server_name[[:space:]]+/ {
-            sub(/server_name[[:space:]][^;]*;/, "server_name " name ";")
-        }
-        { print }
-    ' "$nginx_conf" > "$tmp_conf"
-    cat "$tmp_conf" > "$nginx_conf"
-    rm -f "$tmp_conf"
-}
-
-# The CSP's connect-src names this deployment's own origins. A self-hosted
-# install has a different domain, so the committed policy has to be rewritten
-# the same way server_name is — otherwise every self-hoster would ship a policy
-# pointing at chat.example.com and their own relay would be blocked.
-set_nginx_csp_origins() {
-    local server_name="$1"
-    local port="${2:-8585}"
-    local nginx_conf="$ROOT/config/nginx.conf"
-
-    [[ -f "$nginx_conf" ]] || return 0
-    # An IP address or "localhost" gets the same treatment; what matters is that
-    # the origins in the policy are the ones the browser will actually talk to.
-    local tmp_conf
-    tmp_conf="$(mktemp)"
-    sed -E "s#https://[^ ]+:[0-9]+ wss://[^ ]+:[0-9]+#https://${server_name}:${port} wss://${server_name}:${port}#" \
-        "$nginx_conf" > "$tmp_conf"
-    cat "$tmp_conf" > "$nginx_conf"
-    rm -f "$tmp_conf"
-}
+# config/nginx.conf used to be rewritten in place here -- server_name and the
+# CSP's connect-src origins patched with sed and awk during an install. Both are
+# gone: the file is a template now, and APP_DOMAIN / APP_ORIGIN / APP_ORIGIN_WS
+# are filled in when the container starts, from the DOMAIN and APP_PORT that
+# write_env_file puts in .env. An in-place rewrite only ever held until the next
+# deployment rsynced config/ over it, which is why a second server kept coming
+# up under the first one's name.
 
 resolve_domain_ip() {
     local domain="$1"
@@ -574,7 +560,7 @@ handle_existing_certs() {
 }
 
 factory_reset() {
-    if ! whiptail --backtitle "$BACKTITLE" --title "FACTORY RESET" --yesno "WARNING: This will perform the following actions:\n\n1. Stop and remove all Docker containers and volumes.\n2. Delete the .env file.\n3. Clear all certificates in the certs/ directory.\n4. Reset config/nginx.conf server_name to the default wildcard (_).\n\nAre you sure you want to proceed?" 16 72; then
+    if ! whiptail --backtitle "$BACKTITLE" --title "FACTORY RESET" --yesno "WARNING: This will perform the following actions:\n\n1. Stop and remove all Docker containers and volumes.\n2. Delete the .env file.\n3. Clear all certificates in the certs/ directory.\n\nAre you sure you want to proceed?" 16 72; then
         return
     fi
 
@@ -597,8 +583,6 @@ factory_reset() {
     rm -f "$ROOT/.env"
     mkdir -p "$ROOT/certs"
     rm -f "$ROOT/certs"/*.pem
-    
-    set_nginx_server_name "_"
 
     msg_box "Reset Successful" "All settings and certificates have been cleared.\nThe project is now in its default state."
     exit 0
@@ -815,17 +799,9 @@ main() {
 
     write_env_file
 
-    # The port matters as much as the domain: an origin is scheme + host +
-    # PORT, so a deployment on anything other than 8585 was handed a policy
-    # naming a port it does not listen on, and the browser then blocked the
-    # relay this very function exists to keep reachable. APP_PORT is what the
-    # installer asked for.
-    set_nginx_csp_origins "$DOMAIN" "${APP_PORT:-8585}"
-    set_nginx_server_name "$DOMAIN"
-
     build_display_urls
 
-    msg_box "Configuration Complete" "Environment: $DOMAIN\nIP: $EXT_IP\n\nApplication:\n$APP_URL\n\nMonitor Server:\n$MONITOR_URL\n\nConfiguration has been saved to .env and config/nginx.conf."
+    msg_box "Configuration Complete" "Environment: $DOMAIN\nIP: $EXT_IP\n\nApplication:\n$APP_URL\n\nMonitor Server:\n$MONITOR_URL\n\nConfiguration has been saved to .env."
 
     if yes_no "Deploy" "Would you like to build and start the Docker containers now?" ; then
         print_header
@@ -848,8 +824,8 @@ main() {
 # Unattended install
 #
 # Reuses the wizard's own functions rather than reimplementing them, so the two
-# paths cannot drift: same .env writer, same certificate generator, same nginx
-# rewrite, same compose invocation, same health wait.
+# paths cannot drift: same .env writer, same certificate generator, same compose
+# invocation, same health wait.
 # ---------------------------------------------------------------------------
 quick_install() {
     print_header
@@ -912,9 +888,8 @@ quick_install() {
     fi
 
     write_env_file
-    set_nginx_server_name "$DOMAIN"
     build_display_urls
-    ok_log "Wrote .env and config/nginx.conf"
+    ok_log "Wrote .env; nginx reads the domain from it at start-up"
 
     if [[ "$QUICK_START" != "true" ]]; then
         ok_log "Configured but not started (--no-start)."
@@ -934,6 +909,13 @@ quick_install() {
 
     printf '\n'
     ok_log "Installed."
+    if [[ -z "${QUICK_PEERS:-}" ]]; then
+        echo
+        echo "  This relay carries for nobody, which is the default. To let it carry"
+        echo "  for another deployment of this application, once both are running:"
+        echo "      bash scripts/link-relays.sh <this one> <the other>"
+        echo "  People on either one can then write to and call people on the other."
+    fi
     echo "  Application    : $APP_URL"
     echo "  Monitor        : $MONITOR_URL"
     echo "  Monitor password: $MONITOR_PASS"

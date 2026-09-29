@@ -53,7 +53,7 @@ function contactBookRecords() {
       .some((field) => String(field || '').toLowerCase().includes(query)))
     : records;
   return matched.slice().sort((a, b) => {
-    const onlineGap = (b.status === 'online' ? 1 : 0) - (a.status === 'online' ? 1 : 0);
+    const onlineGap = (peerLooksOnline(b) ? 1 : 0) - (peerLooksOnline(a) ? 1 : 0);
     if (onlineGap) return onlineGap;
     return String(a.name || a.username || '').localeCompare(String(b.name || b.username || ''), undefined, { sensitivity: 'base' });
   });
@@ -66,6 +66,10 @@ function contactShareText(peer = {}) {
     peerId: peer.peerId || '',
     fingerprint: peer.fingerprint || '',
     publicKeyData: peer.publicKeyData || '',
+    /* Passed on only when it was established out of band here too. Forwarding
+       a presence hint would launder it into a card, which is the one way the
+       ladder could be climbed by accident. */
+    homeRelay: routableHomeRelay(peer),
   }));
 }
 
@@ -75,7 +79,7 @@ function renderAddressBook() {
 
   const rows = records.length ? records.map((peer) => {
     const name = peer.name || peer.username || peer.peerId;
-    const online = peer.status === 'online';
+    const online = peerLooksOnline(peer);
     const initial = String(name || '?').trim().charAt(0).toUpperCase() || '?';
     const avatar = peer.avatarData
       ? `<img class="chat-contact-avatar" src="${esc(peer.avatarData)}" alt="">`

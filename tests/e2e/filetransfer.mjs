@@ -678,7 +678,16 @@ fs.rmSync(offlineFixture.file, { force: true });
 
 console.log('\n===== the two ceilings =====');
 const queuedBefore = mailbox(ghost.fingerprint).length;
-const tooBigOffline = makeSparseFile('offline-200mb.bin', 200 * MB);
+/* Read from the running app rather than written down here.
+ *
+ * This used to send exactly 200 MB, from when that was over the ceiling. The
+ * ceiling was later raised to exactly 200 MB and the guard reads "larger
+ * than", so the file stopped being refused and 2,800 chunks went into the
+ * mailbox the check was about — while the check still claimed to be testing
+ * a refusal. A number copied out of the source is a number that goes stale
+ * silently; asking the app what its own limit is cannot. */
+const offlineCeiling = await A.evaluate(() => MAX_OFFLINE_FILE_BYTES);
+const tooBigOffline = makeSparseFile('offline-over-ceiling.bin', offlineCeiling + MB);
 await A.evaluate(() => { window.__toasts = []; });
 await A.setInputFiles('#chatFileInput', tooBigOffline.file);
 await A.waitForTimeout(6000);
@@ -687,7 +696,7 @@ await A.waitForTimeout(6000);
    take them off before matching. */
 const plain = (text) => String(text || '').replace(/[\u2066-\u2069\u200e\u200f]/g, '');
 const offlineToasts = await A.evaluate(() => (window.__toasts || []).slice(-4));
-check('200 MB to an absent contact is refused, with the reason',
+check(`a file over the ${Math.round(offlineCeiling / MB)} MB ceiling is refused for an absent contact, with the reason`,
   offlineToasts.some((t) => /only be sent while they are online|larger than/i.test(plain(t))),
   offlineToasts.join(' | ').slice(0, 140));
 check('and nothing was added to their mailbox',

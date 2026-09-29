@@ -32,7 +32,7 @@ function currentChatListFilter() {
 function chatListFilterPredicate(id) {
   if (id === 'unread') return (record) => unreadConversationCount(getConversationKey(record)) > 0;
   if (id === 'pinned') return (record) => Boolean(record.pinned);
-  if (id === 'online') return (record) => record.status === 'online';
+  if (id === 'online') return (record) => peerLooksOnline(record);
   return () => true;
 }
 function applyChatListFilter(records) {

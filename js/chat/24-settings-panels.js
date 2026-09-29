@@ -340,6 +340,15 @@ function buildChatGroupCollapsibles() {
 }
 
 function renderPeers() {
+/* Drawing the list is also the moment to find out whether it is true.
+ *
+ * A contact on this relay is pushed to us the instant their presence changes; a
+ * contact on another relay changes only when we ask, and nothing asked until
+ * their conversation was opened. On a phone that meant the list was wrong every
+ * time the application started -- everybody grey until you tapped them.
+ * askAboutTheVisibleContacts throttles per contact and caps the sweep, so this
+ * costs the same whether the address book holds three people or three hundred. */
+if (typeof askAboutTheVisibleContacts === 'function') askAboutTheVisibleContacts();
 bindRailCondense();
   bindChatRailResizer();
   bindProfileCard();
@@ -372,14 +381,14 @@ const leftPinned = left.pinned ? 1 : 0;
 const rightPinned = right.pinned ? 1 : 0;
 if (leftPinned !== rightPinned) return rightPinned - leftPinned;
 if (leftPinned && rightPinned) return (left.pinOrder || 0) - (right.pinOrder || 0);
-const leftOnline = left.status === 'online' ? 1 : 0;
-const rightOnline = right.status === 'online' ? 1 : 0;
+const leftOnline = peerLooksOnline(left) ? 1 : 0;
+const rightOnline = peerLooksOnline(right) ? 1 : 0;
 if (leftOnline !== rightOnline) return rightOnline - leftOnline;
 const leftStamp = new Date((conversationHistory(left).slice(-1)[0]?.createdAt || conversationHistory(left).slice(-1)[0]?.timestamp) || left.lastSeenAt || 0).getTime();
 const rightStamp = new Date((conversationHistory(right).slice(-1)[0]?.createdAt || conversationHistory(right).slice(-1)[0]?.timestamp) || right.lastSeenAt || 0).getTime();
 return rightStamp - leftStamp;
 });
-const onlinePeers = allPeers.filter((peer) => peer.status === 'online');
+const onlinePeers = allPeers.filter((peer) => peerLooksOnline(peer));
 if ((chatState.activePeerClientId || chatState.activeConversationId) && !activePeer() && chatState.activeView === 'chats') {
 // Only forget a conversation that nothing can vouch for any more. Clearing on
 // the first failed lookup meant a single render with an incomplete record list
@@ -449,7 +458,7 @@ const presence = isGroup ? groupPresence(record) : null;
 /* For a person "online" is a fact about them; for a group it is a summary of
    the people in it, and the dot follows the same three-way reading the badge
    does: everybody here, somebody here, nobody here. */
-const online = isGroup ? Boolean(presence?.some) : record.status === 'online';
+const online = isGroup ? Boolean(presence?.some) : peerLooksOnline(record);
 const presenceClass = isGroup
   ? (presence?.dissolved ? 'dissolved' : (presence?.all ? 'online' : (presence?.some ? 'partial' : 'offline')))
   : (online ? 'online' : 'offline');
@@ -775,6 +784,34 @@ name: identity.name || '',
 fingerprint: identity.fingerprint || '',
 publicKeyData: identity.publicKeyData || '',
 avatarData: identity.avatarData || '',
+/* Where this person's messages have to end up when they are not on the relay
+   this device is connected to.
+ *
+ * It was missing here, and that is the whole of what "the two servers cannot
+ * talk to each other" turned out to mean. parseIdentityText reads the relay out
+ * of the card and stamps it `card` -- the top of the trust ladder, because it
+ * arrived on the same out-of-band channel as the key -- and this function then
+ * built the record field by field without it, so the claim was parsed, verified
+ * and dropped. transitRouteFor found no home relay, decided the contact was on
+ * this relay, and handed the message to a relay that had never heard of them.
+ * Both the QR scanner and the pasted-card path come through here, so both were
+ * affected; nothing that tests mergePeerRecord directly can see it.
+ *
+ * Passing it in is safe rather than trusting: mergePeerRecord runs it through
+ * betterHomeRelay, which only ever moves the trust ladder up, so an existing
+ * `card` cannot be downgraded by a later import and a forged one cannot
+ * displace what presence already proved.
+ *
+ * The rank comes from whoever parsed the identity, and the fallback is the
+ * WEAKEST one on purpose. parseIdentityText stamps `card` for a scanned or
+ * pasted card, because that arrived out of band. This function is also reached
+ * by a session-offer the relay held for us while we were away, and on a first
+ * contact there is nothing yet to check that offer against -- a relay could
+ * have written the whole thing, home relay included. So an unstamped claim gets
+ * `presence`, which is below the bar routableHomeRelay sets, and it takes a
+ * verified fingerprint or a session before anything is routed on it. */
+homeRelay: identity.homeRelay || null,
+homeRelaySource: identity.homeRelaySource || (identity.homeRelay ? 'presence' : ''),
 manual: true,
 status: 'offline',
 }, { online: false });

@@ -834,6 +834,21 @@ renderPeers();
 }
 }
 }
+/* Its own listener, not part of the profile draft: this is a per-device
+   choice like the download quota, not something that travels with the
+   profile. */
+document.getElementById('chatSendReceipts')?.addEventListener('change', (event) => {
+chatState.prefs = chatState.prefs || {};
+chatState.prefs.sendReceipts = Boolean(event.target.checked);
+saveChatPrefs();
+syncChatToggleStates();
+});
+/* Accepting a changed relay fingerprint. Deliberately a button of its own
+   rather than something that happens on connect: the question it answers is
+   "is this still the server I chose", and only the person can answer it. */
+document.getElementById('chatRelayIdentityAcceptBtn')?.addEventListener('click', () => {
+promptRelayPinChange().catch(console.error);
+});
 // --- chat status report -------------------------------------------------
 // One place that answers "why can't I send?" without another round of guesses.
 document.getElementById('chatDiagBtn')?.addEventListener('click', () => {

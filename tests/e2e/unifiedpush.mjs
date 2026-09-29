@@ -27,13 +27,14 @@
 
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import crypto from 'node:crypto';
 import { relayTestIdentity, answerRelayChallenge } from './_relay-identity.mjs';
+import { mirrorRelayLib } from './_relay-lib.mjs';
 
 /* The same ceremony the presence socket uses, over HTTP: ask for a challenge,
    decrypt it with the private key behind the fingerprint, hand it back. */
@@ -95,13 +96,10 @@ await new Promise((resolve) => sink.listen(SINK_PORT, resolve));
 
 // ---- the relay, in the layout its Dockerfile builds ----------------------
 const work = mkdtempSync(join(tmpdir(), 'poorija-up-'));
-const libDir = join(ROOT, 'standalone-relay', 'lib');
-const libFile = join(libDir, 'push-wording.js');
-const libWasMissing = !existsSync(libFile);
-if (libWasMissing) {
-  mkdirSync(libDir, { recursive: true });
-  copyFileSync(join(ROOT, 'scripts', 'lib', 'push-wording.js'), libFile);
-}
+/* The relay reads its shared modules from ./lib, which only the image has.
+   Mirrored by name would break the day a second module appeared; see
+   tests/e2e/_relay-lib.mjs. */
+const restoreRelayLib = mirrorRelayLib();
 
 const relay = spawn(process.execPath, [RELAY_SERVER], {
   env: {
@@ -129,9 +127,7 @@ function cleanup() {
   try { sink.close(); } catch (_error) { /* already closed */ }
   try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
   catch (_error) { /* the OS will reap it */ }
-  if (libWasMissing) {
-    try { rmSync(libDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
-  }
+  restoreRelayLib();
 }
 process.on('exit', cleanup);
 

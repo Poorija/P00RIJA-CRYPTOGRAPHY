@@ -471,6 +471,18 @@ stablePeerId: '',
 turnUrl: '',
 turnUsername: '',
 turnCredential: '',
+/* Which relay handed over the three fields above, so the app can tell a
+   credential it fetched from one the user typed -- and, more to the point,
+   tell a credential fetched from THIS relay from one fetched from a different
+   one. A client that keeps the TURN of a relay on another continent sends
+   every relayed call the long way round, which is the one thing a nearby TURN
+   exists to prevent. TURN_ORIGIN_MANUAL marks a triple entered by hand; it
+   matches no origin, so nothing replaces it. */
+turnOrigin: '',
+/* Relay origin -> the identity first seen there. See the block above
+   relayIdFromPublicKey() for why a relay has an identity at all, and why a
+   change to one is shown rather than followed. */
+relayPins: {},
 /* null = decide from whether a TURN server is configured; see peerOptions(). */
 publicStun: null,
 ringtoneId: 'classic',
@@ -798,15 +810,38 @@ const raw = Number(chatState.prefs?.autoDownloadLimitBytes);
 if (!Number.isFinite(raw) || raw < 0) return DEFAULT_AUTO_DOWNLOAD_LIMIT_BYTES;
 return raw;
 }
+/* Whether this device answers a message with a receipt.
+ *
+ * A read receipt is a guaranteed, immediate reply to every message that
+ * arrives — and that is exactly what makes it useful to somebody watching
+ * the outside of the traffic. Published work on Signal's sealed sender shows
+ * the pairs who are talking can be recovered by statistical disclosure from
+ * that reply alone, without reading anything: the content stays sealed and
+ * the shape of the conversation does not. Signal has no way to turn it off,
+ * which is what makes it work so reliably as a signal.
+ *
+ * On by default, because silently changing what an existing conversation
+ * does would be its own surprise. What matters is that it can be turned off
+ * at all, and that turning it off stops the automatic reply rather than only
+ * hiding the ticks. */
+function receiptsEnabled() {
+return chatState.prefs?.sendReceipts !== false;
+}
 function saveChatPrefs() {
 saveEncrypted(CHAT_PREFS_STORAGE_KEY, {
 autoDownloadLimitBytes: chatAutoDownloadLimitBytes(),
 relayOnboardAsked: Boolean(chatState.prefs?.relayOnboardAsked),
+sendReceipts: receiptsEnabled(),
 /* The pixel step the last video call settled at, so the next one starts near
    an answer that held instead of asking for 1080p and walking down through
    the opening seconds. A number, and one this device worked out about itself:
    it says nothing about who was called or when. */
 callPixelStep: Number(chatState.prefs?.callPixelStep ?? 0),
+/* Which TURN server worked for which contact. Round trips and loss rates
+   against server addresses — the call log already records who was called, so
+   this adds how the network behaved and no new fact about the conversation. */
+turnChoices: chatState.prefs?.turnChoices && typeof chatState.prefs.turnChoices === 'object'
+? chatState.prefs.turnChoices : {},
 });
 }
 /* The webview's internal origin is never a relay.
@@ -1156,6 +1191,8 @@ async function importRelayConfigFile(file) {
   chatState.profile.turnUrl = String(payload.turnUrl || chatState.profile.turnUrl || '');
   chatState.profile.turnUsername = String(payload.turnUsername || chatState.profile.turnUsername || '');
   chatState.profile.turnCredential = String(payload.turnCredential || chatState.profile.turnCredential || '');
+  chatState.profile.turnOrigin = importedTurnOrigin(
+    chatState.profile.turnUrl, probe.turnConfig, probe.origin);
   saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
   notify(t(`کانفیگ اعمال شد: ${probe.origin}`, `Config applied: ${probe.origin}`), 'success');
   applyChatEnabled(true, { silent: true });
@@ -1849,7 +1886,22 @@ console.log(`[Discovery] TURN config fetch failed for ${normalizedOrigin}:`, err
 const nativeResult = await probeRelayOriginNatively(normalizedOrigin);
 if (nativeResult?.turnConfig) return nativeResult;
 }
-return { origin: normalizedOrigin, health, turnConfig };
+/* Asked for separately from the health check although the health check
+   already carries the id, because the id alone cannot be verified -- the
+   key it is the hash of is what makes it checkable, and only this endpoint
+   has the key. A relay that predates this answers 404 and the probe
+   carries on without one: an older relay is not a broken relay. */
+let relayIdentity = null;
+try {
+const identityUrl = new URL('/relay-identity', normalizedOrigin);
+const identityResponse = await fetchRelayJson(identityUrl, 4000);
+if (identityResponse.ok) {
+relayIdentity = await verifiedRelayIdentity(await identityResponse.json(), health);
+}
+} catch (error) {
+console.log(`[Discovery] Relay identity unavailable at ${normalizedOrigin}:`, error.message);
+}
+return { origin: normalizedOrigin, health, turnConfig, relayIdentity };
 } catch (error) {
 console.log(`[Discovery] Probe failed for ${normalizedOrigin}:`, error.message);
 return probeRelayOriginNatively(normalizedOrigin);
@@ -1937,11 +1989,8 @@ if (!result) continue;
 chatState.profile.serverUrl = result.origin;
 chatState.profile.presenceUrl = String(result.health?.presenceUrl || chatState.profile.presenceUrl || '');
 chatState.profile.peerOrigin = String(result.health?.peerOrigin || chatState.profile.peerOrigin || result.origin);
-if (result.turnConfig?.enabled && result.turnConfig?.urls) {
-chatState.profile.turnUrl = formatIceServerUrlsForInput(result.turnConfig.urls || '');
-chatState.profile.turnUsername = String(result.turnConfig.username || '');
-chatState.profile.turnCredential = String(result.turnConfig.credential || '');
-}
+if (result.turnConfig?.enabled) adoptRelayTurnConfig(result.turnConfig, result.origin);
+applyRelayIdentity(result.origin, result.relayIdentity);
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 if (!silent) {
@@ -1954,12 +2003,398 @@ notify(t('سرور محلی پیدا نشد.', 'No local relay server was discov
 }
 return null;
 }
-async function hydrateRelayTurnConfig() {
+/* ===================== هویت رله ===================== */
+/* A relay's own name, checked rather than believed.
+ *
+ * Every other address in this app is self-certifying: a contact is the hash
+ * of its public key, so the name carries its own proof. A relay was an origin
+ * -- a hostname, a certificate, a DNS record, all of them things somebody
+ * else can be made to hand over -- and there was no way to ask whether the
+ * server answering today is the one that answered yesterday.
+ *
+ * The relay now publishes an X25519 key and is named by its hash. Two things
+ * follow, and the second is the reason for the first:
+ *
+ *   - a change of identity at an origin somebody has used before is worth
+ *     showing. It is not proof of an attack: a reinstall that lost the data
+ *     directory produces exactly the same signal. It is worth a person's
+ *     attention either way, which is why it is shown and not acted on.
+ *   - a transit envelope has to be sealed TO a relay, and sealing to a
+ *     hostname seals to whoever holds the hostname. The pin is what a seal
+ *     will be built on, so it is collected now, before anything depends on
+ *     it.
+ *
+ * The id is recomputed here rather than taken from the relay. An id the
+ * server merely asserts is a label; an id the client derives from the key it
+ * was given is a name the server cannot lie about — which is the only
+ * property that makes any of this worth doing. */
+async function relayIdFromPublicKey(publicKeyData) {
+let raw;
+try {
+raw = Uint8Array.from(atob(String(publicKeyData || '')), (character) => character.charCodeAt(0));
+} catch (_error) {
+return '';
+}
+if (!raw.length) return '';
+const digest = await crypto.subtle.digest('SHA-256', raw);
+return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+/* Sixteen groups of four: the form somebody can read down a telephone, which
+   is the only way two people ever compare one of these. */
+function formatRelayId(id) {
+return String(id || '').replace(/(.{4})(?=.)/g, '$1 ').trim();
+}
+/* Returns the bundle only if it is internally consistent. A relay whose id is
+   not the hash of the key it published has either been tampered with or is
+   broken; both mean the bundle cannot be pinned, so nothing is. */
+async function verifiedRelayIdentity(bundle, health) {
+const publicKey = String(bundle?.publicKey || '');
+const claimed = String(bundle?.id || '');
+if (!publicKey || !claimed) return null;
+const derived = await relayIdFromPublicKey(publicKey);
+if (!derived || derived !== claimed) {
+console.warn('[Relay] The relay published an id that is not the hash of its own key; ignoring it.');
+return null;
+}
+/* The health endpoint carries the same id, and the two are fetched
+   separately. Disagreement means something is rewriting one of them. */
+const fromHealth = String(health?.relayId || '');
+if (fromHealth && fromHealth !== derived) {
+console.warn('[Relay] Two endpoints of the same relay gave different identities; ignoring both.');
+return null;
+}
+return {
+id: derived,
+publicKey,
+algorithm: String(bundle?.algorithm || 'x25519'),
+createdAt: String(bundle?.createdAt || ''),
+};
+}
+function relayPinFor(origin) {
+return (chatState.profile.relayPins || {})[String(origin || '')] || null;
+}
+/* 'new' on first sight, 'same' when it matches, 'changed' when it does not --
+   and 'changed' deliberately does NOT overwrite. Silently adopting whatever
+   answered most recently is the same as having no pin at all. */
+function recordRelayPin(origin, identity) {
+if (!identity?.id) return 'unknown';
+const key = String(origin || '');
+if (!key) return 'unknown';
+if (!chatState.profile.relayPins || typeof chatState.profile.relayPins !== 'object') {
+chatState.profile.relayPins = {};
+}
+const existing = chatState.profile.relayPins[key];
+if (!existing?.id) {
+chatState.profile.relayPins[key] = {
+id: identity.id,
+publicKey: identity.publicKey,
+algorithm: identity.algorithm,
+pinnedAt: new Date().toISOString(),
+};
+return 'new';
+}
+if (existing.id === identity.id) {
+/* The key travels with the id so that a pin made by an older build, which
+   stored only what it needed then, can still be sealed to later. */
+if (!existing.publicKey && identity.publicKey) existing.publicKey = identity.publicKey;
+return 'same';
+}
+return 'changed';
+}
+/* Replaces a pin, and only ever from a deliberate answer to the question
+   below. Nothing calls this on its own. */
+function acceptRelayPin(origin, identity) {
+const key = String(origin || '');
+if (!key || !identity?.id) return false;
+if (!chatState.profile.relayPins || typeof chatState.profile.relayPins !== 'object') {
+chatState.profile.relayPins = {};
+}
+chatState.profile.relayPins[key] = {
+id: identity.id,
+publicKey: identity.publicKey,
+algorithm: identity.algorithm,
+pinnedAt: new Date().toISOString(),
+replaced: true,
+};
+chatState.relayPinAlert = null;
+saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+renderStaticUi();
+return true;
+}
+/* Applied where a probe result is ACCEPTED, never where one is merely taken:
+   scanning a range of addresses must not pin everything that answers. */
+function applyRelayIdentity(origin, identity) {
+const verdict = recordRelayPin(origin, identity);
+if (verdict === 'changed') {
+const pinned = relayPinFor(origin);
+chatState.relayPinAlert = { origin: String(origin || ''), expected: pinned?.id || '', seen: identity.id, identity };
+/* Loud, and repeated on every connect until it is answered. Messages stay
+   end-to-end encrypted through all of this -- a relay cannot read them
+   whoever it is -- so this does not stop the connection. What it stops is
+   the change going unnoticed, and once transit seals envelopes to this key
+   a changed pin will stop that separately. */
+notify(t(
+`هویت رمزنگاشتی سرور رله عوض شده است. ممکن است سرور دوباره نصب شده باشد — یا سرور دیگری باشد.`,
+'The relay server\'s cryptographic identity has changed. It may have been reinstalled — or it may be a different server.'), 'warning');
+promptRelayPinChange().catch(console.error);
+} else if (verdict !== 'unknown') {
+chatState.relayPinAlert = null;
+}
+return verdict;
+}
+async function promptRelayPinChange() {
+const alertState = chatState.relayPinAlert;
+if (!alertState || chatState.relayPinPromptOpen) return;
+chatState.relayPinPromptOpen = true;
+try {
+const question = t(
+`سرور رله ${alertState.origin} با هویت دیگری پاسخ می‌دهد.\n\nهویت پین‌شده:\n${formatRelayId(alertState.expected)}\n\nهویت فعلی:\n${formatRelayId(alertState.seen)}\n\nاگر خودتان سرور را دوباره نصب کرده‌اید، این طبیعی است. در غیر این صورت پیش از پذیرفتن، اثر انگشت را از راه دیگری با مدیر سرور بررسی کنید.\n\nهویت جدید پذیرفته شود؟`,
+`The relay at ${alertState.origin} is answering with a different identity.\n\nPinned:\n${formatRelayId(alertState.expected)}\n\nNow:\n${formatRelayId(alertState.seen)}\n\nIf you reinstalled the server yourself, this is expected. Otherwise check the fingerprint with whoever runs it, by some other route, before accepting.\n\nAccept the new identity?`);
+if (await PoorijaDialogs.confirm(question)) acceptRelayPin(alertState.origin, alertState.identity);
+} finally {
+chatState.relayPinPromptOpen = false;
+}
+}
+/* The row in the connection sheet. Three states and nothing in between:
+   nothing pinned yet, a pin that matches, and a pin that does not. */
+function renderRelayIdentityRow() {
+const row = document.getElementById('chatRelayIdentityRow');
+if (!row) return;
+const title = document.getElementById('chatRelayIdentityTitle');
+const value = document.getElementById('chatRelayIdentityValue');
+const note = document.getElementById('chatRelayIdentityNote');
+const accept = document.getElementById('chatRelayIdentityAcceptBtn');
+const origin = chatServerOrigin();
+const pinned = relayPinFor(origin);
+const alertState = chatState.relayPinAlert;
+const changed = Boolean(alertState && alertState.origin === origin);
+if (!pinned && !changed) {
+row.classList.add('hidden');
+return;
+}
+row.classList.remove('hidden');
+row.classList.toggle('is-changed', changed);
+if (title) {
+title.textContent = changed
+? t('اثر انگشت رله عوض شده است', 'The relay fingerprint has changed')
+: t('اثر انگشت رله', 'Relay fingerprint');
+}
+if (value) value.textContent = formatRelayId(changed ? alertState.seen : pinned?.id);
+if (note) {
+note.textContent = changed
+? t(`اثر انگشت پین‌شده: ${formatRelayId(alertState.expected)} — پیش از پذیرفتن، آن را از راهی غیر از خود همین سرور بررسی کنید.`,
+`Pinned: ${formatRelayId(alertState.expected)} — check the new one by some route other than this server before accepting.`)
+: t('این اثر انگشت از کلید عمومی رله ساخته می‌شود، نه از آدرس آن. اگر عوض شود، این‌جا گفته می‌شود.',
+'Derived from the relay\'s public key rather than its address. If it changes, you are told here.');
+}
+if (accept) {
+accept.classList.toggle('hidden', !changed);
+accept.textContent = t('پذیرفتن هویت جدید', 'Accept the new identity');
+}
+}
+/* This device's own home relay, as it goes onto an identity card.
+   The pinned id travels with the origin because the origin alone is worth
+   nothing to seal to: a hostname is whoever holds the hostname today, which
+   is the reason relays were given identities in the first place. A relay too
+   old to have one yields an origin with no id, and step five will decline to
+   route to it rather than seal to a name it cannot check. */
+function myHomeRelay() {
+const origin = chatServerOrigin();
+if (!isUsableRelayOrigin(origin)) return null;
+const pinned = relayPinFor(origin);
+return {
+origin,
+id: pinned?.id || '',
+/* The key as well as the id, so somebody who scans this card can seal to
+   this relay without having to reach it first — which, in the case transit
+   exists for, they cannot. */
+key: pinned?.publicKey || '',
+updatedAt: new Date().toISOString(),
+};
+}
+/* ===================== مهر ترانزیت ===================== */
+/* Sealing an envelope to a relay that is not the one this device talks to.
+ *
+ * The carrying relay must not learn the recipient — that is the entire point
+ * — so the real envelope is sealed to the RECIPIENT'S relay before it is
+ * handed over. What the carrying relay gets is a relay id, some bytes, and a
+ * length that has been rounded off.
+ *
+ * This is the same construction as scripts/lib/relay-transit.js and has to
+ * stay byte for byte identical to it, because that is the code at the other
+ * end that opens the result. Two implementations of one format is where the
+ * difference between them becomes the bug, so tests/e2e/transitseal.mjs seals
+ * with each and opens with the other rather than trusting that they match.
+ *
+ * P-256 is why the relay identity is P-256: see scripts/lib/relay-identity.js.
+ * The client is the half of this that runs in a browser. */
+const TRANSIT_VERSION = 1;
+const TRANSIT_AAD = 'poorija-transit-v1';
+const TRANSIT_PAD_BUCKET = 512;
+const TRANSIT_LENGTH_PREFIX = 4;
+const TRANSIT_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TRANSIT_SEAL_INFO = 'poorija-relay-seal-v1';
+const TRANSIT_MAX_INNER_BYTES = 24 * 1024 * 1024;
+
+function transitAadFor(relayId) {
+return `${TRANSIT_AAD}|${String(relayId || '').toLowerCase()}`;
+}
+/* [4-byte big-endian length][json][zeros to the next 512]. The prefix is what
+   makes the padding removable without guessing. */
+function padTransitBody(json) {
+const body = new TextEncoder().encode(json);
+if (body.length > TRANSIT_MAX_INNER_BYTES) throw new Error('transit payload is too large');
+const total = Math.ceil((TRANSIT_LENGTH_PREFIX + body.length) / TRANSIT_PAD_BUCKET) * TRANSIT_PAD_BUCKET;
+const out = new Uint8Array(total);
+new DataView(out.buffer).setUint32(0, body.length, false);
+out.set(body, TRANSIT_LENGTH_PREFIX);
+return out;
+}
+function unpadTransitBody(bytes) {
+if (bytes.length < TRANSIT_LENGTH_PREFIX) throw new Error('transit payload is truncated');
+const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, false);
+if (length > TRANSIT_MAX_INNER_BYTES || TRANSIT_LENGTH_PREFIX + length > bytes.length) {
+throw new Error('transit payload claims a length it does not have');
+}
+return new TextDecoder().decode(bytes.subarray(TRANSIT_LENGTH_PREFIX, TRANSIT_LENGTH_PREFIX + length));
+}
+async function transitSealKey(sharedBits, ephemeralPublicData) {
+const material = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+return crypto.subtle.deriveKey(
+{
+name: 'HKDF',
+hash: 'SHA-256',
+/* The ephemeral public key is the salt, matching the relay side exactly. */
+salt: base64ToBytes(ephemeralPublicData),
+info: new TextEncoder().encode(TRANSIT_SEAL_INFO),
+},
+material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
+);
+}
+/* The id is the hash of the key, so a key that does not hash to the id this
+   device was given out of band is not that relay's key — whoever handed it
+   over. Checked here rather than where the key is stored, because this is the
+   moment it is about to be used for something. */
+async function relayKeyMatchesId(publicKeyData, relayId) {
+if (!publicKeyData || !/^[a-f0-9]{64}$/i.test(String(relayId || ''))) return false;
+return (await relayIdFromPublicKey(publicKeyData)) === String(relayId).toLowerCase();
+}
+/** Seals `inner` for the relay named by `relayId`. Refuses rather than
+    sealing to a key that is not that relay's. */
+async function sealTransitEnvelope(relayId, relayPublicKeyData, inner, { ttlMs = TRANSIT_DEFAULT_TTL_MS } = {}) {
+const id = String(relayId || '').toLowerCase();
+if (!await relayKeyMatchesId(relayPublicKeyData, id)) {
+throw new Error('that key is not the key of the relay it claims to be');
+}
+const recipient = await crypto.subtle.importKey('spki', base64ToBytes(relayPublicKeyData),
+{ name: 'ECDH', namedCurve: 'P-256' }, true, []);
+const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+const ephemeralPublic = bytesToBase64(new Uint8Array(await crypto.subtle.exportKey('spki', ephemeral.publicKey)));
+const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: recipient }, ephemeral.privateKey, 256);
+const key = await transitSealKey(shared, ephemeralPublic);
+const iv = crypto.getRandomValues(new Uint8Array(12));
+const body = padTransitBody(JSON.stringify({ exp: Date.now() + ttlMs, inner }));
+const sealed = new Uint8Array(await crypto.subtle.encrypt(
+{ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(transitAadFor(id)) }, key, body));
+return {
+type: 'transit',
+v: TRANSIT_VERSION,
+toRelay: id,
+eph: ephemeralPublic,
+iv: bytesToBase64(iv),
+ct: bytesToBase64(sealed),
+};
+}
+/* The other direction. This device is not a relay and will never open an
+   envelope in anger; it exists so the format can be exercised from both ends
+   in one place, which is how the two implementations are kept honest. */
+async function openTransitEnvelope(privateKeyData, relayId, envelope) {
+if (Number(envelope?.v) !== TRANSIT_VERSION) throw new Error('unsupported transit version');
+const id = String(relayId || '').toLowerCase();
+if (String(envelope?.toRelay || '').toLowerCase() !== id) {
+throw new Error('transit envelope is addressed elsewhere');
+}
+const privateKey = await crypto.subtle.importKey('pkcs8', base64ToBytes(privateKeyData),
+{ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+const ephemeral = await crypto.subtle.importKey('spki', base64ToBytes(envelope.eph),
+{ name: 'ECDH', namedCurve: 'P-256' }, true, []);
+const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephemeral }, privateKey, 256);
+const key = await transitSealKey(shared, String(envelope.eph));
+const plain = new Uint8Array(await crypto.subtle.decrypt(
+{ name: 'AES-GCM', iv: base64ToBytes(envelope.iv), additionalData: new TextEncoder().encode(transitAadFor(id)) },
+key, base64ToBytes(envelope.ct)));
+const parsed = JSON.parse(unpadTransitBody(plain));
+if (!Number.isFinite(parsed?.exp)) throw new Error('transit envelope has no expiry');
+if (parsed.exp < Date.now()) throw new Error('transit envelope has expired');
+if (!parsed.inner || typeof parsed.inner !== 'object') throw new Error('transit envelope is empty');
+return parsed.inner;
+}
+const TURN_ORIGIN_MANUAL = 'manual';
+/* A TURN triple the user typed in full is theirs and is never overwritten.
+   An incomplete one is not: peerOptions() drops a turn: entry that is missing
+   a username or a credential, so keeping it would only mean no TURN at all --
+   emptying the fields is how somebody asks for the relay's own back. */
+function turnConfigIsUserOwned() {
+return chatState.profile.turnOrigin === TURN_ORIGIN_MANUAL
+&& Boolean(chatState.profile.turnUrl)
+&& Boolean(chatState.profile.turnUsername)
+&& Boolean(chatState.profile.turnCredential);
+}
+/* The one place TURN credentials arrive from a relay. Records WHICH relay
+   alongside them, which is what lets the refresh below notice that the
+   credentials belong to somewhere the client is no longer talking to. */
+function adoptRelayTurnConfig(turnConfig, origin) {
+if (!turnConfig?.urls || turnConfigIsUserOwned()) return false;
+const urls = formatIceServerUrlsForInput(turnConfig.urls || '');
+if (!urls) return false;
+chatState.profile.turnUrl = urls;
+chatState.profile.turnUsername = String(turnConfig.username || '');
+chatState.profile.turnCredential = String(turnConfig.credential || '');
+chatState.profile.turnOrigin = String(origin || '');
+return true;
+}
+/* Where the TURN inside an imported config file came from, decided by
+   comparing it against what the relay in the same file serves.
+
+   The two are usually identical and recording the relay is right: a rotated
+   password then reaches everyone who imported the file.
+
+   They are deliberately different in the case this is most useful for -- a
+   TURN nearer the user than the relay is, so the media takes the short path
+   while the signalling stays wherever every contact already is. That is a
+   choice, not a leftover, and filing it under the relay would let the
+   background refresh replace it with the relay's own within minutes. */
+function importedTurnOrigin(fileTurnUrl, relayTurnConfig, relayOrigin) {
+const relayOwnTurn = formatIceServerUrlsForInput(relayTurnConfig?.urls || '');
+const importedTurn = formatIceServerUrlsForInput(fileTurnUrl || '');
+return (relayOwnTurn && relayOwnTurn === importedTurn) ? relayOrigin : TURN_ORIGIN_MANUAL;
+}
+/* True when the credentials in hand came from a relay that is not the one
+   being connected to now. Deliberately not treated as "missing": they work,
+   they are simply in the wrong place, and the call still connects while the
+   fresh ones are fetched. */
+function turnConfigIsForAnotherRelay() {
+if (turnConfigIsUserOwned()) return false;
+if (!chatState.profile.turnUrl) return false;
+return chatState.profile.turnOrigin !== chatServerOrigin();
+}
+/* A forced refresh costs two small requests, so it is rate limited rather than
+   run on every reconnect: a flaky link produces a burst of them and none of
+   the answers would differ. */
+const TURN_REFRESH_MIN_MS = 300000;
+let lastForcedTurnRefresh = 0;
+async function hydrateRelayTurnConfig({ force = false } = {}) {
 if (hasActiveServerRestriction()) return;
-const needsTurn = !chatState.profile.turnUrl || !chatState.profile.turnUsername || !chatState.profile.turnCredential;
+const needsTurn = !chatState.profile.turnUrl || !chatState.profile.turnUsername
+|| !chatState.profile.turnCredential || turnConfigIsForAnotherRelay();
 const needsPresence = !chatState.profile.presenceUrl;
 const needsPeerOrigin = !chatState.profile.peerOrigin;
-if (!needsTurn && !needsPresence && !needsPeerOrigin) return;
+if (force) {
+if (turnConfigIsUserOwned()) return;
+const now = Date.now();
+if (now - lastForcedTurnRefresh < TURN_REFRESH_MIN_MS) return;
+lastForcedTurnRefresh = now;
+} else if (!needsTurn && !needsPresence && !needsPeerOrigin) return;
 if (isStaticDevAppOrigin() && !window.__POORIJA_DESKTOP__) return;
 try {
 const result = await probeRelayOrigin(chatServerOrigin());
@@ -1977,18 +2412,15 @@ chatState.profile.serverUrl = result.origin;
 chatState.profile.presenceUrl = String(result.health?.presenceUrl || chatState.profile.presenceUrl || '');
 chatState.profile.peerOrigin = String(result.health?.peerOrigin || chatState.profile.peerOrigin || result.origin);
 if (result.turnConfig) {
-const turn = result.turnConfig;
-if (turn.urls) {
-chatState.profile.turnUrl = formatIceServerUrlsForInput(turn.urls || '');
-chatState.profile.turnUsername = String(turn.username || '');
-chatState.profile.turnCredential = String(turn.credential || '');
-console.log('[Discovery] TURN fields populated successfully.');
-} else {
+if (adoptRelayTurnConfig(result.turnConfig, result.origin)) {
+console.log(`[Discovery] TURN fields populated from ${result.origin}.`);
+} else if (!result.turnConfig.urls) {
 console.warn('[Discovery] TURN config received but no URLs found.');
 }
 } else {
 console.warn('[Discovery] No TURN configuration received from relay.');
 }
+applyRelayIdentity(result.origin, result.relayIdentity);
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 return Boolean(chatState.profile.presenceUrl || chatState.profile.peerOrigin);
@@ -2065,6 +2497,10 @@ name: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
 peerId: chatState.peerId || chatState.profile.stablePeerId || chatState.clientId || '',
 fingerprint: chatState.identity?.fingerprint || '',
 publicKeyData: chatState.identity?.publicKeyData || '',
+/* Where to reach this person, on the same out-of-band channel that carries
+   the key. Anything less trustworthy than the key cannot be used to route
+   to them; see the trust ladder in 18-file-manager-2.js. */
+homeRelay: myHomeRelay(),
 createdAt: identityCreatedAt(),
 };
 }
@@ -2111,6 +2547,12 @@ function identityQrText() {
       hexToBytes(full.fingerprint || ''),
       base64ToBytes(full.publicKeyData || ''),
       encoder.encode(String(full.createdAt || '')),
+      /* Appended rather than inserted: an older reader stops after the fifth
+         field and ignores what follows, so a new card still scans on a build
+         that predates home relays. */
+      encoder.encode(String(full.homeRelay?.origin || '')),
+      hexToBytes(full.homeRelay?.id || ''),
+      base64ToBytes(full.homeRelay?.key || ''),
     ];
     let total = 0;
     fields.forEach((field) => { total += 2 + field.length; });
@@ -2154,7 +2596,7 @@ function parseIdentityQrText(packed) {
     const decoder = new TextDecoder();
     const fields = [];
     let at = 0;
-    while (at + 2 <= bytes.length && fields.length < 5) {
+    while (at + 2 <= bytes.length && fields.length < 8) {
       const length = (bytes[at] << 8) | bytes[at + 1];
       if (at + 2 + length > bytes.length) return null;
       fields.push(bytes.subarray(at + 2, at + 2 + length));
@@ -2170,6 +2612,13 @@ function parseIdentityQrText(packed) {
       fingerprint: bytesToHex(fields[2]),
       publicKeyData: bytesToBase64(fields[3]),
       createdAt: fields[4] ? decoder.decode(fields[4]) : '',
+      homeRelay: fields[5] && fields[5].length
+        ? {
+          origin: decoder.decode(fields[5]),
+          id: fields[6] ? bytesToHex(fields[6]) : '',
+          key: fields[7] && fields[7].length ? bytesToBase64(fields[7]) : '',
+        }
+        : null,
     });
   } catch (error) {
     return null;
@@ -2193,7 +2642,12 @@ if (expanded) text = expanded;
 }
 try {
 const parsed = JSON.parse(text);
-if (parsed?.peerId && (parsed.fingerprint || parsed.publicKeyData)) return parsed;
+/* Marked here, where the channel is known. normalizeHomeRelay drops a value
+   whose source is not stated, so a claim that reached the record by some
+   other route is discarded rather than quietly trusted. */
+if (parsed?.peerId && (parsed.fingerprint || parsed.publicKeyData)) {
+return parsed.homeRelay ? { ...parsed, homeRelaySource: 'card' } : parsed;
+}
 } catch (_error) {}
 const peerMatch = text.match(/Peer:\s*"?([^"\n]+)"?/i) || text.match(/peerId["\s:]+([^",\n]+)/i);
 const keyMatch = text.match(/Security Key:\s*"?([^"\n]+)"?/i) || text.match(/fingerprint["\s:]+([^",\n]+)/i);
@@ -2273,10 +2727,19 @@ messageToneId: document.getElementById('chatMessageToneSelect')?.value || chatSt
 function syncProfileDraftFromInputs() {
 const draft = buildProfileDraft();
 const serverUrlChanged = draft.serverUrl !== chatState.profile.serverUrl;
+/* Editing any of the three TURN fields claims the triple. Guarded on the
+   input existing, because this runs from screens that do not render the
+   connection sheet and would otherwise read three blanks as a deliberate
+   edit. */
+const turnEdited = Boolean(document.getElementById('chatTurnUrl'))
+&& (draft.turnUrl !== (chatState.profile.turnUrl || '')
+|| draft.turnUsername !== (chatState.profile.turnUsername || '')
+|| draft.turnCredential !== (chatState.profile.turnCredential || ''));
 chatState.profile = {
 ...chatState.profile,
 ...draft,
 };
+if (turnEdited) chatState.profile.turnOrigin = TURN_ORIGIN_MANUAL;
 if (serverUrlChanged && chatState.profile.serverUrl) {
 hydrateRelayTurnConfig().catch(console.error);
 }
@@ -2287,6 +2750,7 @@ chatAutoConnect: ['اتصال خودکار روشن است', 'Auto connect is on
 chatAllowVideo: ['تماس تصویری فعال است', 'Video calls are on', 'تماس تصویری غیرفعال است', 'Video calls are off'],
 chatAutoDiscovery: ['دیسکاوری محلی فعال است', 'Local discovery is on', 'دیسکاوری محلی غیرفعال است', 'Local discovery is off'],
 chatShowSuspensionCountdown: ['شمارش معکوس تعلیق روشن است', 'Suspension countdown is on', 'شمارش معکوس تعلیق خاموش است', 'Suspension countdown is off'],
+chatSendReceipts: ['رسید خواندن فرستاده می‌شود', 'Read receipts are sent', 'رسید خواندن فرستاده نمی‌شود — طرف مقابل تیک دوم را نمی‌بیند', 'Read receipts are not sent — the other side does not see the second tick'],
 chatPublicStun: ['STUN عمومی روشن است — آی‌پی شما به گوگل/توییلیو دیده می‌شود', 'Public STUN is on — Google/Twilio see your address', 'فقط رله و TURN خودتان استفاده می‌شود', 'Only your own relay and TURN are used'],
 };
 Object.entries(toggleMeta).forEach(([id, labels]) => {

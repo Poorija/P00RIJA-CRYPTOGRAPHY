@@ -170,8 +170,18 @@ notify(t('تماس با همین سشن محلی مجاز نیست.', 'Calling t
 return;
 }
 let callInviteSent = false;
+/* Somebody on ANOTHER relay is never reported online here, and that is not
+   knowledge, it is ignorance: presence is per relay -- a relay hands out its own
+   clients and nobody else's -- so this side has no way to be told they picked up
+   their phone. Taking the offline branch for them meant a cross-relay call rang
+   for thirty seconds and then logged itself as missed, every time, including
+   when the other person was sitting there looking at it.
+   The call is placed instead, and the answer says what the truth was: the far
+   relay delivers the offer if they are there and queues it with a push if they
+   are not, which is the same distinction the message path already lives on. */
+const overRelay = typeof callNeedsRelay === 'function' && callNeedsRelay(peerRecord);
 try {
-if (peerRecord.status !== 'online') {
+if (peerRecord.status !== 'online' && !overRelay) {
 /* An offline contact used to be an instant missed call: nothing rang, and the
    other side only found out afterwards. Now the invitation is queued — which
    also wakes their device through push — and this side rings for thirty
@@ -203,7 +213,19 @@ peerId: chatState.peerId,
 const stream = await requestCallMedia(mode);
 attachLocalStream(stream);
 syncFloatingCallPeerIdentity();
-const call = chatState.peer.call(peerRecord.peerId, stream, {
+/* Last thing before dialling: PeerJS reads the server list at this instant
+   and there is no later moment to reorder it. See prepareIceForContact. */
+prepareIceForContact(peerRecord);
+/* A PeerJS id only means something on the server that issued it, so this line
+   cannot reach somebody who loaded the app from the other deployment. When it
+   cannot, the negotiation goes over the relay instead and what comes back
+   behaves like a MediaConnection -- see js/chat/39-relay-call.js. */
+const call = overRelay
+? await placeRelayCall(peerRecord, stream, {
+mode,
+metadata: { username: chatState.profile.name, peerId: chatState.peerId },
+})
+: chatState.peer.call(peerRecord.peerId, stream, {
 sdpTransform: preferCallCodecs,
 metadata: {
 mode,

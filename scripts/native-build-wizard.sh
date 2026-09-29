@@ -18,7 +18,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BACKTITLE="P00RIJA Cryptography • Native Build Wizard"
+# Read from package.json rather than written here, so a release cannot ship a
+# wizard that announces the version before it.
+APP_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/package.json" | head -1)"
+APP_BUILD_TAG="$(sed -n 's/.*"buildTag": *"\([^"]*\)".*/\1/p' "$ROOT/package.json" | head -1)"
+BACKTITLE="P00RIJA Cryptography ${APP_VERSION} • ${APP_BUILD_TAG} • Native Build Wizard"
 
 INFO='\033[1;34m'
 SUCCESS='\033[1;32m'
@@ -138,10 +142,36 @@ require_host_for() {
 
 main() {
     local ACTION
-    ACTION=$(choice_menu "Native build wizard" "Choose an action:" \
+    ACTION=$(choice_menu "Native build wizard ${APP_VERSION} (${APP_BUILD_TAG})" "Choose an action:" \
         "build" "Build the native client or the monitor" \
-        "check" "System check and prerequisite install")
+        "check" "System check and prerequisite install" \
+        "whatsnew" "What this version carries")
     [ -z "$ACTION" ] && exit 0
+
+    if [ "$ACTION" == "whatsnew" ]; then
+        msg_box "P00RIJA Cryptography ${APP_VERSION} (${APP_BUILD_TAG})" \
+"Calls\n\
+  A relay can run its own TURN, and a call reports which way it went:\n\
+  direct, through your TURN, through theirs, or through both.\n\
+  With two TURN servers configured the app remembers which one worked\n\
+  for each contact, and moves a call that stays poor.\n\
+\n\
+Relays that carry for each other\n\
+  A relay now has a cryptographic name, and two of them can open an\n\
+  authenticated link. A message for somebody on another relay is sealed\n\
+  to THAT relay, so the relay carrying it cannot see who it is for.\n\
+  Off by default: set CHAT_TRANSIT_PEERS on each relay to turn it on.\n\
+  See docs/RELAY-NETWORK.md.\n\
+\n\
+When nothing reaches a relay at all\n\
+  A message can be encrypted to a contact and hidden in an ordinary\n\
+  photograph, then sent through whatever messenger still works.\n\
+  In the conversation's + menu.\n\
+\n\
+Privacy\n\
+  Read receipts can be turned off, and off means the reply is not sent."
+        exec bash "$0"
+    fi
 
     if [ "$ACTION" == "check" ]; then
         clear
@@ -166,7 +196,7 @@ main() {
         [ -z "$SERVER_MODE" ] && exit 0
 
         if [ "$SERVER_MODE" == "docker" ]; then
-            if yes_no "Confirm server build" "Builds and starts the chat-signal service:\n\n  /self-destruct/records\n  /self-destruct/records/:id/open\n  persistent /data/self-destruct-records.json\n\nRequires MONITOR_PASSWORD and TURN_PASSWORD in .env."; then
+            if yes_no "Confirm server build" "Builds and starts the chat-signal service:\n\n  /self-destruct/records\n  /self-destruct/records/:id/open\n  /relay-identity   (this relay's cryptographic name)\n  persistent /data/self-destruct-records.json\n  persistent /data/relay-identity.json  (keep it: losing it renames the relay)\n\nRequires MONITOR_PASSWORD, TURN_USER and TURN_PASSWORD in .env.\nCHAT_TRANSIT_PEERS is optional and off by default."; then
                 clear
                 log_info "Building and starting the self-destruct sync server…"
                 docker compose -f "$ROOT/config/docker-compose.yaml" up -d --build chat-signal

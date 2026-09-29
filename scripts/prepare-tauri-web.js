@@ -59,9 +59,33 @@ function relayHintsFromDefaults() {
   }
 }
 
+/* Relays named on the command line of the build itself.
+ *
+ *     POORIJA_RELAY_HINTS=https://a.example.com:8585,https://b.example.com:8585 \
+ *       bash scripts/native-build-wizard.sh
+ *
+ * This exists because a native install has no origin to learn a relay from,
+ * while the PWA has one by definition -- it was loaded from it. So the same
+ * code shipped as an installer comes up with an empty server box unless the
+ * build says where to look, and the two halves of the same release behave
+ * differently for a reason that has nothing to do with the application.
+ *
+ * It is an environment variable and not a file on purpose. config/relay-defaults.json
+ * is tracked and intentionally empty -- the published project must not point a
+ * stranger's fresh install at anybody's server -- and a variable cannot be
+ * committed by accident the way a filled-in file can. Whoever runs the build
+ * decides, for the copies they distribute, and nothing about that decision
+ * leaves their machine.
+ *
+ * Ordered first, because the first hint is what a fresh install pre-fills. */
 function relayHintsFromEnv() {
   const env = parseEnvFile(path.join(root, '.env'));
   const hints = new Set();
+  String(process.env.POORIJA_RELAY_HINTS || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .forEach((entry) => hints.add(entry));
   const append = (value) => {
     if (!value) return;
     String(value)

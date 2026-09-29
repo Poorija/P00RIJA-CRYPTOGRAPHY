@@ -11,7 +11,12 @@ services:
       # default so that adding a proxy later is a deliberate edit here.
       CHAT_TRUSTED_PROXIES: ${CHAT_TRUSTED_PROXIES:-0}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
-      CHAT_TURN_URL: ${CHAT_TURN_URL:-turns:${DOMAIN:-localhost}:5349?transport=tcp}
+      # UDP first. TURN carries the media, and a relayed call over TCP or TLS
+      # sounds worse than the same call over UDP: a reliable ordered stream
+      # under a codec that would rather drop a late packet than wait for it.
+      # The default here used to advertise the TLS entry alone, while coturn
+      # below was listening on all three the whole time.
+      CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
       CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
       CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
@@ -19,6 +24,23 @@ services:
       CHAT_PUSH_STORE_PATH: /data/push-subscriptions.json
       CHAT_OFFLINE_STORE_PATH: /data/offline-messages.json
       CHAT_POLICY_STORE_PATH: /data/server-policy.json
+      # The relays this one may link to, as "<id>@<origin>" separated by commas.
+      #
+      # Empty means transit is off and the /relay-link socket is refused
+      # outright -- a relay with no peers configured cannot be talked into
+      # carrying anything. An entry with an id but no origin is one this relay
+      # will ANSWER but never dial, which is what a server behind NAT wants.
+      #
+      # This has to be listed here and not only read from .env: the server
+      # reads process.env, and a variable that is in .env but not named in this
+      # block never reaches the container at all. It was missing, so setting it
+      # in .env looked right and did nothing.
+      CHAT_TRANSIT_PEERS: ${CHAT_TRANSIT_PEERS:-}
+      # Only for a link to a relay whose certificate this one cannot verify --
+      # a self-signed staging box. Never on a real deployment: the link's own
+      # handshake authenticates the far relay, but TLS is what stops the dial
+      # being answered by whoever holds the route.
+      CHAT_TRANSIT_INSECURE_TLS: ${CHAT_TRANSIT_INSECURE_TLS:-}
       CHAT_SELF_DESTRUCT_STORE_PATH: /data/self-destruct-records.json
       CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
     network_mode: host

@@ -44,7 +44,17 @@ export const RELAY = process.env.RELAY_URL
 export const PASS = 'Transfer#Harness2026!';
 export const MB = 1024 * 1024;
 
-export const browser = await chromium.launch();
+/* A fake camera and microphone, because headless Chromium has neither and
+   getUserMedia simply fails without them -- so a suite that places a call gets a
+   browser that behaves like a machine with a webcam rather than one that refuses.
+   Every call suite in this directory already launches with exactly these two
+   flags; they are here so a suite built on this harness can place a call too.
+   The suites that test what happens when permission is REFUSED
+   (mediaerrors.mjs, lockdefence.mjs, pushrenew.mjs, swnotify.mjs) launch their
+   own browser and are unaffected. */
+export const browser = await chromium.launch({
+  args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+});
 
 export const waitFor = async (page, fn, { timeoutMs = 90000, arg = null } = {}) => {
   const deadline = Date.now() + timeoutMs;
@@ -106,8 +116,13 @@ export function makeSparseFile(name, bytes) {
 }
 
 
-export async function openApp(tag, { duplicateChunk = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true });
+/* `origin` and `relay` default to the single deployment every other suite
+   tests against. They are parameters because a two-server suite has to open one
+   browser on each server -- the whole point there is that the two pages are
+   served by different origins and talk to different relays, which a
+   module-level BASE cannot express. */
+export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, permissions: ['microphone', 'camera'] });
   /* The chat module wires its console probes only when a page asks for them
      before load — shipping them unconditionally would be a bypass rather than
      a diagnostic. Every suite that reaches this harness drives conversations
@@ -170,7 +185,7 @@ export async function openApp(tag, { duplicateChunk = false } = {}) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(`${tag}: ${e.message.slice(0, 160)}`));
   page.__errors = errors;
-  await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+  await page.goto(`${origin}/index.html`, { waitUntil: 'load' });
   await page.waitForTimeout(2000);
   await page.evaluate((pass) => {
     const set = (id, v) => {
@@ -225,7 +240,7 @@ export async function openApp(tag, { duplicateChunk = false } = {}) {
     const el = document.getElementById('chatServerUrl');
     if (el) { el.value = relay; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
     document.getElementById('chatConnectBtn')?.click();
-  }, RELAY);
+  }, relay);
   /* A peer id only appears once the signalling server has assigned one, which
      is the honest "we are connected" signal. */
   const online = await waitFor(page, () => (document.getElementById('chatPeerId')?.textContent || '').trim().length > 8);

@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.44.6-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.77.0-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -271,24 +271,110 @@ dashboard is at `/Monitor_Server` with the password from `.env`.
 
 To check it: `curl -k https://localhost:8585/chat-health` should answer `ok`.
 
+### Two servers, one conversation
+
+Every deployment is complete on its own: it serves the application, runs its own
+relay and TURN server, and holds its own mailboxes. Two of them can also be
+**linked**, and then people on one can write to, send files to and call people on
+the other, as if they were on the same server.
+
+The relay that carries a message between them **cannot read it**. The sender
+seals the envelope to the RECIPIENT'S relay before handing it over, so the
+carrier sees a relay id, a number of bytes and a time, and nothing else — not the
+recipient, not the contents, not that these two have ever spoken before.
+
+**Off until you turn it on.** A relay that carries for anyone who asks is an open
+relay, so `/relay-link` is refused outright until peers are named.
+
+```bash
+# Both servers running, and both named in scripts/deploy.sh's settings file:
+bash scripts/link-relays.sh first second
+
+# What is linked to what:
+bash scripts/link-relays.sh --status
+
+# And to undo it:
+bash scripts/link-relays.sh --unlink first second
+```
+
+That reads each relay's identity, names each to the other, restarts them and
+waits for the link to actually come up. It also decides who dials: a relay can
+only dial an address whose certificate it can verify, so if one side's does not
+verify it links them the other way round — the verifiable side answers, the other
+dials. One established link carries both directions, so that is enough, and
+verification is never turned off.
+
+**By hand**, for servers that are not in that file:
+
+```bash
+# 1. each relay's identity. The id is the SHA-256 of the key in the same
+#    answer, so it is a name the relay cannot lie about:
+curl -s https://first.example.com:8585/relay-identity
+curl -s https://second.example.com:8585/relay-identity
+
+# 2. name each to the other, in its .env:
+#    on the first
+CHAT_TRANSIT_PEERS=<second relay's id>@https://second.example.com:8585
+#    on the second
+CHAT_TRANSIT_PEERS=<first relay's id>@https://first.example.com:8585
+
+# 3. restart the relay on each so it reads the variable:
+docker compose --env-file .env -f config/docker-compose.yaml up -d chat-signal
+
+# 4. check:
+curl -s https://first.example.com:8585/chat-health \
+  | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p'
+# "enabled":true,"allowed":1,"up":1
+```
+
+An entry is `<relay id>@<origin>`. The **id** is what matters; the address is
+only how to get there. A **bare id with no address** means "accept a link from
+this relay but never dial it" — which is what a relay behind a firewall needs,
+and what to use when one side's certificate cannot be verified by the other. At
+least one of the two must hold the other's address.
+
+A new server can join an existing one at install time instead:
+
+```bash
+sudo bash scripts/setup.sh --quick --domain chat.example.com \
+  --peers '<the other relay id>@https://theother.example.com:8585'
+```
+
+Clients need one thing for this to work: a contact's **home relay**, which
+travels in their identity card — the QR code or the pasted code. Two people on
+different relays exchange a card once; after the first message in each direction
+the return route travels inside the sealed message and the rest is automatic.
+The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
+
 ### Quick install — client
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA Cryptography_2.44.6_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.44.6_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA Cryptography_2.77.0_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.77.0_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.44.6-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.77.0-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
-The desktop and Android builds ship knowing the public relay, so a fresh install
-connects without typing an address. Point it anywhere else in
-**Secure Chat → Settings → Connection**.
+A native install has no origin to learn a relay from — the web app does, because
+it was loaded from one — so a build only knows where to connect if the build was
+told. `config/relay-defaults.json` is tracked and intentionally empty: the
+published project must not point a stranger's fresh install at anybody's server.
+Name your own when you build, and they are baked into that copy only:
+
+```bash
+POORIJA_RELAY_HINTS=https://chat.example.com:8585 npm run native:prepare
+```
+
+Several are allowed, comma separated; the first is what the server box is
+pre-filled with. Nothing about this is committed — it is a variable, not a file,
+so it cannot end up in the repository by accident. Whatever the build knows, it
+can still be pointed anywhere else in **Secure Chat → Settings → Connection**.
 
 ### Build it yourself
 
@@ -720,6 +806,16 @@ Session keys are re-negotiated on every connection and retired after 7 days;
 prekeys expire after 15. What that buys is set out under *Forward secrecy*
 above — including what it does not buy.
 
+### More than one relay
+
+Two relays can carry for each other, and the one carrying a message cannot see
+who it is for: the client seals the envelope to the recipient's relay before
+handing it over. [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md) is the
+operational guide — which of the two stacks to put on which server, how to run
+a TURN server so calls take the short path, the exact steps to link two relays,
+and a plain table of what each machine can and cannot see once you do. It is
+off until an operator turns it on.
+
 ### Capacity and scaling
 
 `npm run test:perf` measures what one instance does; [docs/SCALING.md](docs/SCALING.md)
@@ -953,23 +1049,108 @@ docker compose --env-file .env -f config/docker-compose.yaml up -d --build
 
 برای بررسی: `curl -k https://localhost:8585/chat-health` باید `ok` بدهد.
 
+### دو سرور، یک گفتگو
+
+هر نصب به‌تنهایی کامل است: برنامه را سرو می‌کند، رلهٔ خودش و سرور TURN خودش را
+دارد و صندوق‌های خودش را نگه می‌دارد. دو تا از آن‌ها را می‌شود **به هم وصل** کرد؛
+آن‌وقت کسانی که روی یکی هستند می‌توانند به کسانی که روی آن یکی‌اند بنویسند، فایل
+بفرستند و تماس بگیرند، انگار روی یک سرورند.
+
+رله‌ای که پیام را بین آن‌ها حمل می‌کند **نمی‌تواند بخواندش**. فرستنده پاکت را پیش
+از تحویل به رلهٔ **گیرنده** مهر می‌کند، پس حامل یک شناسهٔ رله، یک عدد بایت و یک
+زمان می‌بیند و هیچ چیز دیگری — نه گیرنده، نه محتوا، نه این‌که این دو تا به حال با
+هم حرف زده‌اند.
+
+**تا روشنش نکنید خاموش است.** رله‌ای که برای هر کسی حمل کند open relay است، پس
+`/relay-link` تا وقتی همتایی نام برده نشده یکسره رد می‌شود.
+
+```bash
+# هر دو سرور بالا و هر دو در فایل تنظیمات scripts/deploy.sh نام‌برده:
+bash scripts/link-relays.sh اولی دومی
+
+# چه چیزی به چه چیزی وصل است:
+bash scripts/link-relays.sh --status
+
+# و برای جدا کردن:
+bash scripts/link-relays.sh --unlink اولی دومی
+```
+
+این دستور شناسهٔ هر دو رله را می‌خواند، هر کدام را به آن یکی معرفی می‌کند،
+ری‌استارتشان می‌کند و صبر می‌کند تا لینک واقعاً بالا بیاید. خودش هم تصمیم می‌گیرد
+کدام زنگ بزند: یک رله فقط آدرسی را می‌تواند dial کند که گواهی‌اش را verify کند،
+پس اگر گواهی یک طرف verify نشود برعکس وصلشان می‌کند — طرفی که گواهی‌اش درست است
+جواب می‌دهد و آن یکی زنگ می‌زند. یک لینک برقرارشده هر دو جهت را می‌برد، پس همین
+کافی است و هیچ‌جا verify خاموش نمی‌شود.
+
+**با دست**، برای سرورهایی که در آن فایل نیستند:
+
+```bash
+# ۱. شناسهٔ هر رله. این شناسه هش SHA-256 کلیدِ همان پاسخ است، پس نامی است که
+#    رله نمی‌تواند درباره‌اش دروغ بگوید:
+curl -s https://first.example.com:8585/relay-identity
+curl -s https://second.example.com:8585/relay-identity
+
+# ۲. هر کدام را در .env آن یکی معرفی کنید:
+#    روی اولی
+CHAT_TRANSIT_PEERS=<شناسهٔ رلهٔ دوم>@https://second.example.com:8585
+#    روی دومی
+CHAT_TRANSIT_PEERS=<شناسهٔ رلهٔ اول>@https://first.example.com:8585
+
+# ۳. رلهٔ هر کدام را ری‌استارت کنید تا متغیر را بخواند:
+docker compose --env-file .env -f config/docker-compose.yaml up -d chat-signal
+
+# ۴. بررسی:
+curl -s https://first.example.com:8585/chat-health \
+  | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p'
+# "enabled":true,"allowed":1,"up":1
+```
+
+هر ورودی `<شناسهٔ رله>@<origin>` است. **شناسه** مهم است؛ آدرس فقط راه رسیدن است.
+شناسهٔ **بدون آدرس** یعنی «از این رله لینک را بپذیر ولی هرگز زنگ نزن» — همان چیزی
+که رلهٔ پشت فایروال لازم دارد، و همان چیزی که وقتی گواهی یک طرف از آن یکی verify
+نمی‌شود باید استفاده شود. حداقل یکی از دو طرف باید آدرس دیگری را داشته باشد.
+
+یک سرور تازه می‌تواند همان موقع نصب به سرور موجود بپیوندد:
+
+```bash
+sudo bash scripts/setup.sh --quick --domain chat.example.com \
+  --peers '<شناسهٔ رلهٔ دیگر>@https://theother.example.com:8585'
+```
+
+کلاینت‌ها برای این کار یک چیز لازم دارند: **رلهٔ خانگیِ** مخاطب، که داخل کارت
+هویت او سفر می‌کند — کد QR یا کدی که کپی می‌شود. دو نفر روی دو رلهٔ مختلف یک بار
+کارت رد و بدل می‌کنند؛ بعد از اولین پیام در هر جهت، مسیر بازگشت داخل پیام مهرشده
+سفر می‌کند و بقیه‌اش خودکار است. شرح کامل در
+[docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
+
 ### نصب سریع — کلاینت
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA Cryptography_2.44.6_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.44.6_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA Cryptography_2.77.0_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.77.0_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.44.6-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.77.0-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
-نسخه‌های دسکتاپ و اندروید با آدرس رلهٔ عمومی ساخته می‌شوند، پس نصب تازه بدون
-تایپ کردن آدرس متصل می‌شود. برای هر سرور دیگری:
+نصب نیتیو مبدأیی ندارد که از رویش رله را یاد بگیرد — برنامهٔ وب دارد، چون از
+روی همان بار شده — پس یک بیلد فقط وقتی می‌داند کجا وصل شود که موقع ساخت به او
+گفته باشند. `config/relay-defaults.json` در مخزن هست و عمداً خالی است: پروژهٔ
+منتشرشده نباید نصب تازهٔ یک غریبه را به سرور کسی اشاره بدهد. موقع ساخت، رلهٔ
+خودتان را نام ببرید تا فقط داخل همان نسخه پخته شود:
+
+```bash
+POORIJA_RELAY_HINTS=https://chat.example.com:8585 npm run native:prepare
+```
+
+چند تا هم می‌شود، با ویرگول؛ اولی همان است که جعبهٔ سرور با آن پر می‌شود. هیچ‌چیزِ
+این کار کامیت نمی‌شود — یک متغیر است نه یک فایل، پس نمی‌شود اشتباهی سر از مخزن
+دربیاورد. هر چه بیلد بداند، باز هم می‌شود به هر سرور دیگری اشاره‌اش داد:
 **چت امن ← تنظیمات ← اتصال**.
 
 ### ساخت از روی کد
@@ -1310,6 +1491,15 @@ node tools/check-versions.cjs   # refuses if any of the eight declarations drift
 
 کلیدها با CSPRNG خود سکو از طریق Web Crypto ساخته می‌شوند و هرگز از دستگاه خارج
 نمی‌شوند. رله پاکت‌های مهر و موم شده می‌بیند؛ TURN بسته می‌بیند.
+
+### بیش از یک رله
+
+دو رله می‌توانند برای هم حمل کنند، و رله‌ای که پیام را حمل می‌کند نمی‌تواند
+ببیند برای چه کسی است: کلاینت پاکت را پیش از تحویل به رلهٔ گیرنده مهر می‌کند.
+[docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md) راهنمای عملیاتی است — کدام استک
+روی کدام سرور، چطور TURN را اجرا کنید تا تماس مسیر کوتاه را برود، مراحل دقیق
+وصل کردن دو رله، و جدولی صریح از این‌که هر ماشین چه می‌بیند و چه نمی‌بیند.
+تا اپراتور روشنش نکند خاموش است.
 
 ### ظرفیت و مقیاس
 

@@ -22,6 +22,9 @@ WORKDIR /app
 COPY config/relay-overrides.json ./package.json
 RUN npm install --omit=dev express@5.2.1 peer@1.0.2 web-push@3.6.7 ws@8.21.3 \
  && npm audit --omit=dev --audit-level=high
+# The tree's real version, under a name of its own: package.json in this image
+# is config/relay-overrides.json and carries a placeholder version.
+COPY package.json ./app-version.json
 COPY scripts/server.js ./scripts/server.js
 # Anything server.js requires has to come with it. Copying the one file
 # and nothing beside it is why adding a module took the relay down.

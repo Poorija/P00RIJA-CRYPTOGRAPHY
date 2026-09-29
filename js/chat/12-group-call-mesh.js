@@ -99,7 +99,7 @@ function groupPresence(space) {
   let online = 0;
   others.forEach((key) => {
     const peer = findPeerByAnyKey(key);
-    if (peer && peer.status === 'online') online += 1;
+    if (peer && peerLooksOnline(peer)) online += 1;
   });
   /* You are in the group and you are reading this, so you count. */
   const total = others.length + 1;
@@ -301,7 +301,7 @@ function renderCallPickerList() {
   const people = chatState.peers
     .filter((peer) => peer.peerId && !peer.type && !isSelfPeerRecord(peer))
     .filter((peer) => !isAlreadyIn(peer))
-    .sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online'));
+    .sort((a, b) => Number(peerLooksOnline(b)) - Number(peerLooksOnline(a)));
   if (!people.length) {
     list.innerHTML = `<div class="chat-call-picker-empty">${t('مخاطبی برای افزودن نیست.', 'There is nobody to add.')}</div>`;
     return;
@@ -309,9 +309,9 @@ function renderCallPickerList() {
   list.innerHTML = people.map((peer) => `
     <label class="chat-call-picker-row">
       <input type="checkbox" value="${app().escapeHTML(getConversationKey(peer))}">
-      <span class="chat-peer-presence-dot ${peer.status === 'online' ? 'online' : 'offline'}"></span>
+      <span class="chat-peer-presence-dot ${peerLooksOnline(peer) ? 'online' : 'offline'}"></span>
       <span class="chat-call-picker-name">${app().escapeHTML(peer.username || peer.name || peer.peerId)}</span>
-      <span class="chat-call-picker-state">${peer.status === 'online' ? t('آنلاین', 'online') : t('آفلاین', 'offline')}</span>
+      <span class="chat-call-picker-state">${peerLooksOnline(peer) ? t('آنلاین', 'online') : t('آفلاین', 'offline')}</span>
     </label>`).join('');
   syncCallPickerCount();
 }
@@ -589,15 +589,29 @@ function connectGroupCallPeer(peerRecord, name) {
   };
   watchLeg();
   if (!shouldPlaceCallTo(peerRecord.fingerprint || peerRecord.peerId)) return;
+  const metadata = {
+    groupCall: chatState.groupCall.callId,
+    spaceId: chatState.groupCall.spaceId,
+    mode: chatState.groupCall.mode,
+    username: chatState.profile.name || '',
+  };
+  /* A member on another relay is dialled the same way a one-to-one call to them
+     is, and for the same reason: chatState.peer.call() addresses a PeerJS id, and
+     a PeerJS id only means something on the server that issued it. The invite and
+     the join already cross -- they are relay envelopes -- so a member elsewhere
+     appeared in the room and then sat there with no picture and no sound.
+     js/chat/39-relay-call.js carries the negotiation; what it hands back behaves
+     like the MediaConnection attachGroupCallLeg expects. */
+  if (typeof callNeedsRelay === 'function' && callNeedsRelay(peerRecord)) {
+    placeRelayCall(peerRecord, chatState.groupCall.localStream, { mode: chatState.groupCall.mode, metadata })
+      .then((call) => attachGroupCallLeg(key, call))
+      .catch((error) => console.warn('[Group call] could not reach', peerRecord.peerId, 'over the relay link', error));
+    return;
+  }
   try {
     const call = chatState.peer.call(peerRecord.peerId, chatState.groupCall.localStream, {
       sdpTransform: preferCallCodecs,
-      metadata: {
-        groupCall: chatState.groupCall.callId,
-        spaceId: chatState.groupCall.spaceId,
-        mode: chatState.groupCall.mode,
-        username: chatState.profile.name || '',
-      },
+      metadata,
     });
     attachGroupCallLeg(key, call);
   } catch (error) {

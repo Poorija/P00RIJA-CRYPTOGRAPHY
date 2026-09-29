@@ -302,7 +302,7 @@ function spaceMemberRecords(space) {
       key: memberKey,
       name: peer?.username || peer?.name || memberKey.slice(0, 12),
       avatarData: sanitizeAvatarData(peer?.avatarData || ''),
-      online: peer?.status === 'online',
+      online: peerLooksOnline(peer),
       isSelf: false,
       role: spaceRoleOf(space, memberKey),
     });

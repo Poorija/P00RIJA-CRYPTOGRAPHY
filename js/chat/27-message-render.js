@@ -897,7 +897,7 @@ const entry = historyById.get(entryId);
    flushSeenReceipts pass (which checks visibility and burst-limits) is the
    one that sends it, instead of firing one receipt per hidden render. */
 if (entryId && entry && entry.direction === 'in' && entry.status !== 'opened' && directPeer && !document.hidden) {
-sendRelayEnvelope(directPeer, {
+if (receiptsEnabled()) sendRelayEnvelope(directPeer, {
 type: 'receipt',
 messageId: entryId,
 status: 'opened',
@@ -1019,7 +1019,7 @@ entry.status = 'opened';
 storeHistory();
 renderMessages();
 }
-if (entryId && peer && !peer.type && directPeer) {
+if (entryId && peer && !peer.type && directPeer && receiptsEnabled()) {
 relaySessionEvent(directPeer, {
 type: 'receipt',
 messageId: entryId,
@@ -1271,6 +1271,14 @@ button.title = label;
 function renderActivePeer() {
 updateChatShellMode();
 const peer = getActiveConversation();
+/* Whoever is open, if they live on another relay, is asked about here.
+ *
+ * Every path that opens a conversation ends at this function, which is why the
+ * question is asked from it rather than from each of them. askIfPeerIsThere
+ * throttles, so the re-render its own answer causes does not ask again, and a
+ * contact on this relay costs nothing: transitRouteFor returns null and it
+ * stops there. */
+if (peer && !peer.type && typeof askIfPeerIsThere === 'function') askIfPeerIsThere(peer);
 /* The thread menu speaks with the voice of whatever is open: a group gets
    group calls, a group lock, search in the group and group-history delete;
    a conversation keeps the one-to-one wording. Called on every render, so a
@@ -1451,7 +1459,7 @@ peerMeta.textContent = `${peer.type} • ${t('فضای امن محلی', 'Local 
 /* Their own words keep the pill the chip used to have. As plain text the
    status read as the opening clause of the sentence after it; the bubble is
    what makes it legible as a status without repeating it twice on screen. */
-const rest = `${peer.status === 'online' ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')} • ${t('چت رمزنگاری‌شده', 'Encrypted chat')}`;
+const rest = `${peerLooksOnline(peer) ? t('آنلاین', 'Online') : t('آفلاین', 'Offline')} • ${t('چت رمزنگاری‌شده', 'Encrypted chat')}`;
 peerMeta.innerHTML = `${mood ? `<span class="chat-meta-mood">${app().escapeHTML(mood)}</span>` : ''}${app().escapeHTML(rest)}`;
 }
 }
@@ -1480,7 +1488,7 @@ const presenceClass = presence?.dissolved ? 'dissolved'
 : presence?.some ? 'partial' : 'offline';
 activeAvatar.className = `chat-avatar ${presenceClass}`;
 } else {
-activeAvatar.className = `chat-avatar ${peer.status === 'online' ? 'online' : 'offline'}`;
+activeAvatar.className = `chat-avatar ${peerLooksOnline(peer) ? 'online' : 'offline'}`;
 }
 }
 remoteFingerprint.textContent = shortSecurityValue(peer.fingerprint || peer.conversationId || '-');

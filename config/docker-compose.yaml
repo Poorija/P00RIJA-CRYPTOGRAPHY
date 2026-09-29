@@ -8,6 +8,17 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8585
+      # What this deployment calls itself. nginx.conf is a template and these
+      # are the only three things in it that differ between servers, so the
+      # same image serves two deployments under their own names with nothing
+      # host-specific committed anywhere.
+      #
+      # DOMAIN is required rather than defaulted: a missing one would render an
+      # empty server_name and a CSP whose connect-src names nothing, and the
+      # app would then look like it worked while the relay socket was blocked.
+      APP_DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      APP_ORIGIN: https://${DOMAIN}:${APP_PORT:-8585}
+      APP_ORIGIN_WS: wss://${DOMAIN}:${APP_PORT:-8585}
     depends_on:
       - chat-signal
     ports:
@@ -40,6 +51,23 @@ services:
       # recreated. Without this the server generates a new one on every start
       # and every push subscription anyone made stops working.
       CHAT_VAPID_STORE_PATH: /data/vapid.json
+      # The relays this one may link to, as "<id>@<origin>" separated by commas.
+      #
+      # Empty means transit is off and the /relay-link socket is refused
+      # outright -- a relay with no peers configured cannot be talked into
+      # carrying anything. An entry with an id but no origin is one this relay
+      # will ANSWER but never dial, which is what a server behind NAT wants.
+      #
+      # This has to be listed here and not only read from .env: the server
+      # reads process.env, and a variable that is in .env but not named in this
+      # block never reaches the container at all. It was missing, so setting it
+      # in .env looked right and did nothing.
+      CHAT_TRANSIT_PEERS: ${CHAT_TRANSIT_PEERS:-}
+      # Only for a link to a relay whose certificate this one cannot verify --
+      # a self-signed staging box. Never on a real deployment: the link's own
+      # handshake authenticates the far relay, but TLS is what stops the dial
+      # being answered by whoever holds the route.
+      CHAT_TRANSIT_INSECURE_TLS: ${CHAT_TRANSIT_INSECURE_TLS:-}
       CHAT_OFFLINE_STORE_PATH: /data/offline-messages.json
       CHAT_POLICY_STORE_PATH: /data/server-policy.json
       CHAT_SELF_DESTRUCT_STORE_PATH: /data/self-destruct-records.json

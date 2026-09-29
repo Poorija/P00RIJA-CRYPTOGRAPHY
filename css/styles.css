@@ -26846,3 +26846,123 @@ html body .packman-bulk:disabled { opacity: .35; cursor: default; }
   html body .packman-back { display: grid; }
   html body .packman-backdrop { display: none; }
 }
+
+/* The relay's fingerprint, in the connection sheet beside the address it
+   belongs to. Monospace and forced left-to-right: hex read in the wrong
+   direction is hex compared wrongly, and comparing it is the only thing it is
+   for. The changed state is loud on purpose — it is the one moment this row
+   has a job. */
+.chat-relay-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgb(71 85 105 / 0.5);
+  border-radius: 0.6rem;
+  background: rgb(15 23 42 / 0.35);
+}
+.chat-relay-identity-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.chat-relay-identity-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  word-break: break-all;
+  unicode-bidi: isolate;
+}
+.chat-relay-identity.is-changed {
+  border-color: rgb(248 113 113 / 0.7);
+  background: rgb(127 29 29 / 0.25);
+}
+.chat-relay-identity.is-changed .chat-relay-identity-value { color: rgb(252 165 165); }
+
+/* The carrier sheet: one screen, in the order somebody would do it. It is the
+   flow that was missing, not the cryptography — so nothing here offers a
+   choice that needs to be understood first. */
+.chat-carrier-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(2 6 23 / 0.6);
+}
+.chat-carrier-panel {
+  width: min(32rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgb(15 23 42);
+  border: 1px solid rgb(71 85 105 / 0.6);
+  color: rgb(226 232 240);
+}
+.chat-carrier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.chat-carrier-intro,
+.chat-carrier-note {
+  font-size: 0.75rem;
+  line-height: 1.7;
+  opacity: 0.8;
+  margin: 0;
+}
+.chat-carrier-tabs { display: flex; gap: 0.4rem; }
+.chat-carrier-tab {
+  flex: 1;
+  padding: 0.45rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgb(30 41 59);
+  border: 1px solid transparent;
+}
+.chat-carrier-tab.is-active {
+  background: rgb(51 65 85);
+  border-color: rgb(148 163 184 / 0.5);
+}
+.chat-carrier-for { font-size: 0.8rem; margin: 0.2rem 0 0; }
+.chat-carrier-text {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.6rem;
+  background: rgb(2 6 23 / 0.6);
+  border: 1px solid rgb(71 85 105 / 0.6);
+  color: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+/* The room a photograph has, said before anybody types rather than after they
+   finish: a limit discovered at the end is a message retyped. */
+.chat-carrier-room { font-size: 0.72rem; opacity: 0.75; }
+.chat-carrier-room.is-over { color: rgb(252 165 165); opacity: 1; font-weight: 700; }
+.chat-carrier-primary {
+  padding: 0.6rem;
+  border-radius: 0.7rem;
+  font-weight: 800;
+  background: rgb(14 165 233);
+  color: white;
+}
+.chat-carrier-primary:disabled { opacity: 0.45; }
+.chat-carrier-verdict {
+  font-size: 0.78rem;
+  line-height: 1.7;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  background: rgb(30 41 59);
+  border: 1px solid rgb(71 85 105 / 0.6);
+}
+.chat-carrier-verdict.is-error { border-color: rgb(248 113 113 / 0.7); background: rgb(127 29 29 / 0.3); }
+.chat-carrier-verdict.is-ok { border-color: rgb(52 211 153 / 0.6); background: rgb(6 78 59 / 0.3); }

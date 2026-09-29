@@ -56,8 +56,66 @@ function routesOf(file) {
   return found;
 }
 
+/* The shared modules, which are a second way the two can come apart.
+ *
+ * scripts/lib is the only copy in the repository. Both images get it by
+ * copying the whole directory in, and standalone-relay/lib is a build
+ * artifact that is gitignored and reproduced by the test harness — so there
+ * is nothing here to compare file against file, and everything to check about
+ * HOW it is copied.
+ *
+ * Naming the files one at a time is the failure. It worked for as long as
+ * there was one module, and the day a second appeared the relay that had been
+ * given only the first died on `Cannot find module`. So: both Dockerfiles
+ * copy the directory, and every module the distribution requires from ./lib
+ * exists in the one directory they copy.
+ *
+ * A stale copy left in the working tree by a crashed run is reported too. It
+ * is not a release problem, but it is a program that quietly ran with the
+ * wrong module, which is worth a line. */
+function libParityProblems() {
+  const source = path.join(ROOT, 'scripts', 'lib');
+  const shared = fs.readdirSync(source).filter((name) => name.endsWith('.js'));
+  const problems = [];
+
+  const copiesWholeDirectory = [
+    ['standalone-relay/Dockerfile.relay', /^COPY\s+scripts\/lib\s+\S+$/m],
+    ['config/Dockerfile.chat-signal', /^COPY\s+scripts\/lib\s+\S+$/m],
+  ];
+  for (const [file, pattern] of copiesWholeDirectory) {
+    const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    if (!pattern.test(text)) {
+      problems.push(`${file} does not copy scripts/lib as a directory — a new shared module will not reach it`);
+    }
+    for (const match of text.matchAll(/^COPY\s+scripts\/lib\/(\S+)/gm)) {
+      problems.push(`${file} copies scripts/lib/${match[1]} by name; copy the directory instead`);
+    }
+  }
+
+  const distribution = fs.readFileSync(path.join(ROOT, DISTRIBUTED), 'utf8');
+  for (const match of distribution.matchAll(/require\('\.\/lib\/([\w.-]+)'\)/g)) {
+    if (!shared.includes(match[1])) {
+      problems.push(`${DISTRIBUTED} requires ./lib/${match[1]}, which is not in scripts/lib`);
+    }
+  }
+
+  const copy = path.join(ROOT, 'standalone-relay', 'lib');
+  if (fs.existsSync(copy)) {
+    for (const name of fs.readdirSync(copy).filter((entry) => entry.endsWith('.js'))) {
+      const original = path.join(source, name);
+      if (!fs.existsSync(original)) {
+        problems.push(`standalone-relay/lib/${name} is left over and has no original — delete it`);
+      } else if (!fs.readFileSync(original).equals(fs.readFileSync(path.join(copy, name)))) {
+        problems.push(`standalone-relay/lib/${name} is a stale copy — delete it, the harness recreates it`);
+      }
+    }
+  }
+  return problems;
+}
+
 const deployed = routesOf(DEPLOYED);
 const distributed = routesOf(DISTRIBUTED);
+const libProblems = libParityProblems();
 
 const missingFromDeployed = [...distributed].filter((route) => !deployed.has(route)).sort();
 const missingFromDistributed = [...deployed]
@@ -68,9 +126,17 @@ const missingFromDistributed = [...deployed]
 console.log(`\n  ${DEPLOYED}: ${deployed.size} routes`);
 console.log(`  ${DISTRIBUTED}: ${distributed.size} routes`);
 
-if (!missingFromDeployed.length && !missingFromDistributed.length) {
-  console.log(`\n  both relays answer the same calls\n`);
+console.log(`  shared modules: ${fs.readdirSync(path.join(ROOT, 'scripts', 'lib')).filter((n) => n.endsWith('.js')).length}`);
+
+if (!missingFromDeployed.length && !missingFromDistributed.length && !libProblems.length) {
+  console.log(`\n  both relays answer the same calls, from the same modules\n`);
   process.exit(0);
+}
+
+if (libProblems.length) {
+  console.error(`\n  ${libProblems.length} shared module problem(s):`);
+  libProblems.forEach((problem) => console.error(`    ${problem}`));
+  console.error('\n  scripts/lib is the only copy. Both images copy the directory, not files.');
 }
 
 if (missingFromDeployed.length) {
