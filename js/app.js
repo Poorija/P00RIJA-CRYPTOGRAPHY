@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.77.0';
+const APP_VERSION_SEMVER = '2.91.11';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v85';
+  return 'chat-v95';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -981,7 +981,7 @@ upWhatIsNtfy: 'ntfy یک اپ کوچک و متن‌باز است که فقط ی�
 upNtfyNoAccount: 'نصبش کافی است. نه حساب می‌خواهد، نه تنظیمات.',
 stickerPacks: 'پک‌های استیکر',
 managePacks: 'مدیریت پک‌ها',
-stickerPacksHint: 'نام و ترتیب پک‌ها را عوض کنید، یا چندتا را با هم انتخاب و حذف کنید. ترتیب همان است که در پنل استیکر می‌بینید.',
+stickerPacksHint: 'نام و ترتیب پک‌ها را عوض کنید، یا چندتا را با هم انتخاب و حذف یا ارسال کنید. ترتیب همان است که در پنل استیکر می‌بینید.',
 desktopBiometricPromptTitle: 'فعال‌سازی ورود سریع بیومتریک',
 desktopBiometricPromptSubtitle: 'در صورت پشتیبانی دستگاه، می‌توانید مثل پیام‌رسان‌های دسکتاپ با تایید محلی سریع‌تر وارد شوید.',
 desktopBiometricPromptBody: 'اگر نسخه دسکتاپ و دستگاه شما از احراز هویت محلی پشتیبانی کنند، برنامه می‌تواند master password را در storage امن سیستم نگه دارد و با Touch ID یا تایید محلی آن را سریع‌تر باز کند. آیا مایل هستید همین حالا آن را فعال کنید؟',
@@ -1032,6 +1032,8 @@ importPortableProfile: 'ایمپورت پروفایل همراه',
 linuxCallsNotice: 'به دلیل محدودیت لینوکس و پشتیبانی ناپایدار WebKitGTK از WebRTC، تماس صوتی و تصویری و تماس گروهی در این نسخه در دسترس نیست. برای تماس از نسخهٔ PWA استفاده کنید: با «پروفایل همراه» هویتتان را به PWA ببرید و از مرورگر با همان هویت تماس بگیرید.',
 openPwaForCalls: 'باز کردن نسخهٔ PWA در مرورگر (برای تماس)',
 autoConnect: 'اتصال خودکار',
+crossRelayComm: 'ارتباط بین رله‌ها',
+crossRelayCommHint: 'روشن: پیام، فایل و تماس (شخصی و گروهی) به مخاطبانی که روی رلهٔ دیگری هستند از مسیر رمزنگاری‌شدهٔ بین دو رله می‌رود و رلهٔ شما نمی‌بیند با چه کسی حرف می‌زنید. خاموش: همه‌چیز از رلهٔ خودتان می‌رود و رله می‌بیند با چه کسی ارتباط دارید (محتوا همیشه رمزنگاری‌شده می‌ماند).',
 videoCall: 'تماس تصویری',
 localDiscovery: 'دیسکاوری محلی',
 suspensionCountdown: 'شمارش معکوس تعلیق',
@@ -2032,7 +2034,7 @@ upWhatIsNtfy: 'ntfy is a small open-source app that does one thing: it holds a c
 upNtfyNoAccount: 'Installing it is enough. No account, nothing to configure.',
 stickerPacks: 'Sticker packs',
 managePacks: 'Manage packs',
-stickerPacksHint: 'Rename packs, put them in the order you want, or select several and clear them out together. That order is the one the sticker panel shows.',
+stickerPacksHint: 'Rename packs, put them in the order you want, or select several and clear them out or share them together. That order is the one the sticker panel shows.',
 desktopBiometricPromptTitle: 'Enable biometric quick unlock',
 desktopBiometricPromptSubtitle: 'If your device supports it, you can unlock faster with local verification similar to desktop messengers.',
 desktopBiometricPromptBody: 'If this desktop runtime and device support local authentication, the app can store your master password in the system secure store and unlock it faster with Touch ID or local verification. Do you want to enable it now?',
@@ -2083,6 +2085,8 @@ importPortableProfile: 'Import Portable Profile',
 linuxCallsNotice: 'Due to a Linux limitation — WebKitGTK\'s unstable WebRTC support — audio, video and group calls are unavailable in this build. Use the PWA for calls: carry your identity over with the Portable Profile and call from your browser as the same person.',
 openPwaForCalls: 'Open the PWA in your browser (for calls)',
 autoConnect: 'Auto Connect',
+crossRelayComm: 'Cross-relay communication',
+crossRelayCommHint: 'On: messages, files and calls (1:1 and group) to contacts on another relay go through the encrypted route between the two relays, and your relay cannot see who you are talking to. Off: everything goes through your own relay, which can then see who you communicate with (contents are always encrypted).',
 videoCall: 'Video Call',
 localDiscovery: 'Local Discovery',
 suspensionCountdown: 'Suspension Countdown',
@@ -5638,7 +5642,9 @@ const select = document.getElementById('upDistributor');
 const none = document.getElementById('upNone');
 const row = document.getElementById('upDistributorRow');
 const disconnect = document.getElementById('upDisconnect');
-const state = document.getElementById('upState');
+/* Renamed: a local `state` shadowed the application state of the same name —
+   legal only because this is function scope, and a hazard exactly this size. */
+const stateRow = document.getElementById('upState');
 const polling = document.getElementById('upPolling');
 
 const has = status.distributors.length > 0;
@@ -5651,8 +5657,8 @@ if (status.distributor) select.value = status.distributor;
 }
 const connected = Boolean(status.endpoint);
 if (disconnect) disconnect.classList.toggle('hidden', !connected);
-if (state) {
-state.textContent = connected
+if (stateRow) {
+stateRow.textContent = connected
 ? (state.language === 'fa' ? 'متصل' : 'connected')
 : getTranslatedText(connected ? 'upConnected' : 'upNotConnected');
 }
@@ -6566,7 +6572,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.77.0-chat-v85';
+const reloadKey = 'poorija-sw-reload-2.91.11-chat-v95';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6579,7 +6585,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.77.0-chat-v85', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.91.11-chat-v95', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -9071,9 +9077,33 @@ document.getElementById('encryptBtn').disabled = false;
 }
 }
 async function performWebCryptoDecryption(poorijaData, keySelection) {
+/* A file encrypted before a label or AAD context existed in Settings
+   carries no value of its own, and once the setting exists the fallback
+   fills it in — so the first chunk fails as though the key were wrong.
+   A failure with the settings applied is retried once with them cleared,
+   only when the envelope itself said nothing: an envelope that names its
+   own label was encrypted with it and must fail honestly. */
+try {
+return await decryptFilePayload(poorijaData, keySelection, false);
+} catch (firstError) {
+const carriesOwn = poorijaData.oaepLabel !== undefined || poorijaData.aad !== undefined;
+if (carriesOwn) throw firstError;
+const preferences = getEnvelopeEncryptionPreferences(poorijaData);
+if (!preferences.rsaOaepLabel && !preferences.aadContext) throw firstError;
+try {
+return await decryptFilePayload(poorijaData, keySelection, true);
+} catch (_secondError) {
+throw firstError;
+}
+}
+}
+async function decryptFilePayload(poorijaData, keySelection, stripEnvelopeDefaults) {
 const algorithmId = poorijaData.contentAlgorithm || poorijaData.algorithm;
 const runtime = getSymmetricRuntimeInfo(algorithmId);
-const encryptionPreferences = getEnvelopeEncryptionPreferences(poorijaData);
+let encryptionPreferences = getEnvelopeEncryptionPreferences(poorijaData);
+if (stripEnvelopeDefaults) {
+encryptionPreferences = { ...encryptionPreferences, rsaOaepLabel: '', aadContext: '' };
+}
 let workingKey;
 if (keySelection.kind === 'password') {
 const salt = new Uint8Array(poorijaData.salt);
@@ -10461,7 +10491,12 @@ async function readLegacyStorageEnvelope(parsed, password) {
     'raw', keys.mac, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const macBytes = new Uint8Array(await crypto.subtle.sign(
     'HMAC', macKey, new TextEncoder().encode(macInput)));
-  if (core.toBase64(macBytes) !== parsed.mac) return null;
+  /* Constant-time, like every other comparison of secrets in this app: a
+     plain string compare on the one-off migration MAC is an oracle the v4
+     paths do not offer. */
+  const expected = core.fromBase64(parsed.mac);
+  if (expected.length !== macBytes.length
+    || !core.ctEqual(macBytes, new Uint8Array(expected))) return null;
 
   const encKey = await crypto.subtle.importKey(
     'raw', keys.enc, { name: 'AES-CBC' }, false, ['decrypt']);

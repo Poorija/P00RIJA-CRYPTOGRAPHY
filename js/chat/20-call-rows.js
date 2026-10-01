@@ -847,6 +847,7 @@ serverField.value = chatState.profile.serverUrl || defaultRelayOriginForShell();
 document.getElementById('chatAutoConnect').checked = Boolean(chatState.profile.autoConnect);
 document.getElementById('chatAllowVideo').checked = Boolean(chatState.profile.allowVideo);
 document.getElementById('chatAutoDiscovery').checked = Boolean(chatState.profile.autoDiscovery);
+document.getElementById('chatCrossRelayComm').checked = chatState.profile.crossRelayComm !== false;
 /* The master switch mirrors the profile, and everything connection-shaped on
  * this panel dims while it is off. */
 const enabledToggle = document.getElementById('chatEnabledToggle');

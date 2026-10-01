@@ -1,3 +1,13 @@
+# Bounded logging for every service: the default json-file log grows without
+# limit, and four services logging every presence event and request fill a
+# long-lived host's disk — the same "grows forever" failure the backup script
+# was written to prevent for backups, one layer lower.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   poorija-cryptography:
     image: poorija-crypto:v2.99
@@ -5,6 +15,7 @@ services:
       context: ../
       dockerfile: config/Dockerfile
     container_name: Poorija-Cryptography_App
+    logging: *default-logging
     environment:
       HOST: 0.0.0.0
       PORT: 8585
@@ -37,6 +48,7 @@ services:
       context: ../
       dockerfile: config/Dockerfile.chat-signal
     container_name: Poorija-Cryptography_ChatSignal
+    logging: *default-logging
     environment:
       CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
       CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
@@ -83,6 +95,7 @@ services:
   coturn:
     image: coturn/coturn:4.6-alpine
     container_name: Poorija-Cryptography_Coturn
+    logging: *default-logging
     network_mode: host
     command:
       - -n
@@ -107,8 +120,12 @@ services:
       - --no-multicast-peers
       - --min-port=49152
       - --max-port=50152
-      - --external-ip=${EXTERNAL_IP:-127.0.0.1}
-      - --relay-ip=${EXTERNAL_IP:-127.0.0.1}
+      # Required, not defaulted: a TURN server advertising 127.0.0.1 to the
+      # world answers every relayed call with a connection to itself, and the
+      # failure is silent from the operator's side. Missing is an error, the
+      # same as the credentials are.
+      - --external-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
+      - --relay-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
     volumes:
       - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/coturn/certs/cert.pem:ro
       - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/coturn/certs/key.pem:ro
@@ -119,6 +136,7 @@ services:
       context: ../
       dockerfile: config/Dockerfile.cert-renewer
     container_name: Poorija-Cryptography_CertRenewer
+    logging: *default-logging
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}

@@ -379,6 +379,10 @@ write_env_file() {
         allowed_origins="https://$EXT_IP:$port,http://$EXT_IP:$port"
     fi
 
+    # Owner-only from the first write: this file holds the monitor and TURN
+    # passwords, and the default umask made it readable by every other
+    # account on the host.
+    umask 077
     cat > "$ROOT/.env" <<EOF
 DOMAIN=$DOMAIN
 EXTERNAL_IP=$EXT_IP
@@ -395,6 +399,8 @@ CHAT_ALLOWED_ORIGINS=$allowed_origins
 # or let scripts/link-relays.sh fill this in for two servers that are already up.
 CHAT_TRANSIT_PEERS=${QUICK_PEERS:-${CHAT_TRANSIT_PEERS:-}}
 EOF
+    chmod 600 "$ROOT/.env"
+    umask 022
 }
 
 # config/nginx.conf used to be rewritten in place here -- server_name and the
@@ -918,9 +924,12 @@ quick_install() {
     fi
     echo "  Application    : $APP_URL"
     echo "  Monitor        : $MONITOR_URL"
-    echo "  Monitor password: $MONITOR_PASS"
+    # Not echoed: terminal scrollback, CI logs and screen shares all read it,
+    # and .env holds the only copy the operator actually needs. The quick
+    # mode already knows what it typed; interactive mode chose it.
+    echo "  Monitor password: in .env (chmod 600) — shown nowhere else."
     echo
-    echo "  The password is also in .env. Keep that file private — it is the only copy."
+    echo "  Keep .env private. It is the only copy of the password."
     return 0
 }
 

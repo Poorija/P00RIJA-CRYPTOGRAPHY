@@ -207,10 +207,11 @@ chatState.threadRender = { conversationId: conversationKey, newestId: newestEntr
    see the raw id. */
 const eid = (value) => app().escapeHTML(String(value ?? ''));
 panel.innerHTML = olderNotice + renderHistory.map((entry) => {const canReactToEntry = entry.direction !== 'out';
-const meta = `
+	const meta = `
 <div class="chat-message-meta" style="display: flex !important; opacity: 1 !important; visibility: visible !important;">
 <span>${formatTime(entry.createdAt)}</span>
 ${entry.expiresAt ? `<span class="chat-timer-countdown bg-brand-500/10 text-brand-500 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1" data-expires="${app().escapeHTML(entry.expiresAt)}"><i class="fas fa-stopwatch animate-pulse"></i> ${formatCountdown(entry.expiresAt)}</span>` : (entry.timerSeconds ? `<span class="chat-timer-countdown bg-brand-500/10 text-brand-500 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1"><i class="fas fa-stopwatch"></i> ${entry.timerSeconds}s</span>` : '')}
+${entry.transitFallback ? `<span class="chat-transit-fallback-badge" data-chat-transit-fallback="${eid(entry.id)}" title="${app().escapeHTML(t('این پیام از رلهٔ خودتان رفت، نه از مسیر رلهٔ مقابل', 'This message went through your own relay, not the far relay\'s route'))}"><i class="fas fa-route"></i></span>` : ''}
 ${entry.direction === 'out' ? (() => {
 const meta = statusMeta(entry.status);
 return `<span data-chat-message-status="${eid(entry.id)}" class="chat-msg-status ${meta.cls}" title="${app().escapeHTML(meta.title)}">${meta.label}</span>`;
@@ -985,6 +986,16 @@ const entryId = button.getAttribute('data-chat-delete-message');
 if (!entryId) return;
 chatState.activeReactionMessageId = '';
 deleteMessageEntry(conversationKey, entryId, { broadcast: Boolean(!peer.type), peerRecord: directPeer });
+};
+});
+/* The route icon on a message that fell back to the local relay. One click,
+   one sentence, no bubble, no noise. */
+panel.querySelectorAll('[data-chat-transit-fallback]').forEach((badge) => {
+badge.onclick = () => {
+notify(t(
+'این پیام قرار بود از مسیر رلهٔ مقابل برود، ولی آن مسیر در دسترس نبود و از رلهٔ خودتان فرستاده شد. در این حالت رلهٔ شما می‌بیند که با چه کسی حرف می‌زنید (نه محتوای پیام را). محتوا همچنان رمزنگاری‌شده است.',
+'This message was meant to go through the far relay\'s route, but that route was unavailable and it was sent through your own. Your relay can see who you are talking to in this case (not the contents). The contents are still encrypted.',
+), 'info', 8000);
 };
 });
 panel.querySelectorAll('[data-chat-copy-message]').forEach((button) => {

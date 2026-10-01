@@ -209,3 +209,132 @@ app().base64ToArrayBuffer(payload.cipher)
 );
 return decrypted;
 }
+
+/* ------------------------------------------------------------------
+ * Who an envelope is from, vouched for by the key that name belongs to.
+ *
+ * The seal authenticates the RECIPIENT — it is encrypted to a public key,
+ * which anybody can do. The sender's name rode on the envelope as a claim,
+ * and the v2 body honoured a key the same claimant chose, so whoever held
+ * the recipient's public key could queue a message as any of their contacts
+ * and the only line of defence was a safety number that does not change when
+ * a third party is impersonated — the victim's key is never touched.
+ *
+ * An envelope is now signed with the sender's identity key over exactly the
+ * bytes that carry the claim: the fingerprint, the peer id, the timestamp
+ * and the sealed body itself, so a field swapped on the relay breaks the
+ * signature along with the claim. A receiver who has pinned the contact's
+ * key verifies and drops what fails; a first contact arrives unsigned or
+ * unverified exactly as a hello does, and the pin formed by that first
+ * contact is what protects every envelope after it.
+ * ------------------------------------------------------------------ */
+async function importIdentitySigningKey() {
+const identity = await ensureIdentity();
+return crypto.subtle.importKey(
+'pkcs8',
+app().base64ToArrayBuffer(identity.privateKeyData),
+{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+false,
+['sign'],
+);
+}
+async function verifyIdentitySignature(publicKeyData, signatureBytes, data) {
+const key = await crypto.subtle.importKey(
+'spki',
+app().base64ToArrayBuffer(publicKeyData),
+{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+false,
+['verify'],
+);
+return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signatureBytes, data);
+}
+/* The bytes a sender vouches for. The ciphertext rather than the plaintext:
+   the signature then covers the exact envelope the relay holds, and no field
+   can be swapped without breaking it. */
+function offlineEnvelopeSignBytes(envelope) {
+const body = envelope?.body
+? `${(envelope.body.iv || []).join(',')}|${envelope.body.cipher || ''}`
+: `msg:${JSON.stringify(envelope?.message || null)}`;
+return new TextEncoder().encode([
+envelope?.fromFingerprint || '',
+envelope?.fromPeerId || '',
+envelope?.createdAt || '',
+body,
+].join('\n'));
+}
+async function signOfflineEnvelope(envelope) {
+try {
+const key = await importIdentitySigningKey();
+const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, offlineEnvelopeSignBytes(envelope));
+envelope.sig = app().arrayBufferToBase64(signature);
+envelope.sigv = 1;
+} catch (error) {
+/* An envelope that cannot be signed still travels — an old receiver would
+   ignore the field anyway, and silence is worse than an unverified seal. */
+console.warn('[Chat] could not sign the offline envelope:', error);
+}
+}
+/* 'verified' — the pinned key signed it. 'forged' — a key was pinned for this
+   name and what arrived does not match it. 'unsigned' — nothing to check, the
+   pre-signature world. 'unknown' — no pin yet: first contact, trust on first
+   use as every hello already is. */
+async function verifyOfflineEnvelopeSender(payload, fromId) {
+try {
+if (!payload?.sig) return 'unsigned';
+const record = typeof findPeerRecordByPeerId === 'function' ? findPeerRecordByPeerId(fromId) : null;
+const publicKeyData = record?.publicKeyData || '';
+if (!publicKeyData) return 'unknown';
+if (record.fingerprint && payload.fromFingerprint && record.fingerprint !== payload.fromFingerprint) return 'forged';
+const good = await verifyIdentitySignature(
+publicKeyData,
+app().base64ToArrayBuffer(payload.sig),
+offlineEnvelopeSignBytes(payload),
+);
+return good ? 'verified' : 'forged';
+} catch (_error) {
+return 'unsigned';
+}
+}
+
+/* ------------------------------------------------------------------
+ * A space record carries the whole roster — membership, admins, the
+ * permissions, the dissolve bit — so who pushed it is the whole question.
+ * On the same relay the envelope's sender is the relay's own challenged
+ * fingerprint. Over transit that field is deliberately blank (nothing was
+ * proved on the carrying leg), and the record used to be refused by every
+ * cross-relay member for exactly that reason: their owner's edits never
+ * arrived, and a removed member kept a ghost group that others kept
+ * encrypting to. The record now names its author inside itself, signed
+ * with the identity key, and the recipient checks that signature against
+ * the owner's pinned key before a roster moves.
+ * ------------------------------------------------------------------ */
+function spaceSyncSignBytes(payload) {
+return new TextEncoder().encode([
+String(payload?.fromFingerprint || ''),
+String(payload?.createdAt || ''),
+JSON.stringify(payload?.space || null),
+String(payload?.note || ''),
+].join('\n'));
+}
+async function signSpaceSyncPayload(payload) {
+try {
+const key = await importIdentitySigningKey();
+const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, spaceSyncSignBytes(payload));
+payload.sig = app().arrayBufferToBase64(signature);
+payload.sigv = 1;
+} catch (error) {
+console.warn('[Chat] could not sign the space record:', error);
+}
+}
+async function verifySpaceSyncSender(payload, ownerPublicKeyData) {
+try {
+if (!payload?.sig || !ownerPublicKeyData) return false;
+return await verifyIdentitySignature(
+ownerPublicKeyData,
+app().base64ToArrayBuffer(payload.sig),
+spaceSyncSignBytes(payload),
+);
+} catch (_error) {
+return false;
+}
+}

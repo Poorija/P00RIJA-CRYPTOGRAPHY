@@ -85,7 +85,10 @@ if [[ ! -f "$ROOT/certs/cert.pem" ]]; then
         -subj "/CN=$DOMAIN"
 fi
 
-# .env
+# .env — owner-only from the first write: this file holds the monitor and
+# TURN passwords, and the default umask made it readable by every account on
+# the host.
+umask 077
 cat > "$ROOT/.env" <<EOF
 DOMAIN=$DOMAIN
 EXTERNAL_IP=$EXT_IP
@@ -97,6 +100,8 @@ SSL_CERT_PATH=./certs/cert.pem
 SSL_KEY_PATH=./certs/key.pem
 CHAT_ALLOWED_ORIGINS=$CHAT_ALLOWED_ORIGINS
 EOF
+chmod 600 "$ROOT/.env"
+umask 022
 
 # Clear old config to ensure new password is used
 mkdir -p "$ROOT/data"

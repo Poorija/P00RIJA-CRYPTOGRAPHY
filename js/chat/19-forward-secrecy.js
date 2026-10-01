@@ -323,6 +323,26 @@ members: members.filter((memberKey) => !isRemovedMember(memberKey)),
 saveSpaces();
 return collection[0];
 }
+/* The record that travels, named and signed: the author rides inside the
+   payload because over transit the envelope's sender field is blank by
+   design, and the signature is what makes the name worth anything. */
+async function buildSignedSpaceSyncPayload(space, note = '') {
+const payload = {
+type: 'space-sync',
+space,
+note: note || '',
+createdAt: new Date().toISOString(),
+fromFingerprint: chatState.identity?.fingerprint || '',
+};
+if (typeof signSpaceSyncPayload === 'function') await signSpaceSyncPayload(payload);
+return payload;
+}
+function sendSpaceSync(peer, space, note = '') {
+if (!peer || !space) return;
+buildSignedSpaceSyncPayload(space, note)
+.then((payload) => { try { sendRelayEnvelope(peer, payload); } catch (_error) { /* the caller's loop goes on */ } })
+.catch(() => { /* an unsigned record is still better than none */ });
+}
 function broadcastSpaceRecord(space, note = '') {
 if (!space) return;
 const memberSet = new Set(Array.isArray(space.members) ? space.members : []);
@@ -331,16 +351,13 @@ if (peer.type || isSelfPeerRecord(peer)) return false;
 if (!memberSet.size) return true;
 return memberSet.has(getConversationKey(peer)) || memberSet.has(peer.peerId) || memberSet.has(peer.clientId) || memberSet.has(peer.fingerprint);
 };
-const payload = () => ({
-type: 'space-sync',
-space,
-note: note || '',
-createdAt: new Date().toISOString(),
-});
+/* Built once, signed once, sent to everybody: the record does not differ by
+   recipient, and neither does the signature over it. */
+void buildSignedSpaceSyncPayload(space, note).then((payload) => {
 chatState.peers
 .filter((peer) => peer.status === 'online' && isMember(peer))
 .forEach((peer) => {
-sendRelayEnvelope(peer, payload());
+sendRelayEnvelope(peer, payload);
 });
 /* A removal has to reach the people who were offline when it happened, or the
    roster they come back to still lists the removed member forever. The relay
@@ -352,11 +369,12 @@ chatState.peers
 .filter((peer) => peer.status !== 'online' && isMember(peer))
 .forEach((peer) => {
 try {
-sendRelayEnvelope(peer, payload());
+sendRelayEnvelope(peer, payload);
 } catch (error) {
 console.warn('[Space] an offline member could not be sent the space record', error);
 }
 });
+}).catch(() => { /* nothing to send unsigned for */ });
 }
 /* The log holds this many calls, newest first. */
 const CALL_LOG_LIMIT = 80;

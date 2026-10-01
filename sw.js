@@ -8,7 +8,7 @@
  * version as a network service and its users are entitled to your source.
  */
 
-const CACHE_NAME = 'poorija-cryptography-v2.77.0-chat-v85';
+const CACHE_NAME = 'poorija-cryptography-v2.91.11-chat-v95';
 
 // Live endpoints proxied by nginx: never cached, always straight to the network.
 const NETWORK_ONLY_PREFIXES = [
@@ -150,11 +150,23 @@ self.addEventListener('activate', (event) => {
     await Promise.all(
       keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
     );
-    
-    // Background cache lazy assets
+
+    // Background cache lazy assets — awaited, inside the waitUntil: the
+    // promise used to be fire-and-forget, and a worker is free to stop once
+    // its waitUntil settles, so an offline install could come up with the
+    // core shell cached and half the chat modules missing — a boot that
+    // looked installed and behaved broken. Failing one lazy asset must not
+    // roll back the whole activation, so failures are counted, not thrown.
     const cache = await caches.open(CACHE_NAME);
-    cache.addAll(LAZY_ASSETS).catch(err => console.warn('Lazy caching failed:', err));
-    
+    try {
+      await Promise.allSettled(LAZY_ASSETS.map(async (asset) => {
+        try {
+          const response = await fetch(asset, { cache: 'no-store' });
+          if (response && response.ok) await cache.put(asset, response);
+        } catch (_error) { /* one miss is not a failed activation */ }
+      }));
+    } catch (err) { console.warn('Lazy caching failed:', err); }
+
     await self.clients.claim();
   })());
 });
@@ -175,7 +187,15 @@ self.addEventListener('fetch', (event) => {
         title,
         text,
         url: urlParam,
+        /* A cap, because the whole of a shared file is base64-encoded into a
+           JSON string inside the app-shell cache: a long video means three
+           copies of itself in worker memory and a cache entry that size, on a
+           phone. Above the cap the share is still delivered as text and a
+           named note that the file was too large to carry. */
         files: await Promise.all(files.map(async (f) => {
+          if (f.size > 32 * 1024 * 1024) {
+            return { name: f.name, type: f.type, size: f.size, lastModified: f.lastModified, tooLarge: true };
+          }
           const encoded = arrayBufferToBase64(await f.arrayBuffer());
           // Both keys, one value: the page reader looks for `base64`, while a
           // still-cached older page reads `content`. Cheaper than a lost file.
@@ -205,7 +225,14 @@ self.addEventListener('fetch', (event) => {
     const fromNetwork = async () => {
       const response = await fetch(event.request);
       if (response && response.status === 200 && (url.protocol === 'http:' || url.protocol === 'https:')) {
-        cache.put(event.request, response.clone()).catch(() => { /* quota */ });
+        /* Stored under the bare URL, read back with ignoreSearch either way:
+           entries used to be keyed with the ?v= tag while every lookup
+           ignored it, so a release that bumped the tag without bumping
+           CACHE_NAME left two generations of the same file in the cache — and
+           the oldest one is what a lookup could hand back. One key per asset,
+           whatever its tag. */
+        const bare = new Request(url.origin + url.pathname);
+        cache.put(bare, response.clone()).catch(() => { /* quota */ });
       }
       return response;
     };

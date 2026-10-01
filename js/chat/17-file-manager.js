@@ -2705,6 +2705,10 @@ return {
 name: document.getElementById('chatProfileName')?.value.trim() || chatState.profile.name,
 serverUrl: document.getElementById('chatServerUrl')?.value.trim() || chatState.profile.serverUrl || defaultServerUrl,
 autoConnect: Boolean(document.getElementById('chatAutoConnect')?.checked),
+/* Cross-relay communication: on by default, a decision the person makes once.
+   Off means everything goes through the relay they are connected to, which
+   can then see who they talk to (never the contents). */
+crossRelayComm: document.getElementById('chatCrossRelayComm')?.checked ?? chatState.profile.crossRelayComm ?? true,
 allowVideo: Boolean(document.getElementById('chatAllowVideo')?.checked),
 autoDiscovery: Boolean(document.getElementById('chatAutoDiscovery')?.checked),
 showSuspensionCountdown: Boolean(document.getElementById('chatShowSuspensionCountdown')?.checked),
@@ -2752,6 +2756,14 @@ chatAutoDiscovery: ['دیسکاوری محلی فعال است', 'Local discover
 chatShowSuspensionCountdown: ['شمارش معکوس تعلیق روشن است', 'Suspension countdown is on', 'شمارش معکوس تعلیق خاموش است', 'Suspension countdown is off'],
 chatSendReceipts: ['رسید خواندن فرستاده می‌شود', 'Read receipts are sent', 'رسید خواندن فرستاده نمی‌شود — طرف مقابل تیک دوم را نمی‌بیند', 'Read receipts are not sent — the other side does not see the second tick'],
 chatPublicStun: ['STUN عمومی روشن است — آی‌پی شما به گوگل/توییلیو دیده می‌شود', 'Public STUN is on — Google/Twilio see your address', 'فقط رله و TURN خودتان استفاده می‌شود', 'Only your own relay and TURN are used'],
+/* The master switch and the cross-relay switch were missing from this list,
+   and the list is not decoration: it is what puts is-active on the row, and
+   the row's is-active is the panel's whole "this one is on" signal — the
+   accent-tinted background the other switches' rows carry. Without it the
+   two switches worked but their rows sat in the off-colour permanently,
+   which read as "these two are different from the rest" on every device. */
+chatEnabledToggle: ['چت امن روشن است', 'Secure chat is on', 'چت امن خاموش است', 'Secure chat is off'],
+chatCrossRelayComm: ['ارتباط بین رله‌ها روشن است؛ پیام و تماس از مسیر رمزنگاری‌شدهٔ میان دو رله می‌رود', 'Cross-relay transit is on; messages and calls ride the encrypted link between the relays', 'ارتباط بین رله‌ها خاموش است؛ همه‌چیز از رلهٔ خودتان می‌رود', 'Cross-relay transit is off; everything goes through your own relay'],
 };
 Object.entries(toggleMeta).forEach(([id, labels]) => {
 const input = document.getElementById(id);

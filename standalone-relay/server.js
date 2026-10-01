@@ -20,7 +20,7 @@ const webpush = require('web-push');
    sit in this file knew only 'call-invite' versus everything else, in English
    — while scripts/server.js had grown group, voice-or-video and, now, Persian.
    Dockerfile.relay copies the module in beside this server. */
-const { pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions } = require('./lib/push-wording.js');
+const { pushKindFor, pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions } = require('./lib/push-wording.js');
 const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey } = require('./lib/relay-identity.js');
 const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
 const { openTransit, transitFacts } = require('./lib/relay-transit.js');
@@ -267,7 +267,27 @@ function securityKey(req) {
 
 app.use('/vendor', express.static(path.join(__dirname, 'vendor')));
 app.use('/vendor', express.static(path.join(__dirname, '..', 'vendor')));
-app.use(express.json({ limit: '50mb' }));
+/* 50 MB on every route — authenticated or not — was an amplifier: an
+   anonymous caller could make the process buffer and parse fifty megabytes
+   per request at line rate. Most routes never carry more than a frame; the
+   one that carries records gets its own, still-modest allowance, exactly as
+   the deployed relay prices it. */
+app.use('/self-destruct/records', express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '256kb' }));
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'interest-cohort=(), browsing-topics=()');
+  /* Only over TLS: sending HSTS from a plain-http LAN deployment would pin
+     browsers to https for a host that does not speak it. */
+  if (req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const sameOrigin = !origin;
@@ -300,6 +320,76 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+/* ------------------------------------------------------------------
+ * Rate limiting
+ *
+ * The deployed relay has had buckets on its HTTP paths for a long time; the
+ * distribution never did. Every expensive thing a relay does was one
+ * unauthenticated POST away at line rate — /push/challenge spends an RSA
+ * publicEncrypt and a stored nonce per call, and the body parser would
+ * buffer and parse whatever came with it. Buckets here too, priced the same
+ * way: login is never scaled with anything, write paths get a fraction of
+ * the default, and the whole thing keys on securityKey, which a client
+ * cannot rename with a header.
+ * ------------------------------------------------------------------ */
+const RATE_LIMIT_WINDOW_MS = Number(process.env.CHAT_RATE_WINDOW_MS || 60_000);
+const RATE_LIMITS = {
+  default: Number(process.env.CHAT_RATE_DEFAULT || 300),
+  /* Login is not scaled with the hardware: ten guesses a minute is the right
+     answer on any machine, and a faster server should not make guessing
+     faster. */
+  login: Number(process.env.CHAT_RATE_LOGIN || 10),
+  write: Number(process.env.CHAT_RATE_WRITE || 60),
+};
+const rateBuckets = new Map();
+
+function rateKey(req) {
+  /* Never requestIp(): a bucket an attacker can rename is not a bucket. */
+  return securityKey(req);
+}
+
+function rateLimit(bucketName) {
+  const ceiling = RATE_LIMITS[bucketName] ?? RATE_LIMITS.default;
+  return (req, res, next) => {
+    /* A CORS preflight is not a request for anything: it carries no
+       credentials, performs no work, and the browser sends it on its own
+       before the call the caller actually made. Counting it charged every
+       cross-origin client twice and halved its real allowance. */
+    if (req.method === 'OPTIONS') return next();
+    const key = `${bucketName}:${rateKey(req)}`;
+    const now = Date.now();
+    let entry = rateBuckets.get(key);
+    if (!entry || entry.resetAt <= now) {
+      entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+      rateBuckets.set(key, entry);
+    }
+    entry.count += 1;
+    const remaining = Math.max(0, ceiling - entry.count);
+    res.setHeader('X-RateLimit-Limit', String(ceiling));
+    res.setHeader('X-RateLimit-Remaining', String(remaining));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)));
+    if (entry.count > ceiling) {
+      res.setHeader('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+      return res.status(429).json({ ok: false, reason: 'rate-limited' });
+    }
+    return next();
+  };
+}
+
+/* Unbounded growth here would be its own denial of service. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateBuckets) {
+    if (entry.resetAt <= now) rateBuckets.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref?.();
+
+app.use('/admin/login', rateLimit('login'));
+app.use('/admin', rateLimit('write'));
+app.use('/push', rateLimit('write'));
+app.use('/self-destruct', rateLimit('write'));
+app.use(rateLimit('default'));
 
 function normalizeTurnUrls(value = '') {
   const raw = Array.isArray(value) ? value : String(value || '').split(/[,\n\r]+/);
@@ -351,14 +441,49 @@ const configuredVapid = {
   publicKey: process.env.VAPID_PUBLIC_KEY || '',
   privateKey: process.env.VAPID_PRIVATE_KEY || '',
 };
-const vapidKeys = configuredVapid.publicKey && configuredVapid.privateKey
-  ? configuredVapid
-  : webpush.generateVAPIDKeys();
+/* A pair that changes on every restart silently invalidates every push
+   subscription anyone made: the toggle still says on, the vendor still has
+   the endpoint, and the device never rings again. The distribution used to
+   generate one per process and warn about it, which is the same failure
+   wearing a disclaimer. Env wins; otherwise a pair is generated ONCE and
+   kept beside the other server state, and the salt is what keeps chat
+   fingerprints out of the subscription file at rest — see pushIndexKey. */
+const VAPID_STORE_PATH = process.env.CHAT_VAPID_STORE_PATH || path.join(defaultDataDir, 'vapid.json');
+function loadOrCreateVapid() {
+  if (configuredVapid.publicKey && configuredVapid.privateKey) {
+    return { ...configuredVapid, source: 'env', salt: process.env.CHAT_PUSH_SALT || '' };
+  }
+  try {
+    if (fs.existsSync(VAPID_STORE_PATH)) {
+      const saved = JSON.parse(fs.readFileSync(VAPID_STORE_PATH, 'utf8'));
+      if (saved?.publicKey && saved?.privateKey) return { ...saved, source: 'file' };
+    }
+  } catch (error) {
+    console.warn('Could not read the stored VAPID pair; generating a new one:', error?.message || error);
+  }
+  const generated = webpush.generateVAPIDKeys();
+  const record = { ...generated, salt: crypto.randomBytes(32).toString('hex'), createdAt: new Date().toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(VAPID_STORE_PATH), { recursive: true });
+    fs.writeFileSync(VAPID_STORE_PATH, JSON.stringify(record, null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.warn('Could not persist the VAPID pair; it will change on restart:', error?.message || error);
+  }
+  return { ...record, source: 'generated' };
+}
+const vapidKeys = loadOrCreateVapid();
+const PUSH_INDEX_SALT = vapidKeys.salt || process.env.CHAT_PUSH_SALT || 'poorija-push-index';
 const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@poorija.local';
 
 webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
-if (!configuredVapid.publicKey || !configuredVapid.privateKey) {
-  console.warn('VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY were not provided; using ephemeral keys for this container run.');
+if (vapidKeys.source === 'generated') {
+  console.warn(`VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY were not provided; generated a pair and stored it at ${VAPID_STORE_PATH}.`);
+}
+
+/* Push subscriptions are indexed by this, never by the fingerprint itself:
+   the file at rest must not hold a list of who talks to whom. */
+function pushIndexKey(fingerprint) {
+  return crypto.createHmac('sha256', PUSH_INDEX_SALT).update(String(fingerprint || '')).digest('hex');
 }
 
 let serverLogs = [];
@@ -475,17 +600,81 @@ function clearMonitorAuthCookie(res) {
   ]);
 }
 
-function getMonitorAuth(req) {
-  let authToUse = req.headers.authorization || '';
-  if (!authToUse) {
-    if (req.query && req.query.auth) {
-      authToUse = `Basic ${req.query.auth}`;
-    } else {
-      const cookie = readCookie(req, 'monitor_token_v2');
-      if (cookie) authToUse = `Basic ${cookie}`;
-    }
+/* The monitor's credential used to be the password in a thin disguise:
+   base64("admin:" + password) as the cookie, the same value handed to page
+   JavaScript in the login response, and a ?auth= URL form that lands in
+   access logs, browser history and Referer headers. Anything that read the
+   cookie read the password. The deployed relay replaced all of it with
+   sessions; the distribution is a copy of the same program and answers to
+   the same replacement: a session is a random 32-byte handle that means
+   nothing on its own and is only good while the server remembers it. */
+const MONITOR_SESSION_TTL_MS = Number(process.env.MONITOR_SESSION_TTL_MS || 12 * 60 * 60 * 1000);
+const monitorSessions = new Map();
+
+function issueMonitorSession(req) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  monitorSessions.set(token, {
+    createdAt: Date.now(),
+    expiresAt: Date.now() + MONITOR_SESSION_TTL_MS,
+    ip: monitorLoginKey(req),
+  });
+  return token;
+}
+
+function monitorSessionValid(token) {
+  if (!token) return false;
+  const session = monitorSessions.get(token);
+  if (!session) return false;
+  if (session.expiresAt <= Date.now()) {
+    monitorSessions.delete(token);
+    return false;
   }
-  return authToUse;
+  return true;
+}
+
+function revokeMonitorSession(token) {
+  if (token) monitorSessions.delete(token);
+}
+
+/* Every session dies when the password changes: a rotated password that
+   leaves old sessions logged in has not really been rotated. */
+function revokeAllMonitorSessions() {
+  monitorSessions.clear();
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of monitorSessions) {
+    if (session.expiresAt <= now) monitorSessions.delete(token);
+  }
+}, 15 * 60 * 1000).unref?.();
+
+function secretsMatch(candidate, expected) {
+  const a = crypto.createHash('sha256').update(String(candidate ?? '')).digest();
+  const b = crypto.createHash('sha256').update(String(expected ?? '')).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function monitorCookieFlags(req) {
+  /* Secure would make the cookie unusable over a plain-http LAN deployment,
+     which is a supported way to run this, so it is set when the request that
+     is establishing the session actually arrived over TLS. */
+  const secure = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  return `Path=/; Max-Age=${Math.floor(MONITOR_SESSION_TTL_MS / 1000)}; SameSite=Strict; HttpOnly${secure ? '; Secure' : ''}`;
+}
+
+function monitorTokenFromRequest(req) {
+  const cookie = readCookie(req, 'monitor_token_v2');
+  if (cookie) return cookie;
+  const header = String(req.headers.authorization || '');
+  if (header.startsWith('Bearer ')) return header.slice(7).trim();
+  return '';
+}
+
+/* No query-string credentials: a token in a URL lands in access logs,
+   history and Referer headers. */
+function getMonitorAuth(req) {
+  return monitorTokenFromRequest(req);
 }
 
 function decodeMonitorAuth(authToUse) {
@@ -499,7 +688,6 @@ function decodeMonitorAuth(authToUse) {
     return {
       user: decoded.slice(0, separator),
       pass: decoded.slice(separator + 1),
-      token: parts[1],
     };
   } catch (_error) {
     return null;
@@ -507,8 +695,18 @@ function decodeMonitorAuth(authToUse) {
 }
 
 function isValidMonitorAuth(req) {
-  const decoded = decodeMonitorAuth(getMonitorAuth(req));
-  return Boolean(decoded && decoded.user === 'admin' && decoded.pass === MONITOR_PASSWORD);
+  const token = monitorTokenFromRequest(req);
+  if (monitorSessionValid(token)) return true;
+  /* HTTP Basic stays supported for scripted access, but the password is
+     compared in constant time rather than with ===, and the cookie never
+     carries it: only an Authorization header can be Basic, so the cookie jar
+     a log might see holds a session handle and nothing else. */
+  const header = String(req.headers.authorization || '');
+  if (header.startsWith('Basic ')) {
+    const decoded = decodeMonitorAuth(header);
+    return Boolean(decoded && decoded.user === 'admin' && secretsMatch(decoded.pass, MONITOR_PASSWORD));
+  }
+  return false;
 }
 
 function monitorLoginKey(req) {
@@ -660,11 +858,22 @@ app.post('/admin/login', (req, res) => {
   }
 
   const { password } = req.body || {};
-  if (password === MONITOR_PASSWORD) {
+  if (secretsMatch(password, MONITOR_PASSWORD)) {
     monitorLoginFailures.delete(monitorLoginKey(req));
-    const token = Buffer.from(`admin:${password}`).toString('base64');
-    res.setHeader('Set-Cookie', `monitor_token_v2=${token}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly`);
-    return res.json({ ok: true, token });
+    const token = issueMonitorSession(req);
+    res.setHeader('Set-Cookie', `monitor_token_v2=${token}; ${monitorCookieFlags(req)}`);
+
+    /* The token is not in the body by default: the web monitor is served from
+       this origin, the browser attaches the HttpOnly cookie by itself, and
+       handing page script a copy would undo HttpOnly for no gain. A client
+       with no cookie jar for this origin — the desktop monitor — asks for a
+       bearer handle explicitly, and this response is reached only by someone
+       who just presented the correct password. */
+    const wantsBearer = req.body?.bearer === true || req.body?.mode === 'bearer';
+    return res.json({
+      ok: true,
+      ...(wantsBearer ? { token, tokenType: 'Bearer' } : {}),
+    });
   }
 
   const failure = recordMonitorLoginFailure(req);
@@ -676,16 +885,19 @@ app.post('/admin/login', (req, res) => {
   });
 });
 
-app.post('/admin/logout', (_req, res) => {
+app.post('/admin/logout', (req, res) => {
   setNoStoreHeaders(res);
+  revokeMonitorSession(getMonitorAuth(req));
   clearMonitorAuthCookie(res);
   res.json({ ok: true });
 });
 
 app.post('/admin/kick-peer', authMiddleware, (req, res) => {
   const { clientId } = req.body;
-  const permanent = Boolean(req.body?.permanent);
-  const durationMinutes = permanent ? 0 : sanitizePolicyDurationMinutes(req.body?.durationMinutes, 5);
+  /* Permanent by default, as the deployed relay reads the same verb: a kick
+     that quietly expires was a suspension wearing the stronger word. */
+  const permanent = req.body?.permanent !== undefined ? Boolean(req.body.permanent) : true;
+  const durationMinutes = permanent ? 0 : sanitizePolicyDurationMinutes(req.body?.durationMinutes, 60);
   const peer = presence.get(clientId);
   if (peer) {
     const snapshot = identitySnapshot(peer);
@@ -898,16 +1110,26 @@ app.post('/admin/broadcast', authMiddleware, (req, res) => {
 
 app.post('/admin/change-password', authMiddleware, (req, res) => {
   const { oldPassword, newPassword } = req.body;
-  
-  if (oldPassword && oldPassword !== MONITOR_PASSWORD) {
+
+  /* The old password is required, not optional: an empty field skipping the
+     check made "change the password" into "anybody logged in sets the
+     password to anything". And the comparison is timing-safe, like the login
+     it mirrors. */
+  if (!oldPassword || !secretsMatch(oldPassword, MONITOR_PASSWORD)) {
     return res.status(403).json({ ok: false, reason: 'Old password incorrect' });
   }
 
-  if (!newPassword || newPassword.length < 6) {
+  /* The startup requirement is twelve characters; the change screen used to
+     accept six, so a password could be weakened after the fact by the very
+     screen that exists to strengthen it. */
+  if (!newPassword || newPassword.length < 12) {
     return res.status(400).json({ ok: false, reason: 'Password too short' });
   }
-  
+
   MONITOR_PASSWORD = newPassword;
+  /* A rotated password that leaves old sessions logged in has not really
+     been rotated. */
+  revokeAllMonitorSessions();
   saveServerConfig();
   console.log('[Admin] Monitor password changed and persisted successfully.');
   res.json({ ok: true });
@@ -961,13 +1183,11 @@ app.post('/admin/clear-memory', authMiddleware, (req, res) => {
 
 app.get('/Monitor_Server', (req, res) => {
   setNoStoreHeaders(res);
-  const authToUse = getMonitorAuth(req);
+  /* A session handle never travels in the URL: it would land in access logs,
+     history and Referer headers, which is the whole reason the old ?auth=
+     form is gone. The cookie the login set, or the bearer handle the desktop
+     monitor presents, is the only way in. */
   const authenticated = isValidMonitorAuth(req);
-
-  if (req.query && req.query.auth && authenticated) {
-    res.setHeader('Set-Cookie', `monitor_token_v2=${req.query.auth}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly`);
-    return res.redirect('/Monitor_Server');
-  }
 
   const host = req.get('host') || 'localhost';
 
@@ -1053,8 +1273,11 @@ app.get('/Monitor_Server', (req, res) => {
             document.cookie = "monitor_token_v2=; path=/; Max-Age=0; SameSite=Strict";
             document.cookie = "monitor_token_v2=; path=/Monitor_Server; Max-Age=0; SameSite=Strict";
         }
-        function setAuthCookie(auth) {
-            document.cookie = "monitor_token_v2=" + auth + "; path=/; max-age=86400; SameSite=Strict";
+        /* The session cookie is HttpOnly and set by the server on login; the
+           bearer handle is asked for only so this page can keep its own copy
+           for the calls that follow, and it never travels in a URL. */
+        function authHeaders() {
+            return { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') };
         }
         function formatLock(ms) {
             const total = Math.max(0, Math.ceil(ms / 1000));
@@ -1089,12 +1312,12 @@ app.get('/Monitor_Server', (req, res) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 cache: 'no-store',
-                body: JSON.stringify({ password: pass })
+                body: JSON.stringify({ password: pass, bearer: true })
             }).then(async r => {
                 const data = await r.json().catch(() => ({}));
-                if (r.ok && data.token) {
-                    localStorage.setItem('monitor_token_v2', data.token);
-                    window.location.replace('/Monitor_Server?auth=' + encodeURIComponent(data.token));
+                if (r.ok && data.ok) {
+                    if (data.token) localStorage.setItem('monitor_token_v2', data.token);
+                    window.location.replace('/Monitor_Server');
                 } else if (r.status === 423) {
                     clearAuthState();
                     document.getElementById('error').classList.add('hidden');
@@ -1113,9 +1336,9 @@ app.get('/Monitor_Server', (req, res) => {
         document.getElementById('passInput').onkeypress = (e) => { if(e.key === 'Enter') doLogin(); };
         const saved = localStorage.getItem('monitor_token_v2');
         if(saved) {
-             fetch('/healthz', { cache: 'no-store', headers: { 'Authorization': 'Basic ' + saved } }).then(r => {
+             fetch('/healthz', { cache: 'no-store', headers: { 'Authorization': 'Bearer ' + saved } }).then(r => {
                 if(r.ok) {
-                    window.location.replace('/Monitor_Server?auth=' + encodeURIComponent(saved));
+                    window.location.replace('/Monitor_Server');
                 }
                 else clearAuthState();
              }).catch(clearAuthState);
@@ -1126,8 +1349,9 @@ app.get('/Monitor_Server', (req, res) => {
     `);
   }
 
-  const userPass = decodeMonitorAuth(authToUse);
-  if (!userPass || userPass.user !== 'admin' || userPass.pass !== MONITOR_PASSWORD) {
+  /* isValidMonitorAuth already ran at the top; the check is restated rather
+     than trusted across the intervening branches. */
+  if (!isValidMonitorAuth(req)) {
     return res.status(401).send('Invalid credentials');
   }
 
@@ -1767,7 +1991,7 @@ app.get('/Monitor_Server', (req, res) => {
             try {
                 const res = await fetch('/admin/clear-offline', {
                     method: 'POST',
-                    headers: { 'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') }
                 });
                 if (res.ok) {
                     alert('صف پیام‌های آفلاین با موفقیت پاکسازی شد.');
@@ -1781,7 +2005,7 @@ app.get('/Monitor_Server', (req, res) => {
             try {
                 const res = await fetch('/admin/clear-offline', {
                     method: 'POST',
-                    headers: { 'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') }
                 });
                 if (res.ok) {
                     alert('پیام‌های خطادار با موفقیت پاکسازی شدند.');
@@ -1795,7 +2019,7 @@ app.get('/Monitor_Server', (req, res) => {
             try {
                 const res = await fetch('/admin/optimize-ram', {
                     method: 'POST',
-                    headers: { 'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') }
                 });
                 const data = await res.json();
                 if (data.ok) {
@@ -1833,7 +2057,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({
                         message: msg,
@@ -1949,7 +2173,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({ clientId, durationMinutes: duration.minutes, permanent: duration.permanent })
                 });
@@ -1967,7 +2191,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({ clientId, durationMinutes: duration.minutes, durationMs: duration.ms })
                 });
@@ -1984,7 +2208,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({ key })
                 });
@@ -1999,7 +2223,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({ key })
                 });
@@ -2011,7 +2235,7 @@ app.get('/Monitor_Server', (req, res) => {
             if(!confirm('آیا قصد خروج از داشبورد را دارید؟')) return;
             fetch('/admin/logout', {
                 method: 'POST',
-                headers: { 'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2') },
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') },
                 cache: 'no-store'
             }).finally(() => {
                 localStorage.removeItem('monitor_token_v2');
@@ -2350,7 +2574,7 @@ app.get('/Monitor_Server', (req, res) => {
             try {
                 const res = await fetch('/admin/clear-memory', {
                     method: 'POST',
-                    headers: { 'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2') }
                 });
                 const data = await res.json();
                 if (data.ok) {
@@ -2404,7 +2628,7 @@ app.get('/Monitor_Server', (req, res) => {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + localStorage.getItem('monitor_token_v2')
+                        'Authorization': 'Bearer ' + localStorage.getItem('monitor_token_v2')
                     },
                     body: JSON.stringify({ oldPassword: oldPass, newPassword: newPass })
                 });
@@ -2606,6 +2830,22 @@ function writePrivateFile(target, contents) {
   fs.renameSync(temporary, target);
 }
 
+/* The same writer with the flush the mail itself deserves: rename is atomic,
+   but only a fsync makes the rename itself survive the power going out
+   between it and the platter. */
+function writePrivateFileSynced(target, contents) {
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  const temporary = `${target}.${process.pid}.tmp`;
+  const handle = fs.openSync(temporary, 'w', 0o600);
+  try {
+    fs.writeFileSync(handle, contents);
+    fs.fsyncSync(handle);
+  } finally {
+    fs.closeSync(handle);
+  }
+  fs.renameSync(temporary, target);
+}
+
 function loadPollTokens() {
   try {
     return new Map(Object.entries(JSON.parse(fs.readFileSync(POLL_TOKEN_STORE_PATH, 'utf8'))));
@@ -2701,15 +2941,15 @@ app.post('/push/subscribe', async (req, res) => {
     return;
   }
 
-  const subscriptions = pushSubscriptions.get(fingerprint) || [];
+  const subscriptions = pushSubscriptions.get(pushIndexKey(fingerprint)) || [];
   const next = subscriptions.filter((item) => item.endpoint !== subscription.endpoint);
   next.push({
     ...subscription,
     updatedAt: new Date().toISOString(),
   });
-  pushSubscriptions.set(fingerprint, next.slice(-5));
+  pushSubscriptions.set(pushIndexKey(fingerprint), next.slice(-5));
   savePushSubscriptions();
-  res.json({ ok: true, count: pushSubscriptions.get(fingerprint).length });
+  res.json({ ok: true, count: next.length });
 });
 
 app.post('/push/unsubscribe', (req, res) => {
@@ -2720,12 +2960,12 @@ app.post('/push/unsubscribe', (req, res) => {
     return;
   }
 
-  const subscriptions = pushSubscriptions.get(fingerprint) || [];
+  const subscriptions = pushSubscriptions.get(pushIndexKey(fingerprint)) || [];
   const next = subscriptions.filter((item) => item.endpoint !== endpoint);
   if (next.length) {
-    pushSubscriptions.set(fingerprint, next);
+    pushSubscriptions.set(pushIndexKey(fingerprint), next);
   } else {
-    pushSubscriptions.delete(fingerprint);
+    pushSubscriptions.delete(pushIndexKey(fingerprint));
   }
   savePushSubscriptions();
   res.json({ ok: true });
@@ -2807,10 +3047,44 @@ const upgradeListenersBeforePeer = new Set(server.listeners('upgrade'));
 const peerServer = ExpressPeerServer(server, {
   path: '/',
   proxied: true,
-  allow_discovery: true,
+  /* Off, because nothing this project ships ever asks for the list. The
+     endpoint answers "who is online" to any website that asks, and a relay
+     that answers it hands a stranger the roster for free. */
+  allow_discovery: false,
   key: 'peerjs',
+  // alive_timeout is driven by application-level HEARTBEAT messages, which a
+  // backgrounded browser tab stops sending because its timers are frozen. The
+  // 90s default therefore evicted every phone that spent a minute and a half
+  // in someone's pocket; protocol pings below reap the genuinely dead.
+  alive_timeout: 600000,
+  expire_timeout: 10000,
+  // Peer signalling frames are small; capping them costs nothing, the pings
+  // keep the table honest, and the sockets count against the same budget as
+  // every other socket this process holds.
+  createWebSocketServer: (options) => {
+    const wss = new WebSocketServer({ ...options, maxPayload: 12 * 1024 * 1024 });
+    wss.on('connection', (ws, request) => {
+      ws.isAlive = true;
+      ws.on('pong', () => { ws.isAlive = true; });
+      trackSocket(ws, String(request?.socket?.remoteAddress || 'unknown'));
+    });
+    const keepalive = setInterval(() => {
+      for (const client of wss.clients) {
+        if (client.isAlive === false) { client.terminate(); continue; }
+        client.isAlive = false;
+        try { client.ping(); } catch (_e) { /* the close handler deals with it */ }
+      }
+    }, 30000);
+    keepalive.unref?.();
+    wss.on('close', () => clearInterval(keepalive));
+    return wss;
+  },
 });
 app.use('/peerjs', peerServer);
+/* An 'error' event with no listener is a throw, and a throw in this process
+   is an exit. Every other server in this file says where its errors go; the
+   PeerJS mount re-emits socket errors on itself, so it says so too. */
+peerServer.on('error', (error) => console.error('[PeerJS] server error:', error?.message || error));
 const peerUpgradeListeners = server.listeners('upgrade')
   .filter((listener) => !upgradeListenersBeforePeer.has(listener));
 for (const listener of peerUpgradeListeners) {
@@ -2863,14 +3137,15 @@ function loadOfflineBoxes() {
    whole new one, never a half-written one. */
 function saveOfflineBoxesNow() {
   try {
-    fs.mkdirSync(path.dirname(OFFLINE_STORE_PATH), { recursive: true });
-    /* Written flat, not indented. The bulk of this file is base64 bodies,
-       which are single strings however it is formatted: the indentation only
-       ever padded the braces around them, and it was being recomputed over
-       the entire store every time a chunk landed. */
+    /* Owner-only and fsynced, through the same writer every other private
+       store in this process uses. The default umask made the store 0644 — a
+       file that maps fingerprints to queued envelopes is metadata for every
+       correspondent on the relay, and world-readable is not a mode it gets
+       to choose. The fsync closes the other half: rename is atomic, but
+       without a flush a crash between rename and power-loss can hand the
+       next boot a length and no content. */
     const started = Date.now();
-    fs.writeFileSync(`${OFFLINE_STORE_PATH}.tmp`, JSON.stringify(Object.fromEntries(offlineBoxes)));
-    fs.renameSync(`${OFFLINE_STORE_PATH}.tmp`, OFFLINE_STORE_PATH);
+    writePrivateFileSynced(OFFLINE_STORE_PATH, JSON.stringify(Object.fromEntries(offlineBoxes)));
     lastOfflineSaveMs = Date.now() - started;
   } catch (error) {
     console.error('Failed to save offline boxes:', error);
@@ -3327,6 +3602,11 @@ function loadPushSubscriptions() {
   try {
     if (!fs.existsSync(PUSH_STORE_PATH)) return new Map();
     const raw = JSON.parse(fs.readFileSync(PUSH_STORE_PATH, 'utf8'));
+    /* Keys are loaded as they lie. Rows written before the index was hashed
+       hold raw fingerprints and will match no lookup from now on — the same
+       one-time cost the deployed relay paid when its store gained the salt,
+       and cheaper than guessing which hex strings are names and which are
+       hashes of names: a wrong guess would lose every subscription twice. */
     return new Map(Object.entries(raw || {}).map(([fingerprint, items]) => [
       sanitizeFingerprint(fingerprint),
       Array.isArray(items) ? items.map(sanitizeSubscription).filter(Boolean) : [],
@@ -3535,7 +3815,16 @@ function disconnectRestrictedPeer(record, restriction) {
 
 async function sendPushNotification(toFingerprint, kind = 'chat') {
   const fingerprint = sanitizeFingerprint(toFingerprint);
-  const subscriptions = pushSubscriptions.get(fingerprint) || [];
+  const key = pushIndexKey(fingerprint);
+  const now = Date.now();
+  /* An expired record is not delivered to and not kept: the moment the user's
+     own window runs out, the row goes. */
+  const stored = pushSubscriptions.get(key) || [];
+  const subscriptions = stored.filter((item) => !item.expiresAt || Date.parse(item.expiresAt) > now);
+  if (subscriptions.length !== stored.length) {
+    pushSubscriptions.set(key, subscriptions);
+    savePushSubscriptions();
+  }
   /* Nothing to notify. This used to return in silence, which is how a device
      that had quietly fallen off push came to look exactly like one that had
      just been told: the relay queued the message, delivered it on the next
@@ -3623,9 +3912,9 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
   }));
 
   if (remaining.length) {
-    pushSubscriptions.set(fingerprint, remaining);
+    pushSubscriptions.set(key, remaining);
   } else {
-    pushSubscriptions.delete(fingerprint);
+    pushSubscriptions.delete(key);
   }
   /* A prune only in memory is undone by the next restart, and the relay goes
      back to pushing at an endpoint the vendor already called dead. */
@@ -3634,7 +3923,14 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
 
 async function sendAdminPushNotification(toFingerprint, body, kind = 'admin-policy') {
   const fingerprint = sanitizeFingerprint(toFingerprint);
-  const subscriptions = pushSubscriptions.get(fingerprint) || [];
+  const key = pushIndexKey(fingerprint);
+  const now = Date.now();
+  const stored = pushSubscriptions.get(key) || [];
+  const subscriptions = stored.filter((item) => !item.expiresAt || Date.parse(item.expiresAt) > now);
+  if (subscriptions.length !== stored.length) {
+    pushSubscriptions.set(key, subscriptions);
+    savePushSubscriptions();
+  }
   /* Nothing to notify. This used to return in silence, which is how a device
      that had quietly fallen off push came to look exactly like one that had
      just been told: the relay queued the message, delivered it on the next
@@ -3676,9 +3972,9 @@ async function sendAdminPushNotification(toFingerprint, body, kind = 'admin-poli
   }));
 
   if (remaining.length) {
-    pushSubscriptions.set(fingerprint, remaining);
+    pushSubscriptions.set(key, remaining);
   } else {
-    pushSubscriptions.delete(fingerprint);
+    pushSubscriptions.delete(key);
   }
   /* See sendPushNotification. */
   if (pruned || !remaining.length) savePushSubscriptions();
@@ -3698,7 +3994,10 @@ function snapshotPeers() {
       publicKeyData: client.publicKeyData || '',
       fingerprint: client.fingerprint || '',
       avatarData: client.avatarData || '',
-      status: 'online',
+      /* Registered but frozen is not online. Saying otherwise tells the person
+         writing that their message has been seen when it has not even been
+         read off the wire. */
+      status: isAppAwake(client) ? 'online' : 'away',
       updatedAt: client.updatedAt,
     }));
 }
@@ -3714,10 +4013,13 @@ function broadcastPeers() {
       peers: snapshotPeers(),
     });
 
+    /* The raw send is the one path in the file with no buffered-amount
+       guard — a client that opened a socket and read nothing accumulated the
+       peer table in relay memory for as long as the socket stayed open. The
+       guard costs a readyState and a number; the serialisation is still paid
+       once, and a broadcast is not counted as mail moved. */
     for (const client of presence.values()) {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(payload);
-      }
+      safeSendText(client.ws, payload, false);
     }
   }, 100);
 }
@@ -3735,6 +4037,10 @@ let totalRelays = 0;
 const SEND_BUFFER_LIMIT_BYTES = 16 * 1024 * 1024;
 
 function safeSend(ws, message) {
+  safeSendText(ws, JSON.stringify(message));
+}
+
+function safeSendText(ws, payload, countAsMessage = true) {
   if (ws.readyState === WebSocket.OPEN) {
     if (ws.bufferedAmount > SEND_BUFFER_LIMIT_BYTES) {
       if (!ws.__poorijaSendOverflow) {
@@ -3744,15 +4050,38 @@ function safeSend(ws, message) {
       ws.terminate();
       return;
     }
-    const payload = JSON.stringify(message);
-    totalMessagesSent++;
-    totalBytesSent += Buffer.byteLength(payload);
+    if (countAsMessage) {
+      totalMessagesSent++;
+      totalBytesSent += Buffer.byteLength(payload);
+    }
     ws.send(payload);
   }
 }
 
-/* Only a socket that proved the identity behind the fingerprint may be
-   routed to by it — otherwise mail lands on whoever claimed the name. A
+/* A duplicate connection is replaced only by one that proved itself, and
+   only after it did. The fingerprint and the peerId a hello carries are
+   claims, both broadcast to every client — closing duplicates on the claim
+   would let anybody disconnect anybody by claiming a name off the contact
+   list. Called from the two places where identity is established; a real
+   reconnect costs the one round trip of its proof. */
+function closeDuplicatePresenceRecords(record) {
+  for (const [clientId, existing] of presence.entries()) {
+    if (clientId === record.clientId) continue;
+    const sameFingerprint = record.fingerprint && existing.fingerprint === record.fingerprint;
+    const samePeerId = record.peerId && existing.peerId === record.peerId;
+    if (!sameFingerprint && !samePeerId) continue;
+    console.log(`[Presence] Replacing duplicate connection ${clientId} for ${record.username || record.peerId}`);
+    presence.delete(clientId);
+    try {
+      existing.ws?.close(4000, 'duplicate-presence');
+    } catch (_error) {
+      try { existing.ws?.terminate(); } catch (_terminateError) {}
+    }
+  }
+}
+
+/* Only a socket that proved the identity behind the fingerprint may
+   route to it — otherwise mail lands on whoever claimed the name. A
    reconnect leaves two sockets holding the same fingerprint for a moment,
    so the most recently active one wins rather than the first found. */
 function findOpenPresenceByFingerprint(fingerprint = '') {
@@ -3939,7 +4268,29 @@ const EPHEMERAL_PAYLOADS = new Set([
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
   'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+  /* The group-call verbs: same staleness as the 1:1 ones, and far more of
+     them — a stored, pushed envelope per reaction per participant was what
+     an offline group member's mailbox filled with. gcall-invite stays out:
+     it is the one that rings somebody who was away. */
+  'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
 ]);
+/* Pushable: something a person would want to be told about. The distribution
+   queued a push for EVERY envelope that landed — and a file arrives as one
+   envelope per chunk, so one offline transfer rang the phone thousands of
+   times and hammered the vendor into throttling the deployment. The client
+   already marks chunks notify:false; the relay now honours the mark and the
+   list, exactly as the deployed relay does. */
+const PUSHABLE_PAYLOADS = new Set([
+  'text', 'rich', 'file-start', 'reaction', 'group', 'space-message', 'space-note',
+  'system-note', 'call-invite', 'gcall-invite', 'call-missed', 'call-cancel',
+]);
+/* Can a message reach this person's eyes right now? Not "is there a socket" —
+   an iOS web app in the background holds its socket open and reads nothing. */
+const APP_AWAKE_TTL_MS = Number(process.env.CHAT_APP_AWAKE_TTL_MS || 25000);
+function isAppAwake(record) {
+  if (!record || record.away) return false;
+  return Date.now() - (record.lastActiveAt || 0) <= APP_AWAKE_TTL_MS;
+}
 
 /* Delivering one envelope to one recipient on this relay.
  *
@@ -4122,6 +4473,15 @@ function transitAnswerForClient(answer) {
 function deliverRelayMessage(message, { clientId = '', fromFingerprint = '', reply = () => {} } = {}) {
 totalRelays++;
   const toFingerprint = String(message.toFingerprint || '').slice(0, 128);
+  /* A mailbox key that is not a fingerprint is refused before it reaches the
+     store — the same rule the deployed relay answers to. The distribution's
+     store is one file rather than one file per mailbox, so the name is not a
+     path here; the refusal is still right, because a key that is not a
+     fingerprint names nobody and can only be an accident or a probe. */
+  if (message.persist && toFingerprint && !/^[a-f0-9]{64}$/.test(toFingerprint)) {
+    reply({ type: 'error', reason: 'invalid-target', toClientId: message.toClientId || '', toFingerprint, tag: String(message.tag || '').slice(0, 96) });
+    return;
+  }
   /* Echoed back on every reply so the sender can line a refusal or a
      queue confirmation up with the message it was sent for. */
   const tag = String(message.tag || '').slice(0, 96);
@@ -4169,7 +4529,18 @@ totalRelays++;
       saveOfflineBoxes();
       const remaining = offlineBoxes.get(toFingerprint);
       reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag });
-      sendPushNotification(toFingerprint, payloadType).catch((error) => console.error(error));
+      /* A real chat message travels as a sealed 'offline-chat' envelope, so
+         the type the relay can see is the envelope's, not the message's. The
+         envelope says whether it is worth waking someone for; everything else
+         falls back to the list of plain types. One push per thing worth
+         waking for — never one per chunk. */
+      const wakes = payloadType === 'offline-chat'
+        ? message.payload?.notify !== false
+        : PUSHABLE_PAYLOADS.has(payloadType);
+      if (wakes) {
+        const kind = pushKindFor(payloadType, message.payload || {});
+        sendPushNotification(toFingerprint, kind).catch((error) => console.error(error));
+      }
       return;
     }
     console.warn(`[Relay] Target not found for ${payloadType} to ${message.toClientId || toFingerprint}`);
@@ -4183,12 +4554,92 @@ totalRelays++;
     fromFingerprint: fromFingerprint,
     payload: message.payload || null,
   });
+
+  /* Store-and-forward is not only for offline targets. A "connected" client
+     can be a locked app whose webview is suspended: the socket accepts the
+     frame and nothing reads it, and a message forwarded only live into that
+     socket was lost — no queue entry, no error, and a sender stuck watching
+     an hourglass. Persistent envelopes are queued for connected recipients
+     too, and a recipient whose app has gone quiet is pushed as well. The
+     client de-duplicates by message id and acks the redelivered copy, so a
+     healthy live path costs one extra frame and an unhealthy one is saved. */
+  if (message.persist && toFingerprint) {
+    const queuedLive = offlineBoxes.get(toFingerprint) || [];
+    queuedLive.push({
+      type: 'relay',
+      relayId: crypto.randomUUID(),
+      fromClientId: clientId,
+      fromFingerprint: fromFingerprint,
+      payload: message.payload || null,
+      queuedAt: new Date().toISOString(),
+    });
+    offlineBoxes.set(toFingerprint, queuedLive);
+    sweepRetention(toFingerprint);
+    saveOfflineBoxes();
+    if (!isAppAwake(target)) {
+      const wakes = payloadType === 'offline-chat'
+        ? message.payload?.notify !== false
+        : PUSHABLE_PAYLOADS.has(payloadType);
+      if (wakes) {
+        const kind = pushKindFor(payloadType, message.payload || {});
+        sendPushNotification(toFingerprint, kind).catch((error) => console.error(error));
+      }
+    }
+  }
 }
 
 /* Same ceiling as the relay frames: a hello carries an avatar but nothing
    near this size, and an unbounded frame is buffered before it is parsed. */
 const wsServer = new WebSocketServer({ server: presenceServer, path: '/chat-signal', maxPayload: 12 * 1024 * 1024 });
 wsServer.on('error', (error) => console.error('[Presence] WebSocket server error:', error));
+
+/* ------------------------------------------------------------------
+ * Socket accounting
+ *
+ * The deployed relay counts its sockets; the distribution never did, so one
+ * machine could hold as many as it could open. Each socket costs a file
+ * descriptor, a presence entry and a heartbeat, and "as many as it could
+ * open" is the cheapest denial of service there is. Overridable, because a
+ * test suite constraining an instance to look like a small VPS is how the
+ * ceilings are proven.
+ * ------------------------------------------------------------------ */
+const WS_MAX_TOTAL = Number(process.env.CHAT_WS_MAX_TOTAL || 5000);
+const WS_MAX_PER_IP = Number(process.env.CHAT_WS_MAX_PER_IP || 50);
+const wsPerAddress = new Map();
+let wsTotal = 0;
+
+function trackSocket(ws, address) {
+  wsTotal += 1;
+  wsPerAddress.set(address, (wsPerAddress.get(address) || 0) + 1);
+  const release = () => {
+    if (ws.__poorijaReleased) return;
+    ws.__poorijaReleased = true;
+    wsTotal = Math.max(0, wsTotal - 1);
+    const left = (wsPerAddress.get(address) || 1) - 1;
+    if (left <= 0) wsPerAddress.delete(address);
+    else wsPerAddress.set(address, left);
+  };
+  ws.once('close', release);
+  ws.once('error', release);
+}
+
+/* Frame pricing for one socket, as the deployed relay prices it: a refill
+   above what a busy client asks, a burst that covers a file transfer's first
+   second, and an answer rather than a disconnection. */
+const WS_RATE_BURST = Number(process.env.CHAT_WS_RATE_BURST || 1024);
+const WS_RATE_REFILL_PER_MS = Number(process.env.CHAT_WS_RATE_REFILL_PER_SECOND || 256) / 1000;
+
+/* Protocol-level pings, which the network stack answers even while the
+   page's JavaScript is frozen: a socket whose peer machine vanished without
+   a FIN is reaped in thirty seconds instead of whenever TCP gives up, and a
+   backgrounded phone stays registered instead of being dropped. */
+setInterval(() => {
+  for (const client of wsServer.clients) {
+    if (client.isAlive === false) { client.terminate(); continue; }
+    client.isAlive = false;
+    try { client.ping(); } catch (_e) { /* the close handler deals with it */ }
+  }
+}, 30000).unref?.();
 
 // Ensure data directory exists
 try {
@@ -4199,6 +4650,27 @@ try {
 wsServer.on('connection', (ws, req) => {
   const clientId = crypto.randomUUID();
   const ip = requestIp(req);
+  /* Refused at the door rather than admitted and forgotten: the socket is
+     here, but it never becomes a presence entry or a heartbeat, and the
+     caller is told which ceiling it met. */
+  if (wsTotal >= WS_MAX_TOTAL) {
+    try { ws.close(1013, 'server at capacity'); } catch (_e) { try { ws.terminate(); } catch (_e2) {} }
+    return;
+  }
+  const socketAddressKey = String(req?.socket?.remoteAddress || 'unknown');
+  if ((wsPerAddress.get(socketAddressKey) || 0) >= WS_MAX_PER_IP) {
+    try { ws.close(429, 'too many sockets from this address'); } catch (_e) { try { ws.terminate(); } catch (_e2) {} }
+    return;
+  }
+  trackSocket(ws, socketAddressKey);
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+    /* A pong is the network stack answering, not the page — but it still
+       proves the phone is on the network, which is what presence's TTL
+       measures. */
+    touchPresence(record);
+  });
   guestCounter++;
   const guestId = guestCounter;
 
@@ -4218,6 +4690,15 @@ wsServer.on('connection', (ws, req) => {
     avatarData: '',
     updatedAt: new Date().toISOString(),
     lastSeenAt: Date.now(),
+    /* Proof the JavaScript is running, as against a socket the network stack
+       keeps alive under a suspended webview. Set by every frame. */
+    lastActiveAt: Date.now(),
+    away: false,
+    /* A token bucket, refilled by the clock: HTTP has had rate buckets since
+       the beginning, the socket never did, and every expensive thing this
+       relay does is one frame away on a path nobody counted. */
+    rateTokens: WS_RATE_BURST,
+    rateCheckedAt: Date.now(),
     connectedAt: Date.now(),
   };
 
@@ -4240,12 +4721,43 @@ wsServer.on('connection', (ws, req) => {
       safeSend(ws, { type: 'error', reason: 'invalid-json' });
       return;
     }
+    /* JSON.parse accepts more than messages. `null`, `true` and `42` all
+       parse, and each arrives here without a `type` — where reading one
+       throws, nothing above catches it, and the process answers by exiting.
+       A frame that is not an object is not a message, and an array is no
+       more a message than a number is. */
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      safeSend(ws, { type: 'error', reason: 'invalid-json' });
+      return;
+    }
+    /* Refill by elapsed time, then spend one token on this frame. A socket
+       over the line is answered, not disconnected: a person's browser
+       reconnects, and the point is to price the frame, not to punish it. */
+    const sinceChecked = Date.now() - record.rateCheckedAt;
+    if (sinceChecked > 0) {
+      record.rateTokens = Math.min(WS_RATE_BURST, record.rateTokens + sinceChecked * WS_RATE_REFILL_PER_MS);
+      record.rateCheckedAt = Date.now();
+    }
+    if (record.rateTokens < 1) {
+      safeSend(ws, { type: 'error', reason: 'slow-down' });
+      return;
+    }
+    record.rateTokens -= 1;
+
+    /* A frame the page composed and sent: proof the JavaScript is running,
+       which a pong is not. This is what "awake" is measured by, and what
+       decides whether a connected-but-suspended app is pushed as well as
+       queued for. */
+    record.lastActiveAt = Date.now();
     touchPresence(record);
 
     if (message.type === 'hello') {
       record.username = String(message.username || '').slice(0, 80);
       record.peerId = String(message.peerId || '').slice(0, 160);
-      record.publicKeyData = String(message.publicKeyData || '');
+      /* A public key is under a kilobyte in every format the app uses, and the
+         field is rebroadcast to every connected client on every presence
+         change — one of the few fields that had no ceiling of its own. */
+      record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
       record.avatarData = String(message.avatarData || '').slice(0, 2000000);
 
@@ -4282,6 +4794,7 @@ wsServer.on('connection', (ws, req) => {
         /* Escape hatch: the claim itself counts as the proof, as before. */
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
         broadcastPeers();
         return;
@@ -4317,6 +4830,7 @@ wsServer.on('connection', (ws, req) => {
       if (proven) {
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        closeDuplicatePresenceRecords(record);
         console.log(`[Presence] Identity proven for ${record.fingerprint}`);
         deliverHeldMail(record, ws);
       } else {
@@ -4331,8 +4845,8 @@ wsServer.on('connection', (ws, req) => {
 
     if (message.type === 'relay-ack') {
       /* An ACK destroys mail, so only the proven owner of the fingerprint
-         may spend one. */
-      if (!record.identityVerified) {
+         may spend one — and only a fingerprint names mail. */
+      if (!record.identityVerified || !/^[a-f0-9]{64}$/.test(record.fingerprint || '')) {
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
         return;
       }
@@ -4386,9 +4900,14 @@ wsServer.on('connection', (ws, req) => {
         disconnectRestrictedPeer(record, senderRestriction);
         return;
       }
+      /* The sender's name rides along as metadata for the recipient, and an
+         unproven socket chose it itself. A socket that has not answered the
+         identity challenge may still send — a client races its first frames
+         against its own proof all the time — but nothing it sends leaves
+         claiming to be somebody. */
       deliverRelayMessage(message, {
         clientId,
-        fromFingerprint: record.fingerprint,
+        fromFingerprint: record.identityVerified ? record.fingerprint : '',
         reply: (payload) => safeSend(ws, payload),
       });
       return;
@@ -4462,12 +4981,31 @@ presenceServer.listen(PRESENCE_PORT, HOST, () => {
 });
 
 /* The debounce trades immediacy for fewer writes; a shutdown must not trade
-   the mail itself away, so whatever is still pending is flushed first. */
+   the mail itself away, so whatever is still pending is flushed first. The
+   linked relays are told directly rather than left to time out on their
+   own. */
 process.on('SIGTERM', () => {
   flushOfflineBoxes();
+  try { relayPeers.close(); } catch (_error) { /* already gone */ }
   process.exit(0);
 });
 process.on('SIGINT', () => {
   flushOfflineBoxes();
+  try { relayPeers.close(); } catch (_error) { /* already gone */ }
   process.exit(0);
+});
+
+/* Since Node 15 an unhandled rejection ends the process, and this process
+   had no handler — so one rejected promise in a push call skipped the flush
+   the signal handlers above exist to perform, and the mail died with it.
+   Flushing and exiting is the same contract a signal gets. */
+process.on('unhandledRejection', (reason) => {
+  console.error('[Fatal] unhandled rejection:', reason);
+  try { flushOfflineBoxes(); } catch (_error) { /* nothing more to do */ }
+  process.exit(1);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[Fatal] uncaught exception:', error);
+  try { flushOfflineBoxes(); } catch (_error) { /* nothing more to do */ }
+  process.exit(1);
 });

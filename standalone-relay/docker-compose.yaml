@@ -1,9 +1,20 @@
+# Bounded logging for every service: the default json-file log grows without
+# limit, and services logging every presence event fill a long-lived host's
+# disk — the same "grows forever" failure the backup script was written to
+# prevent for backups, one layer lower.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   relay:
     build:
       context: ..
       dockerfile: standalone-relay/Dockerfile.relay
     container_name: Poorija-Standalone-Relay
+    logging: *default-logging
     environment:
       CHAT_SIGNAL_PORT: 9000
       CHAT_PRESENCE_PORT: 9001
@@ -42,6 +53,11 @@ services:
       # being answered by whoever holds the route.
       CHAT_TRANSIT_INSECURE_TLS: ${CHAT_TRANSIT_INSECURE_TLS:-}
       CHAT_SELF_DESTRUCT_STORE_PATH: /data/self-destruct-records.json
+      # The Web Push key pair lives with the rest of the state, so a restart
+      # hands back the same identity the push vendors already know. Without a
+      # stored pair one is generated per container run, and every subscription
+      # silently stops waking its device.
+      CHAT_VAPID_STORE_PATH: /data/vapid.json
       CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
     network_mode: host
     volumes:
@@ -51,6 +67,7 @@ services:
   coturn:
     image: coturn/coturn:4.6-alpine
     container_name: Poorija-Standalone-Coturn
+    logging: *default-logging
     network_mode: host
     command:
       - -n
@@ -69,7 +86,11 @@ services:
       - --no-multicast-peers
       - --min-port=49152
       - --max-port=50152
-      - --external-ip=${EXTERNAL_IP:-127.0.0.1}
+      # Required, not defaulted: a TURN server advertising 127.0.0.1 to the
+      # world answers every relayed call with a connection to itself, and the
+      # failure is silent from the operator's side. Missing is an error, the
+      # same as the credentials are.
+      - --external-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
     volumes:
       - ${SSL_CERT_PATH:-./certs/cert.pem}:/etc/coturn/certs/cert.pem:ro
       - ${SSL_KEY_PATH:-./certs/key.pem}:/etc/coturn/certs/key.pem:ro

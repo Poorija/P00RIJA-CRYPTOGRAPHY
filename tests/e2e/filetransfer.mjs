@@ -602,7 +602,13 @@ const opened = await A.evaluate(async (envelopes) => {
       const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
       const clear = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: new Uint8Array(envelope.body.iv) }, key, bytes(envelope.body.cipher));
-      out.push({ plain: JSON.parse(new TextDecoder().decode(clear)), class: envelope.class });
+      /* v2 bodies wrap the message together with the session key and the
+         return route; v1 bodies held the message alone. The message — the
+         thing with a type — is one level deeper in the v2 shape, and every
+         assertion below reads it. */
+      const parsed = JSON.parse(new TextDecoder().decode(clear));
+      const plain = (parsed && typeof parsed === 'object' && 'message' in parsed) ? parsed.message : parsed;
+      out.push({ plain, class: envelope.class });
     } catch (error) {
       out.push({ error: String(error).slice(0, 80), class: envelope.class });
     }

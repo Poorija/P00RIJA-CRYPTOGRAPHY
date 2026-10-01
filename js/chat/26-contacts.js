@@ -376,21 +376,29 @@ function bindAddressBook() {
   });
 
   /* The search box is re-created on every render, so its value is kept in
-     state and the listener is delegated like everything else. */
+     state and the listener is delegated like everything else. Debounced, as
+     the call log's search is: the book rebuilds the whole sorted table, and
+     doing that per keystroke over hundreds of contacts is typing against a
+     renderer rather than a filter. */
+  let contactSearchTimer = null;
   document.addEventListener('input', (event) => {
     const box = event.target.closest?.('[data-contact-search]');
     if (!box) return;
     chatState.contactSearch = box.value;
-    const rows = document.querySelector('.chat-contact-rows');
-    if (!rows) return;
-    /* Only the rows are replaced: rewriting the whole book would take the
-       focus and the caret out of the box being typed into. */
-    const fragment = document.createElement('div');
-    fragment.innerHTML = renderAddressBook();
-    rows.innerHTML = fragment.querySelector('.chat-contact-rows')?.innerHTML || '';
-    const count = document.querySelector('.chat-contact-title strong');
-    const freshCount = fragment.querySelector('.chat-contact-title strong');
-    if (count && freshCount) count.textContent = freshCount.textContent;
+    if (contactSearchTimer) clearTimeout(contactSearchTimer);
+    contactSearchTimer = setTimeout(() => {
+      contactSearchTimer = null;
+      const rows = document.querySelector('.chat-contact-rows');
+      if (!rows) return;
+      /* Only the rows are replaced: rewriting the whole book would take the
+         focus and the caret out of the box being typed into. */
+      const fragment = document.createElement('div');
+      fragment.innerHTML = renderAddressBook();
+      rows.innerHTML = fragment.querySelector('.chat-contact-rows')?.innerHTML || '';
+      const count = document.querySelector('.chat-contact-title strong');
+      const freshCount = fragment.querySelector('.chat-contact-title strong');
+      if (count && freshCount) count.textContent = freshCount.textContent;
+    }, 220);
   });
 }
 

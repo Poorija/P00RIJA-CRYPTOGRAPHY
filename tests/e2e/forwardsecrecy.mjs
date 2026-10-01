@@ -118,7 +118,18 @@ await B.page.waitForTimeout(3000);
 console.log('  A knows B prekey: ' + JSON.stringify(await A.page.evaluate(()=>window.__peerPrekeyProbe())));
 await A.page.fill('#chatComposer', 'this one waits in the queue');
 await A.page.click('#chatSendMessageBtn');
-await A.page.waitForTimeout(4000);
+/* The mailbox write is debounced and the wait scales with the last write,
+   so a fixed sleep here races the relay's own accounting on a loaded
+   machine: the envelope is on its way the whole time and the assertion
+   reads a store that has not been told yet. Poll for it, the way the file
+   suite polls — and keep the failure honest if it never lands. */
+let queued = [];
+for (let attempt = 0; attempt < 150; attempt += 1) {
+  await A.page.waitForTimeout(100);
+  queued = Object.values(mailboxes()).flat()
+    .map((item) => item?.payload).filter((p) => p?.type === 'offline-chat');
+  if (queued.some((p) => p?.kex || p?.seal)) break;
+}
 /* A steps away too. Otherwise A simply resends the message from its own copy
    the moment B reappears — which is correct behaviour, and would hide whether
    the queued envelope itself could still be opened. */
@@ -127,8 +138,6 @@ await A.page.waitForTimeout(4000);
    never expires — so the envelope itself has to be read. This caught a real
    one: merging a pasted identity card blanked the stored prekey, and every
    queued message after that quietly lost its window. */
-const queued = Object.values(mailboxes()).flat()
-  .map((item) => item?.payload).filter((p) => p?.type === 'offline-chat');
 const sealed = queued.find((p) => p.kex) || null;
 console.log('  envelope on the relay: ' + JSON.stringify({
   fields: sealed ? Object.keys(sealed).sort() : null,

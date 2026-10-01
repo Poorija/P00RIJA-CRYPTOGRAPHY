@@ -413,7 +413,8 @@ async function deleteSpaceForEveryone() {
   groupDeliveryMemberKeys(space).forEach((key) => {
     const peer = findPeerByAnyKey(key);
     if (!peer) return;
-    sendRelayEnvelope(peer, { type: 'space-sync', space: tombstone, createdAt: new Date().toISOString() });
+    if (typeof sendSpaceSync === 'function') sendSpaceSync(peer, tombstone);
+    else sendRelayEnvelope(peer, { type: 'space-sync', space: tombstone, createdAt: new Date().toISOString() });
   });
   /* The owner keeps their own copy too. Dissolving ends the group; it does not
      reach into anybody's device and take the conversation away, and that has to

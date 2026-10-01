@@ -611,8 +611,10 @@ function syncPackManagerFooter() {
   if (!packManagerElement) return;
   const chosen = packManagerSelection().length;
   const remove = packManagerElement.querySelector('[data-pack-delete]');
+  const share = packManagerElement.querySelector('[data-pack-share]');
   const label = packManagerElement.querySelector('[data-pack-selected]');
   if (remove) remove.disabled = chosen === 0;
+  if (share) share.disabled = chosen === 0;
   if (label) {
     label.textContent = chosen
       ? t(`${chosen} پک انتخاب شده`, `${chosen} selected`)
@@ -644,6 +646,7 @@ function renderPackManagerList() {
       ${thumb}
       <input class="packman-name" data-rename="${app().escapeHTML(pack.id)}" value="${app().escapeHTML(pack.title || '')}" maxlength="60">
       <span class="packman-count">${pack.stickers?.length || 0}</span>
+      <button type="button" class="packman-share" data-pack-one-share="${app().escapeHTML(pack.id)}" title="${app().escapeHTML(t('ارسال این پک به گفتگوی باز', 'Share this pack into the open chat'))}" aria-label="${app().escapeHTML(t('ارسال این پک', 'Share this pack'))}"><i class="fas fa-share-nodes"></i></button>
       <span class="packman-move">
         <button type="button" data-move="up" data-pack-id="${app().escapeHTML(pack.id)}" ${index === 0 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('بالا', 'Up'))}">&#8593;</button>
         <button type="button" data-move="down" data-pack-id="${app().escapeHTML(pack.id)}" ${index === packs.length - 1 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('پایین', 'Down'))}">&#8595;</button>
@@ -671,11 +674,12 @@ function openPackManager() {
         <h3>${app().escapeHTML(t('مدیریت پک‌های استیکر', 'Manage sticker packs'))}</h3>
       </div>
       <div class="packman-body">
-        <p class="packman-note">${app().escapeHTML(t('نام هر پک را همین‌جا می‌توانید عوض کنید، و با فلش‌ها ترتیبشان را. ترتیب همان است که در پنل استیکر می‌بینید.', 'Rename a pack in place, and use the arrows to order them. That order is the one the sticker panel shows.'))}</p>
+        <p class="packman-note">${app().escapeHTML(t('نام هر پک را همین‌جا می‌توانید عوض کنید، و با فلش‌ها ترتیبشان را. ترتیب همان است که در پنل استیکر می‌بینید. با دکمهٔ ارسال هر پک را جداگانه، یا چندتا را تیک‌زده با هم برای گفتگوی باز بفرستید.', 'Rename a pack in place, and use the arrows to order them. That order is the one the sticker panel shows. The share button sends one pack; tick several and send them together into the open chat.'))}</p>
         <div class="packman-list" data-pack-list></div>
       </div>
       <div class="packman-foot">
         <span class="packman-count" data-pack-selected style="flex:1 1 auto;align-self:center"></span>
+        <button type="button" class="packman-bulk is-share" data-pack-share>${app().escapeHTML(t('ارسال انتخاب‌شده‌ها', 'Share selected'))}</button>
         <button type="button" class="packman-bulk is-danger" data-pack-delete>${app().escapeHTML(t('حذف انتخاب‌شده‌ها', 'Delete selected'))}</button>
       </div>
     </div>`;
@@ -689,6 +693,24 @@ function openPackManager() {
     if (move) {
       await moveStickerPack(move.getAttribute('data-pack-id'), move.getAttribute('data-move') === 'up' ? -1 : 1);
       renderPackManagerList();
+      return;
+    }
+    /* One pack, straight from its row. */
+    const oneShare = event.target.closest('[data-pack-one-share]');
+    if (oneShare) {
+      await shareStickerPacks([oneShare.getAttribute('data-pack-one-share')]);
+      return;
+    }
+    /* The whole ticked selection. */
+    const share = event.target.closest('[data-pack-share]');
+    if (share) {
+      const chosen = packManagerSelection();
+      if (!chosen.length) return;
+      const sent = await shareStickerPacks(chosen);
+      if (sent) {
+        packManagerElement?.querySelectorAll('input[type="checkbox"]').forEach((box) => { box.checked = false; });
+        syncPackManagerFooter();
+      }
       return;
     }
     const remove = event.target.closest('[data-pack-delete]');
@@ -982,6 +1004,25 @@ function moveStickerPack(packId, direction) {
   return true;
 }
 
+/* The manage view's multi-pick, for sending several packs in one go. A set of
+   pack ids, same shape as the sticker selection below it; ids that no longer
+   exist are filtered out when the selection is read, so deleting a ticked pack
+   cannot leave a ghost tick behind. */
+const stickerManageSelection = new Set();
+function toggleStickerManagePick(packId) {
+  if (!packId) return false;
+  if (stickerManageSelection.has(packId)) stickerManageSelection.delete(packId);
+  else stickerManageSelection.add(packId);
+  return stickerManageSelection.has(packId);
+}
+function orderedStickerManageSelection() {
+  const ids = orderedStickerPacks().map((pack) => pack.id);
+  return ids.filter((id) => stickerManageSelection.has(id));
+}
+function clearStickerManageSelection() {
+  stickerManageSelection.clear();
+}
+
 /* ---- picking several at once -------------------------------------------- */
 
 /* Selection is a set of refs, not a flag on each record.
@@ -1127,6 +1168,9 @@ function renderStickerPanel() {
   const tabs = document.getElementById('chatStickerTabs');
   if (!grid || !tabs) return;
   const packs = orderedStickerPacks();
+  /* Leaving the manage view ends the pick: a tick that survives into the
+     sticker grid and reappears weeks later is a question with no answer. */
+  if (!chatState.stickerManageMode) clearStickerManageSelection();
 
   if (!packs.length) {
     tabs.innerHTML = '';
@@ -1184,7 +1228,8 @@ function renderStickerPanel() {
   if (chatState.stickerManageMode) {
     grid.innerHTML = `<div class="chat-sticker-manage">
       ${packs.map((pack, index) => `
-        <div class="chat-sticker-manage-row">
+        <div class="chat-sticker-manage-row ${stickerManageSelection.has(pack.id) ? 'is-picked' : ''}">
+          <input type="checkbox" class="chat-sticker-manage-pick" data-chat-sticker-pick="${pack.id}" ${stickerManageSelection.has(pack.id) ? 'checked' : ''} aria-label="${app().escapeHTML(t('انتخاب پک', 'Select pack'))}: ${app().escapeHTML(pack.title)}">
           <div class="chat-sticker-manage-order">
             <button type="button" data-chat-sticker-up="${pack.id}" ${index === 0 ? 'disabled' : ''} title="${app().escapeHTML(t('بالاتر', 'Move up'))}"><i class="fas fa-chevron-up"></i></button>
             <button type="button" data-chat-sticker-down="${pack.id}" ${index === packs.length - 1 ? 'disabled' : ''} title="${app().escapeHTML(t('پایین‌تر', 'Move down'))}"><i class="fas fa-chevron-down"></i></button>
@@ -1197,6 +1242,11 @@ function renderStickerPanel() {
           <button type="button" class="chat-sticker-manage-share" data-chat-sticker-share="${pack.id}" title="${app().escapeHTML(t('ارسال پک به این گفتگو', 'Share pack into this chat'))}"><i class="fas fa-share-nodes"></i></button>
           <button type="button" class="chat-sticker-manage-del" data-chat-sticker-delete="${pack.id}" title="${app().escapeHTML(t('حذف پک', 'Delete pack'))}"><i class="fas fa-trash"></i></button>
         </div>`).join('')}
+      <div class="chat-sticker-manage-bar ${stickerManageSelection.size ? '' : 'hidden'}">
+        <span class="chat-sticker-selcount">${stickerManageSelection.size} ${app().escapeHTML(t('پک انتخاب‌شده', 'pack(s) selected'))}</span>
+        <button type="button" class="chat-sticker-selbtn is-primary" data-chat-sticker-send-packs><i class="fas fa-paper-plane"></i> ${app().escapeHTML(t('ارسال انتخاب‌شده‌ها', 'Send selected'))}</button>
+        <button type="button" class="chat-sticker-selbtn" data-chat-sticker-clear-packs>${app().escapeHTML(t('لغو', 'Clear'))}</button>
+      </div>
     </div>`;
     return;
   }
@@ -1360,6 +1410,51 @@ async function shareStickerPack(packId) {
     console.error('[Stickers] share failed', error);
     notify(t('ارسال پک استیکر ناموفق بود.', 'Sharing the sticker pack failed.'), 'error');
   }
+}
+
+/* The pack manager's "send what I ticked". One intent, several packs: each
+   still leaves as its own message, because merging them into one archive
+   would arrive on the other side as a single pack nobody chose — and the
+   receiver's Add button works per pack. The packs go out in the order the
+   manager lists them, and the summary at the end is one sentence, not one
+   toast per pack. Returns how many left, so the caller knows to clear the
+   ticks. */
+async function shareStickerPacks(packIds) {
+  const conversation = getActiveConversation();
+  if (!conversation) {
+    notify(t('اول یک گفتگو را باز کنید تا پک‌ها برایش ارسال شوند.', 'Open a conversation first, then share the packs into it.'), 'warning');
+    return 0;
+  }
+  notify(t('در حال بسته‌بندی پک‌ها…', 'Packing the sticker packs…'), 'info');
+  setStickerPanelVisible(false);
+  let sent = 0;
+  let skipped = 0;
+  for (const packId of packIds) {
+    const pack = chatState.stickerPacks.find((item) => item.id === packId);
+    /* An empty or oversized pack is skipped, not fatal: the rest of the
+       selection still goes, and the count says what did not. */
+    if (!pack || !pack.stickers.length) { skipped += 1; continue; }
+    try {
+      const file = await buildStickerPackArchive(pack);
+      if (file.size > MAX_FILE_BYTES) { skipped += 1; continue; }
+      await sendEncryptedBlob(file, 'stickerpack', 0, {
+        packTitle: pack.title,
+        packCount: pack.stickers.length,
+      });
+      sent += 1;
+    } catch (error) {
+      console.error('[Stickers] pack share failed for', pack.title, error);
+      skipped += 1;
+    }
+  }
+  if (sent && skipped) {
+    notify(t(`${sent} پک ارسال شد؛ ${skipped} پک رد شد (خالی یا بیش از حد بزرگ).`, `${sent} pack(s) sent; ${skipped} skipped (empty or too large).`), 'warning');
+  } else if (sent) {
+    notify(t(`${sent} پک ارسال شد.`, `${sent} pack(s) sent.`), 'success');
+  } else {
+    notify(t('هیچ پکی ارسال نشد؛ خالی یا بیش از حد بزرگ بودند.', 'No packs were sent; they were empty or too large.'), 'warning');
+  }
+  return sent;
 }
 
 /* Saves a pack that arrived in a message. Reuses the same archive reader the

@@ -302,6 +302,54 @@ chatState.ws.send(JSON.stringify({ type: 'id-proof', nonce: app().arrayBufferToB
 console.warn('[Chat] could not answer the relay identity challenge:', error);
 }
 }
+/* A space record, on its own turn of the sender's queue.
+ *
+ * The relay stamps the sender from an unauthenticated hello, so the sender
+ * claim is the only thing vouching for a roster that can dissolve a group
+ * and purge session keys. Only the space's owner (or this device) may push
+ * one at an existing space — and over transit, where the envelope's sender
+ * is deliberately blank, the record itself names its author and the
+ * author's signature is checked against the owner's pinned key. Without
+ * that second half, every cross-relay member refused every edit: the
+ * owner's renames, permissions and removals simply never arrived, and a
+ * removed member kept a ghost group others kept encrypting to. */
+async function handleSpaceSyncMessage(message, payload) {
+const senderFingerprint = String(message.fromFingerprint || '');
+const senderPeerId = String(message.fromClientId || message.fromPeerId || '');
+const existingSpace = (chatState.spaces?.groups || []).find((space) => space.conversationId === payload.space.conversationId)
+|| (chatState.spaces?.channels || []).find((space) => space.conversationId === payload.space.conversationId)
+|| null;
+let authorized = typeof isSpaceUpdateAuthorized !== 'function'
+|| isSpaceUpdateAuthorized(existingSpace, senderFingerprint, senderPeerId);
+if (!authorized && existingSpace && payload.fromFingerprint) {
+const ownerKey = existingSpace.ownerFingerprint
+? String((typeof findPeerByAnyKey === 'function' ? findPeerByAnyKey(existingSpace.ownerFingerprint) : null)?.publicKeyData || '') : '';
+authorized = payload.fromFingerprint === String(existingSpace.ownerFingerprint || '')
+&& Boolean(ownerKey)
+&& typeof verifySpaceSyncSender === 'function'
+&& await verifySpaceSyncSender(payload, ownerKey);
+}
+if (!authorized) {
+console.warn('[Chat] refused a space-sync from a non-owner sender');
+ackRelayMessage(message.relayId);
+return;
+}
+/* Being dropped from the members list of a newer revision means we were
+removed; keeping the thread around would show a group we can no longer
+post to. */
+if (handleSpaceRemoval(payload.space)) {
+ackRelayMessage(message.relayId);
+return;
+}
+const merged = upsertSharedSpace(payload.space);
+/* Only for a group this device is actually in - a note about a group we are
+not a member of would be a thread appearing out of nowhere. */
+if (merged && payload.note) appendSpaceNote(merged, String(payload.note).slice(0, 300));
+renderPeers();
+renderActivePeer();
+renderMessages();
+ackRelayMessage(message.relayId);
+}
 function connectPresence() {
 if (chatState.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(chatState.ws.readyState)) {
 return;
@@ -603,6 +651,9 @@ const incomingPeerId = payload.peerId || message.fromClientId;
 if (chatState.pendingIncomingInvite?.peerId === incomingPeerId ||
 chatState.pendingIncomingCall?.peer === incomingPeerId ||
 chatState.currentCall?.peer === incomingPeerId) {
+/* Acknowledged, or the mailbox holds it for ever and every reconnect rings
+   the same dead invitation again. */
+ackRelayMessage(message.relayId);
 return;
 }
 if (chatState.currentCall || chatState.pendingIncomingCall || chatState.pendingIncomingInvite) {
@@ -615,6 +666,8 @@ name: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
 peerId: chatState.peerId,
 });
 }
+/* Same as above: answered is answered, whatever the answer was. */
+ackRelayMessage(message.relayId);
 notify(t('در حال حاضر در تماس دیگری هستید و تماس جدید رد شد.', 'You are already in another call, so the new request was rejected.'), 'warning');
 return;
 }
@@ -798,36 +851,20 @@ ackRelayMessage(message.relayId);
 return;
 }
 if (payload.type === 'space-sync' && payload.space) {
-/* The relay stamps the sender from an unauthenticated hello, so the sender
-   claim is the only thing vouching for a roster that can dissolve a group
-   and purge session keys. Only the space's owner (or this device) may push
-   one at an existing space. */
-const senderFingerprint = String(message.fromFingerprint || '');
-const senderPeerId = String(message.fromClientId || message.fromPeerId || '');
-const existingSpace = (chatState.spaces?.groups || []).find((space) => space.conversationId === payload.space.conversationId)
-|| (chatState.spaces?.channels || []).find((space) => space.conversationId === payload.space.conversationId)
-|| null;
-if (typeof isSpaceUpdateAuthorized === 'function'
-&& !isSpaceUpdateAuthorized(existingSpace, senderFingerprint, senderPeerId)) {
-console.warn('[Chat] refused a space-sync from a non-owner sender');
-ackRelayMessage(message.relayId);
-return;
+/* Through the same per-sender queue offline mail uses: a space record's
+   revision is only meaningful in order, and a signature check that resolves
+   asynchronously must not let a later revision overtake an earlier one. */
+const fromKey = message.fromFingerprint || payload.fromFingerprint || message.fromClientId || 'unknown';
+if (!chatState.wsMessageQueues.has(fromKey)) {
+chatState.wsMessageQueues.set(fromKey, Promise.resolve());
 }
-/* Being dropped from the members list of a newer revision means we were
-   removed; keeping the thread around would show a group we can no longer
-   post to. */
-if (handleSpaceRemoval(payload.space)) {
-ackRelayMessage(message.relayId);
-return;
+chatState.wsMessageQueues.set(fromKey, chatState.wsMessageQueues.get(fromKey).then(async () => {
+try {
+await handleSpaceSyncMessage(message, payload);
+} catch (error) {
+console.error('Failed to process a space record:', error);
 }
-const merged = upsertSharedSpace(payload.space);
-/* Only for a group this device is actually in - a note about a group we are
-   not a member of would be a thread appearing out of nowhere. */
-if (merged && payload.note) appendSpaceNote(merged, String(payload.note).slice(0, 300));
-renderPeers();
-renderActivePeer();
-renderMessages();
-ackRelayMessage(message.relayId);
+}));
 return;
 }
 if (payload.type === 'offline-chat') {
@@ -847,7 +884,9 @@ console.error('Failed to process offline relay message in queue:', error);
 return;
 }
 if (payload.type === 'typing') {
-handleRemoteTyping(message.fromFingerprint);
+/* The payload's name first: over transit the envelope-level fingerprint is
+   blank by design, and the payload is where the sender put it. */
+handleRemoteTyping(payload.fromFingerprint || message.fromFingerprint);
 ackRelayMessage(message.relayId);
 return;
 }
@@ -862,8 +901,17 @@ return;
 }
 setConnectionState(false, t('ارتباط با سرور چت قطع شد', 'Chat server disconnected'));
 chatState.serverReachable = false;
+/* Whose presence this socket may speak for: its own relay's clients and
+   nobody else's. The peers broadcast applies the same rule when it marks
+   people offline; a socket blip used to apply it to contacts whose presence
+   is answered elsewhere, so a reconnect overwrote a cross-relay contact's
+   good answer with this relay's silence — and wrote it into the saved
+   contacts, where it outlived the blip. Their answer stays as it was. */
 chatState.peers.forEach((peer) => {
-if (!peer.type) peer.status = 'offline';
+if (!peer.type
+&& !(typeof presenceAnsweredElsewhere === 'function' && presenceAnsweredElsewhere(peer))) {
+peer.status = 'offline';
+}
 });
 saveContacts();
 if (chatState.heartbeatTimer) clearInterval(chatState.heartbeatTimer);
@@ -1201,7 +1249,10 @@ async function offerSecureSessionBeforeLargeSend(peer, session, file) {
   const size = Number(file?.size || 0);
   if (!peer || peer.type === 'group' || isSelfPeerRecord(peer)) return session;
   if (session?.connection?.open) return session;
-  if (peer.status !== 'online') return session;
+  /* peerLooksOnline, not the raw field — a cross-relay contact answers to
+     their own relay, and the raw status here says 'offline' for ever. */
+  const reachable = typeof peerLooksOnline === 'function' ? peerLooksOnline(peer) : peer.status === 'online';
+  if (!reachable) return session;
   if (size < LARGE_FILE_CONFIRM_BYTES) return session;
   const key = getConversationKey(peer) || peer.peerId || '';
   if (!key || secureSessionAdvised.has(key)) return session;
@@ -1272,7 +1323,13 @@ if (!session?.cryptoKey) {
 session = await ensureDirectSession(directPeer);
 }
 const liveChannel = Boolean(session?.connection?.open);
-if (!session?.cryptoKey || (!liveChannel && directPeer.status !== 'online')) {
+/* peerLooksOnline, not the raw field: a cross-relay contact is answered by
+   their own relay, and the raw status on this side says 'offline' forever —
+   which made every self-destruct message to one refuse to send while their
+   dot was green. */
+const peerReachable = typeof peerLooksOnline === 'function'
+? peerLooksOnline(directPeer) : directPeer.status === 'online';
+if (!session?.cryptoKey || (!liveChannel && !peerReachable)) {
 const reason = !session?.cryptoKey
 ? t('سشن امن هنوز آماده نیست', 'the secure session is not ready yet')
 : t('کاربر آفلاین است', 'the peer is offline');
@@ -1414,17 +1471,17 @@ replyToId,
 hidden: hiddenMessage,
 payload,
 };
-/* Same rule as the group path: a data-channel send that throws must not be
-   reported as sent. Fall through to the relay queue so the message survives
-   a flaky channel instead of dying with a confident tick. */
-if (session.connection?.open
-&& safeConnectionSend(session.connection, outbound, 'text-message')) {
-markMessageStatus(getConversationKey(targetPeer), messageId, 'sent');
-} else {
-await sendSealedRelay(targetPeer, session, outbound, { createdAt: outbound.createdAt });
-markMessageStatus(getConversationKey(targetPeer), messageId, 'queued');
-}
-}
+	/* Same rule as the group path: a data-channel send that throws must not be
+	   reported as sent. Fall through to the relay queue so the message survives
+	   a flaky channel instead of dying with a confident tick. */
+	if (session.connection?.open
+	&& safeConnectionSend(session.connection, outbound, 'text-message')) {
+	markMessageStatus(getConversationKey(targetPeer), messageId, 'sent');
+	} else {
+	await sendSealedRelay(targetPeer, session, outbound, { createdAt: outbound.createdAt });
+	markMessageStatus(getConversationKey(targetPeer), messageId, 'queued');
+	}
+	}
 // A file upload used to happen in complete silence, so a slow transfer looked
 // like nothing was happening at all. Telegram shows progress at the top of the
 // thread; so do we.
@@ -1451,6 +1508,24 @@ if (icon) icon.className = incoming ? 'fas fa-download' : 'fas fa-arrow-up-from-
 if (fill) fill.style.width = percent === null ? '0%' : `${Math.max(0, Math.min(100, Math.round(percent)))}%`;
 banner.classList.toggle('is-indeterminate', percent === null);
 banner.classList.toggle('is-incoming', Boolean(incoming));
+/* A send in progress is one tap from stopped. Picking the wrong
+   multi-gigabyte file used to mean watching it grind or reloading the
+   app; the decline path had a flag all along and only the recipient
+   could set it. */
+banner.onclick = null;
+banner.title = '';
+banner.style.cursor = '';
+if (!incoming && typeof owner === 'string' && owner.startsWith('send:')
+&& typeof cancelOutgoingTransfer === 'function') {
+const messageId = owner.slice('send:'.length);
+banner.title = t('برای لغو ارسال کلیک کنید', 'Click to cancel the transfer');
+banner.style.cursor = 'pointer';
+banner.onclick = () => {
+for (const [transferId, entry] of chatState.outgoingFiles.entries()) {
+if ((entry?.messageId || '') === messageId) { cancelOutgoingTransfer(transferId); break; }
+}
+};
+}
 }
 function clearTransferBanner(delay = 700, owner = '') {
 window.setTimeout(() => {

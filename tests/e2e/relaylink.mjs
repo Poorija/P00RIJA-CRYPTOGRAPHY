@@ -464,5 +464,60 @@ console.log('\nA link that drops');
   await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
+/* A link that is up and says nothing — the death that closes no socket.
+ *
+ * A relay that goes away cleanly sends a close frame and the link is rebuilt
+ * from the close event. A relay that goes away DIRTY — the NAT table expired,
+ * the machine was paused, the cable left — sends nothing, and TCP will hold
+ * a dead connection open for as long as it takes somebody to notice. Nobody
+ * did: the heartbeat fired pings into it and never once asked where the
+ * pongs were, so a black-holed link answered as up, took envelopes it could
+ * not deliver, and kept the dial from ever being remade.
+ *
+ * The peer here completes a real handshake and then goes silent with pongs
+ * switched off — the closest a test can come to a cable pull. The answering
+ * relay must drop it inside three heartbeats and stop counting it as up. */
+console.log('\nA link that stops answering');
+{
+  const [portsB] = await relayPorts(1);
+  const dirB = seed(B);
+  const relayB = await start('standalone-relay/server.js', dirB, portsB, M.id);
+
+  const { WebSocket } = require('ws');
+  const privM = ids.relayPrivateKey(M);
+  const outcome = await new Promise((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${portsB.signal}/relay-link`, { autoPong: false });
+    const started = link.startLink(identityOf(M), B.keys.p256.publicKey);
+    let confirmed = false;
+    const timer = setTimeout(() => resolve(confirmed ? 'hung' : 'handshake never finished'), 110000);
+    socket.on('open', () => socket.send(JSON.stringify({ t: 'hello', ...started.hello })));
+    socket.on('message', (raw) => {
+      if (confirmed) return;
+      let message; try { message = JSON.parse(raw.toString()); } catch (_error) { return; }
+      if (message?.t !== 'proof') return;
+      const finished = link.finishLink(identityOf(M), privM, started.state, message, B.id);
+      socket.send(JSON.stringify({ t: 'confirm', ...finished.answer }));
+      confirmed = true;
+    });
+    socket.on('close', () => { clearTimeout(timer); resolve(confirmed ? 'dropped' : 'closed mid-handshake'); });
+    socket.on('error', () => { clearTimeout(timer); resolve('error'); });
+  });
+  ok(outcome === 'dropped',
+    `a silent peer loses its link rather than keeping it (${outcome})`);
+
+  const transit = await (async () => {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const body = await health(portsB.signal).catch(() => null);
+      if (body && body.transit?.up === 0) return body.transit;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return null;
+  })();
+  ok(transit?.up === 0, `and the answerer stops counting it as up (${JSON.stringify(transit)})`);
+
+  relayB.child.kill('SIGTERM');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+}
+
 console.log(`\n${failures ? 'FAILED' : 'passed'} — ${checks - failures}/${checks} checks`);
 process.exit(failures ? 1 : 0);

@@ -99,8 +99,27 @@ relay_identity() {
     # The id is the SHA-256 of the key in the same answer, so it is a name the
     # relay cannot lie about. Read over the public URL rather than from the
     # container, because the public URL is what the other relay will dial.
-    curl -sk --max-time 20 "$(server_field "$1" PUBLIC_URL)/relay-identity" \
-        | sed -n 's/.*"id":"\([a-f0-9]*\)".*/\1/p'
+    #
+    # But the id is also the allowlist entry that admits a transit link, and
+    # reading it with -k means whoever answers the URL writes that entry — a
+    # name on the network path (a hijacked route, hostile Wi-Fi) substitutes
+    # its own self-consistent identity and the answering relay trusts it
+    # forever after. So the id is cross-checked against the server's own
+    # relay-identity.json over SSH, on the machine itself, and anything that
+    # disagrees stops the link before it starts. Where the certificate
+    # verifies, the fetch drops -k as well.
+    local via_ssh via_url
+    via_url="$(curl -sk --max-time 20 "$(server_field "$1" PUBLIC_URL)/relay-identity" \
+        | sed -n 's/.*"id":"\([a-f0-9]*\)".*/\1/p')"
+    via_ssh="$(ssh_to "$1" "sed -n 's/.*\"id\":\"\\\\([a-f0-9]*\\\\)\".*/\\\\1/p' \
+        \"\$(ls -1 '$(server_field "$1" REMOTE_DIR)'/data/chat-signal/relay-identity.json \
+              '$(server_field "$1" REMOTE_DIR)'/standalone-relay/data/relay-identity.json 2>/dev/null | head -1)\" 2>/dev/null" 2>/dev/null || true)"
+    if [ -n "$via_ssh" ] && [ "$via_ssh" != "$via_url" ]; then
+        fail "$1's identity over HTTPS ($via_url) is not the one on its own disk ($via_ssh)."
+        echo "  Something is answering its public URL that is not the relay. Nothing was linked."
+        return 1
+    fi
+    printf '%s' "$via_url"
 }
 
 transit_of() {
@@ -114,20 +133,65 @@ cert_verifies() {
     curl -s --max-time 20 -o /dev/null "$(server_field "$1" PUBLIC_URL)/chat-health" 2>/dev/null
 }
 
+merge_peer() {
+    # merge_peer <existing-value> <new-entry> — adds or replaces one id's
+    # entry and keeps every other relay already linked. The old behaviour
+    # replaced the whole line, so linking a third relay silently unlinked the
+    # second, and "A carries for nobody" was only ever true by wipe.
+    local existing="$1" new="$2" kept out
+    [ -n "$existing" ] || { printf '%s' "$2"; return; }
+    out="$new"
+    kept=0
+    local IFS=','
+    for entry in $existing; do
+        [ -n "$entry" ] || continue
+        case "$entry" in
+            "${new%%@*}"|"${new%%@*}@"*) continue ;;  # the id being replaced
+        esac
+        out="$out,$entry"
+        kept=1
+    done
+    printf '%s' "$out"
+}
+
+drop_peer() {
+    # drop_peer <existing-value> <id> — removes one relay from the list and
+    # leaves the rest of the mesh standing.
+    local existing="$1" drop="$2" out="" entry
+    local IFS=','
+    for entry in $existing; do
+        [ -n "$entry" ] || continue
+        case "$entry" in
+            "$drop"|"$drop@"*) continue ;;
+        esac
+        out="${out:+$out,}$entry"
+    done
+    printf '%s' "$out"
+}
+
 set_peers() {
-    # set_peers <name> <value>  — rewrites the one line and restarts the relay.
+    # set_peers <name> <value> — sets CHAT_TRANSIT_PEERS to exactly <value>.
     local name="$1" value="$2" dir
     dir="$(server_field "$name" REMOTE_DIR)"
     ssh_to "$name" "bash -s" <<REMOTE
 set -e
 cd '$dir'
 cp .env ".env.bak-\$(date -u +%Y%m%d-%H%M%S)"
+# The backups hold TURN and monitor passwords; the relays that made them are
+# restarted below, and the copies are for exactly one bad edit. Keep five.
+ls -1t .env.bak-* 2>/dev/null | tail -n +6 | xargs -r rm -f
 sed -i '/^CHAT_TRANSIT_PEERS=/d' .env
 printf 'CHAT_TRANSIT_PEERS=%s\n' '$value' >> .env
+chmod 600 .env
 PROJECT="\$(docker inspect Poorija-Cryptography_ChatSignal \
     --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || echo config)"
 docker compose -p "\$PROJECT" --env-file .env -f config/docker-compose.yaml up -d chat-signal >/dev/null 2>&1
 REMOTE
+}
+
+peers_of() {
+    # The current CHAT_TRANSIT_PEERS on a server, or empty.
+    ssh_to "$1" "sed -n 's/^CHAT_TRANSIT_PEERS=//p' '$(server_field "$1" REMOTE_DIR)/.env'" 2>/dev/null || true
 }
 
 if [ "$MODE" = "status" ]; then
@@ -147,9 +211,17 @@ if [ -z "$A" ] || [ -z "$B" ]; then
 fi
 
 if [ "$MODE" = "unlink" ]; then
-    log "Unlinking $A and $B"
-    set_peers "$A" "" && ok "$A carries for nobody"
-    set_peers "$B" "" && ok "$B carries for nobody"
+    # Removing one link must not cut the others: a mesh of three used to lose
+    # its second relay the day the third was unlinked, because "unlink" read
+    # the whole line off both .env files.
+    log "Reading both relay identities"
+    ID_A="$(relay_identity "$A")" || exit 1
+    ID_B="$(relay_identity "$B")" || exit 1
+    [ ${#ID_A} -eq 64 ] || { fail "$A did not return a relay identity"; exit 1; }
+    [ ${#ID_B} -eq 64 ] || { fail "$B did not return a relay identity"; exit 1; }
+    log "Unlinking $A and $B, leaving any other linked relays in place"
+    set_peers "$A" "$(drop_peer "$(peers_of "$A")" "$ID_B")" && ok "$A no longer carries for $B"
+    set_peers "$B" "$(drop_peer "$(peers_of "$B")" "$ID_A")" && ok "$B no longer carries for $A"
     exit 0
 fi
 
@@ -173,16 +245,16 @@ URL_B="$(server_field "$B" PUBLIC_URL)"
 
 if [ "$A_OK" -eq 1 ] && [ "$B_OK" -eq 1 ]; then
     log "Both certificates verify — each may dial the other"
-    set_peers "$A" "$ID_B@$URL_B"
-    set_peers "$B" "$ID_A@$URL_A"
+    set_peers "$A" "$(merge_peer "$(peers_of "$A")" "$ID_B@$URL_B")"
+    set_peers "$B" "$(merge_peer "$(peers_of "$B")" "$ID_A@$URL_A")"
 elif [ "$A_OK" -eq 1 ]; then
     warn "$B's certificate does not verify from here; $B will dial and $A will answer"
-    set_peers "$A" "$ID_B"
-    set_peers "$B" "$ID_A@$URL_A"
+    set_peers "$A" "$(merge_peer "$(peers_of "$A")" "$ID_B")"
+    set_peers "$B" "$(merge_peer "$(peers_of "$B")" "$ID_A@$URL_A")"
 elif [ "$B_OK" -eq 1 ]; then
     warn "$A's certificate does not verify from here; $A will dial and $B will answer"
-    set_peers "$A" "$ID_B@$URL_B"
-    set_peers "$B" "$ID_A"
+    set_peers "$A" "$(merge_peer "$(peers_of "$A")" "$ID_B@$URL_B")"
+    set_peers "$B" "$(merge_peer "$(peers_of "$B")" "$ID_A")"
 else
     fail "Neither certificate verifies, so neither relay can dial the other safely."
     echo "  Install real certificates first — see scripts/prepare-relay-host.sh."

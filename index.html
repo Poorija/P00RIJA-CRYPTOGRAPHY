@@ -153,8 +153,8 @@ font-display: swap;
 <script defer src="vendor/otpauth/otpauth.umd.min.js"></script>
 <script defer src="vendor/hash-wasm/argon2.umd.min.js"></script>
 <script defer src="vendor/jszip/jszip.min.js"></script>
-<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.77.0-chat-v85">
-<link rel="stylesheet" href="css/styles.css?v=2.77.0-chat-v85">
+<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.91.11-chat-v95">
+<link rel="stylesheet" href="css/styles.css?v=2.91.11-chat-v95">
 <script>
     (function() {
         window.loadDeferredFonts = function() {
@@ -2225,6 +2225,14 @@ FA / EN
 </span>
 </label>
 <label class="chat-toggle">
+<span data-i18n="crossRelayComm">ارتباط بین رله‌ها</span>
+<span class="chat-settings-switch relative inline-block w-12 h-6 align-middle select-none">
+<input id="chatCrossRelayComm" type="checkbox" checked class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 border-slate-600">
+<span class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer transition-colors duration-300"></span>
+</span>
+</label>
+<p class="chat-settings-hint" data-i18n="crossRelayCommHint">روشن: پیام، فایل و تماس (شخصی و گروهی) به مخاطبانی که روی رلهٔ دیگری هستند از مسیر رمزنگاری‌شدهٔ بین دو رله می‌رود و رلهٔ شما نمی‌بیند با چه کسی حرف می‌زنید. خاموش: همه‌چیز از رلهٔ خودتان می‌رود و رله می‌بیند با چه کسی ارتباط دارید (محتوا همیشه رمزنگاری‌شده می‌ماند).</p>
+<label class="chat-toggle">
 <span data-i18n="videoCall">تماس تصویری</span>
 <span class="chat-settings-switch relative inline-block w-12 h-6 align-middle select-none">
 <input id="chatAllowVideo" type="checkbox" checked class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 border-slate-600">
@@ -2751,7 +2759,7 @@ FA / EN
     <span class="font-semibold" data-i18n="stickerPacks">پک‌های استیکر</span>
     <button type="button" onclick="openPackManager()" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-gray-600" data-i18n="managePacks">مدیریت پک‌ها</button>
   </div>
-  <p class="chat-settings-hint" data-i18n="stickerPacksHint">نام و ترتیب پک‌ها را عوض کنید، یا چندتا را با هم انتخاب و حذف کنید. ترتیب همان است که در پنل استیکر می‌بینید.</p>
+  <p class="chat-settings-hint" data-i18n="stickerPacksHint">نام و ترتیب پک‌ها را عوض کنید، یا چندتا را با هم انتخاب و حذف یا ارسال کنید. ترتیب همان است که در پنل استیکر می‌بینید.</p>
 </div>
 
 <div id="chatStickerPanel" class="chat-sticker-panel hidden">
@@ -5164,64 +5172,64 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 </div>
 </div>
 </div>
-<script defer src="vendor/peerjs/peerjs.min.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/crypto-core.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/vault-profiles.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/stego.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/qr-kit.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/tools-extra.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/local-link.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/local-mesh.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/local-room.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/crypto-config.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/dialogs.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/desktop-bridge.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/metadata.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/voice-changer.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/help-content.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/games.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/relay-hints.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/image-formats.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/update-check.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/app.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/ssh-keys.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/advanced-crypto.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/backup.js?v=2.77.0-chat-v85"></script>
+<script defer src="vendor/peerjs/peerjs.min.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/crypto-core.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/vault-profiles.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/stego.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/qr-kit.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/tools-extra.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/local-link.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/local-mesh.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/local-room.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/crypto-config.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/dialogs.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/desktop-bridge.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/metadata.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/voice-changer.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/help-content.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/games.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/relay-hints.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/image-formats.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/update-check.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/app.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/ssh-keys.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/advanced-crypto.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/backup.js?v=2.91.11-chat-v95"></script>
 <!-- Secure Chat: one file split into ordered parts. `defer` keeps them in
      document order, which is the order they depend on. See js/chat/README.md. -->
-<script defer src="js/chat/01-constants.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/02-media-vault.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/03-call-screen.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/04-call-layout.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/05-structured-messages.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/06-groups.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/07-conversation-lock.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/08-global-search.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/09-the-emoji-key.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/10-selection.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/11-group-permissions.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/12-group-call-mesh.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/13-group-call-stage.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/14-group-call-roster.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/15-group-call-render.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/16-group-call-signalling.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/17-file-manager.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/18-file-manager-2.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/19-forward-secrecy.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/20-call-rows.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/21-chat-list-filters.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/22-drafts.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/23-export-import.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/24-settings-panels.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/25-call-log.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/26-contacts.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/27-message-render.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/28-offline-envelopes.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/29-file-transfer.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/30-file-transfer-2.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/31-file-transfer-3.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/32-file-transfer-4.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/33-rail-header.js?v=2.77.0-chat-v85"></script>
+<script defer src="js/chat/01-constants.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/02-media-vault.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/03-call-screen.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/04-call-layout.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/05-structured-messages.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/06-groups.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/07-conversation-lock.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/08-global-search.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/09-the-emoji-key.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/10-selection.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/11-group-permissions.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/12-group-call-mesh.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/13-group-call-stage.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/14-group-call-roster.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/15-group-call-render.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/16-group-call-signalling.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/17-file-manager.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/18-file-manager-2.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/19-forward-secrecy.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/20-call-rows.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/21-chat-list-filters.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/22-drafts.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/23-export-import.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/24-settings-panels.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/25-call-log.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/26-contacts.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/27-message-render.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/28-offline-envelopes.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/29-file-transfer.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/30-file-transfer-2.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/31-file-transfer-3.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/32-file-transfer-4.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/33-rail-header.js?v=2.91.11-chat-v95"></script>
 <!-- Carrying a message through a messenger that works but is watched. The
      pieces were always here; what was missing was a way to use them without
      knowing they were here. See js/chat/38-carrier.js. -->
@@ -5266,11 +5274,11 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 </section>
 </div>
 </div>
-<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/37-chat-tools.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/38-carrier.js?v=2.77.0-chat-v85"></script>
-<script defer src="js/chat/39-relay-call.js?v=2.77.0-chat-v85"></script>
+<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/37-chat-tools.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/38-carrier.js?v=2.91.11-chat-v95"></script>
+<script defer src="js/chat/39-relay-call.js?v=2.91.11-chat-v95"></script>
 </body>
 </html>

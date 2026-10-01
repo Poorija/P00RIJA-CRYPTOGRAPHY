@@ -35,6 +35,19 @@ const HANDSHAKE_TIMEOUT_MS = 10000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 60000;
 const HEARTBEAT_MS = 25000;
+/* How many heartbeats a link may hear nothing back on before it is declared
+   dead. Two is about a minute of silence — long enough that a busy relay
+   answers the odd ping late, short enough that a link black-holed by a NAT
+   retable or a paused machine is redialled while the envelopes it was asked
+   to carry are still worth delivering. */
+const MISSED_PONGS_LIMIT = 2;
+/* A frame may be up to 24 MB, so the buffer has to be allowed a few of those
+   before it is judged stuck — but it must be allowed to stop somewhere. A far
+   end that stopped reading turns an unbounded buffer into an unbounded
+   liability: every transit envelope this relay accepted would sit in memory
+   awaiting a drain that is never coming, and the 60-second wait would expire
+   client-side before the socket ever said no. */
+const LINK_BUFFER_LIMIT_BYTES = 96 * 1024 * 1024;
 
 /* The peers an operator named, as `<relay id>@<origin>` — or as a bare id,
    which means "accept a link from this relay but never dial it". That is the
@@ -213,6 +226,15 @@ function createRelayPeers({
       isOpen: () => alive && socket.readyState === 1,
       send(payload) {
         if (!link.isOpen()) return false;
+        /* The client sockets have a buffered-amount guard that cuts a peer
+           who never reads; a link deserves the same mercy in both directions.
+           Crossing the line closes the link rather than dropping the frame,
+           so the far end's redial — and ours — starts from a known state. */
+        if (socket.bufferedAmount > LINK_BUFFER_LIMIT_BYTES) {
+          log.warn?.(`[Transit] link with ${peerId.slice(0, 12)} stopped draining; closing it`);
+          link.close('send buffer full');
+          return false;
+        }
         socket.send(JSON.stringify({ t: 'f', ...cipher.seal(payload) }));
         return true;
       },
@@ -221,8 +243,25 @@ function createRelayPeers({
         try { socket.close(1000, String(reason).slice(0, 100)); } catch (_error) { /* already gone */ }
       },
     };
+    /* A ping proves nothing about the far end until a pong has failed to come
+       back. The heartbeat used to fire pings into whatever the socket's state
+       said was open, and a link lost without a FIN — a NAT table expiring, a
+       cable pulled, a VM paused — stays readyState 1 for as long as TCP takes
+       to notice, which can be an hour. Everything above kept working: the
+       link answered as up, envelopes were handed to it, and each one sat in
+       the send buffer until its client-side wait expired. Now two heartbeats
+       without a pong terminate the socket, which is the close event the
+       redial path has been waiting for all along. */
+    let missedPongs = 0;
+    socket.on('pong', () => { missedPongs = 0; });
     const heartbeat = setInterval(() => {
       if (!link.isOpen()) return;
+      if (missedPongs >= MISSED_PONGS_LIMIT) {
+        log.warn?.(`[Transit] link with ${peerId.slice(0, 12)} stopped answering pings; dropping it`);
+        try { socket.terminate(); } catch (_error) { /* the close handler deals with it */ }
+        return;
+      }
+      missedPongs += 1;
       try { socket.ping(); } catch (_error) { /* the close handler deals with it */ }
     }, HEARTBEAT_MS);
     heartbeat.unref?.();
@@ -276,6 +315,17 @@ function createRelayPeers({
       try {
         if (!state && message?.t === 'hello') {
           if (!enabled()) return refuse(1008, 'transit is not enabled here');
+          /* The claim is checked before the work, not after. answerLink proves
+             the claim against the key it carries, but proving it costs an
+             ECDH, a second keypair, and a post-quantum encapsulation — and
+             every one of those is spent on a socket that has proven nothing.
+             An id nobody named is not worth the arithmetic, and rejecting the
+             claim early cannot admit anybody: acceptance still runs the full
+             proof and the allowlist against the verified id afterwards. */
+          if (!mayLinkWith(message?.from)) {
+            log.warn?.(`[Transit] refused a link from ${String(message?.from || '').slice(0, 12)}: not in the allowlist`);
+            return refuse(1008, 'not allowed');
+          }
           const answered = answerLink(identity, privateKey, message, pqPrivateKey);
           if (!mayLinkWith(answered.peerId)) {
             log.warn?.(`[Transit] refused a link from ${answered.peerId.slice(0, 12)}: not in the allowlist`);

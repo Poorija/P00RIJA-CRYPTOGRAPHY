@@ -248,7 +248,13 @@ chatState.floatingDragOffset = null;
 document.getElementById('chatFloatingCall')?.classList.remove('dragging');
 }
 function isCallBusy() {
-return Boolean(chatState.currentCall || chatState.pendingIncomingCall || chatState.pendingIncomingInvite);
+/* A group call on the stage is a call. The check used to see only the 1:1
+   fields, so an offer arriving mid-group-call passed every gate and stacked
+   a second, parallel call UI on top of the stage — two microphones, two
+   connections, and a group nobody could hear over it. */
+return Boolean(chatState.currentCall || chatState.pendingIncomingCall
+|| chatState.pendingIncomingInvite
+|| (typeof groupCallActive === 'function' && groupCallActive()));
 }
 function clearCallTimers() {
 if (chatState.outgoingCallTimer) {
@@ -2606,7 +2612,11 @@ refreshCallControls();
 }
 function redialCall(peerId, mode) {
 const peer = findPeerRecordByPeerId(peerId);
-if (!peer || peer.status !== 'online') {
+/* A contact on another relay never carries 'online' in this relay's own
+   broadcast — their presence is answered by their relay and merged by
+   peerLooksOnline. The raw field said "not online" about a person whose dot
+   was green, on every redial, from every button that funnels here. */
+if (!peer || !(typeof peerLooksOnline === 'function' ? peerLooksOnline(peer) : peer.status === 'online')) {
 notify(t('این کاربر آنلاین نیست.', 'This user is not online.'), 'warning');
 return;
 }

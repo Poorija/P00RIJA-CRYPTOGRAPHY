@@ -363,7 +363,14 @@ function linkCipher(key, role) {
       };
     },
     open(frame) {
-      const counter = BigInt(String(frame?.n ?? '-1'));
+      /* The counter rides outside the authenticated body, so its shape is
+         checked before it is parsed. A frame may be megabytes and BigInt's
+         string parser is superlinear, so a counter long enough to be costly
+         would freeze the relay's one thread for the parse alone — and no real
+         counter has more digits than a link could ever send. */
+      const counterText = String(frame?.n ?? '');
+      if (!/^[0-9]{1,20}$/.test(counterText)) throw new Error('link frame carries no usable counter');
+      const counter = BigInt(counterText);
       /* Strictly increasing rather than merely unseen: a link is one ordered
          stream, so an out-of-order frame is either an attack or a broken
          peer, and neither is worth a buffer to hold it in. */

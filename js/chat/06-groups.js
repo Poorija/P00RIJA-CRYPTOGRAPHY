@@ -326,7 +326,7 @@ function addMembersToActiveSpace(keys) {
      directly rather than waiting for the next presence sweep. */
   keys.forEach((key) => {
     const peer = findPeerByAnyKey(key);
-    if (peer) sendRelayEnvelope(peer, { type: 'space-sync', space, createdAt: new Date().toISOString() });
+    if (peer && typeof sendSpaceSync === 'function') sendSpaceSync(peer, space);
   });
 }
 
@@ -351,12 +351,8 @@ async function removeMemberFromActiveSpace(memberKey) {
   /* Tell the person themselves, or their copy stays and keeps showing the
      group as if nothing happened. */
   const peer = findPeerByAnyKey(memberKey);
-  if (peer) {
-    sendRelayEnvelope(peer, {
-      type: 'space-sync',
-      space: { ...space, members, admins, removed },
-      createdAt: new Date().toISOString(),
-    });
+  if (peer && typeof sendSpaceSync === 'function') {
+    sendSpaceSync(peer, { ...space, members, admins, removed });
   }
 }
 

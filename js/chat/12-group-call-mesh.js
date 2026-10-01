@@ -555,7 +555,13 @@ async function joinGroupCall(callId, spaceId, mode, roster = []) {
 
 /* Places the leg to one peer, if the tie-break says it is our turn. */
 function connectGroupCallPeer(peerRecord, name) {
-  if (!groupCallActive() || !chatState.peer || !peerRecord?.peerId) return;
+  /* chatState.peer is the PeerJS object, and a relay-only client — WebKitGTK,
+     or anywhere peer-to-peer is unavailable — never gets one. That used to
+     end the function here, so joining a group call from such a client opened
+     the stage and announced the arrival while no leg to anybody was ever
+     placed. A relay leg needs no PeerJS object: placeRelayCall talks to the
+     socket this client already has. */
+  if (!groupCallActive() || !peerRecord?.peerId) return;
   const key = groupCallParticipantKey(peerRecord);
   if (!key || key === myCallIdentity()) return;
   const existing = chatState.groupCall.participants.get(key);
@@ -585,6 +591,10 @@ function connectGroupCallPeer(peerRecord, name) {
   const watchLeg = () => {
     const entry = chatState.groupCall?.participants?.get(legKey);
     if (entry?.call || entry?.stream) { clearLegTimer(); return; }
+    /* The entry itself is the stopwatch: once the leg timer has taken it out,
+       there is nothing left to watch, and the chain used to keep rescheduling
+       once a second per failed leg for as long as the call ran. */
+    if (!entry) return;
     if (chatState.groupCall?.callId) window.setTimeout(watchLeg, 1000);
   };
   watchLeg();

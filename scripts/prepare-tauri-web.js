@@ -77,7 +77,11 @@ function relayHintsFromDefaults() {
  * decides, for the copies they distribute, and nothing about that decision
  * leaves their machine.
  *
- * Ordered first, because the first hint is what a fresh install pre-fills. */
+ * Ordered, because the order is all they are: discovery seeds for a fresh
+ * install's local-network scan, and the fallback origin when the app runs
+ * from the file: protocol. The native shell does NOT pre-fill its server box
+ * from them — defaultRelayOriginForShell returns an empty string there —
+ * so the ordering matters for discovery, not for a pre-filled input. */
 function relayHintsFromEnv() {
   const env = parseEnvFile(path.join(root, '.env'));
   const hints = new Set();
@@ -290,7 +294,24 @@ if (fs.existsSync(lockFile)) {
   }
   fs.rmSync(lockFile, { force: true });
 }
-fs.writeFileSync(lockFile, lockOwner);
+/* Exclusive-create, so two prepares starting in the same moment cannot both
+ * pass the check above and then both rm -rf the same dist/tauri — the window
+ * between the check and this line is exactly the window a second process
+ * would have used. The EEXIST race loser gets the same message as a held
+ * lock, which is the truth: someone else got there first. */
+try {
+  const handle = fs.openSync(lockFile, 'wx');
+  fs.writeSync(handle, lockOwner);
+  fs.closeSync(handle);
+} catch (error) {
+  if (error.code === 'EEXIST') {
+    throw new Error(
+      'Another native build just took dist/tauri. ' +
+      'Builds share one frontendDist directory and cannot run at the same time.'
+    );
+  }
+  throw error;
+}
 process.on('exit', () => {
   try {
     if (fs.readFileSync(lockFile, 'utf8').trim() === lockOwner) {

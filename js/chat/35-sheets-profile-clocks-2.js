@@ -441,7 +441,7 @@ document.getElementById(id)?.addEventListener('input', syncProfileDraftFromInput
  * each intermediate value used to fire a live probe of a half-typed URL —
  * dozens of dead DNS lookups per edit and visible stutter while typing. */
 document.getElementById('chatServerUrl')?.addEventListener('change', syncProfileDraftFromInputs);
-['chatAutoConnect', 'chatAllowVideo', 'chatAutoDiscovery', 'chatShowSuspensionCountdown', 'chatPublicStun'].forEach((id) => {
+['chatAutoConnect', 'chatAllowVideo', 'chatAutoDiscovery', 'chatShowSuspensionCountdown', 'chatPublicStun', 'chatCrossRelayComm'].forEach((id) => {
 document.getElementById(id)?.addEventListener('change', handleConnectionToggleChange);
 });
 /* The master switch is handled separately from the ordinary toggles: turning
@@ -1370,6 +1370,30 @@ return;
 const share = event.target.closest('[data-chat-sticker-share]');
 if (share) {
 await shareStickerPack(share.getAttribute('data-chat-sticker-share'));
+return;
+}
+/* Ticking packs in the manage view, for sending several at once. The set is
+   the truth and the re-render draws from it, so the checkbox's own native
+   toggle is discarded rather than fought over. */
+const pick = event.target.closest('[data-chat-sticker-pick]');
+if (pick) {
+toggleStickerManagePick(pick.getAttribute('data-chat-sticker-pick'));
+renderStickerPanel();
+return;
+}
+if (event.target.closest('[data-chat-sticker-send-packs]')) {
+const chosen = orderedStickerManageSelection();
+if (!chosen.length) return;
+const sent = await shareStickerPacks(chosen);
+if (sent) {
+clearStickerManageSelection();
+renderStickerPanel();
+}
+return;
+}
+if (event.target.closest('[data-chat-sticker-clear-packs]')) {
+clearStickerManageSelection();
+renderStickerPanel();
 return;
 }
 const remove = event.target.closest('[data-chat-sticker-delete]');

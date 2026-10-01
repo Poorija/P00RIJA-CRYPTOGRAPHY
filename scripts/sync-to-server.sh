@@ -124,16 +124,21 @@ verify_assets() {
             printf "  ${ERR}DIFF${NC}  %s\n" "$f"
             mismatched=$((mismatched + 1))
         fi
-    /* The chat parts are in here, all of them.
-     *
-     * The list used to be twelve fixed names and not one of them was under
-     * js/chat/, which is where the messenger actually lives -- the relay
-     * routing, the receipts, the calls, the carrier, every one of them. So a
-     * stale Docker layer could leave the application serving last week's chat
-     * while this function said all eleven assets matched, and it did: the file
-     * was on the server's disk and the container held the old one, and the
-     * deployment reported success. deploy.sh already fetches every chat part to
-     * count the 200s; the missing half was comparing what came back. */
+    # The chat parts are in here, all of them.
+    #
+    # The list used to be twelve fixed names and not one of them was under
+    # js/chat/, which is where the messenger actually lives -- the relay
+    # routing, the receipts, the calls, the carrier, every one of them. So a
+    # stale Docker layer could leave the application serving last week's chat
+    # while this function said all eleven assets matched, and it did: the file
+    # was on the server's disk and the container held the old one, and the
+    # deployment reported success. deploy.sh already fetches every chat part to
+    # count the 200s; the missing half was comparing what came back.
+    #
+    # (A C-style comment used to stand here, and bash runs those as commands:
+    # once per loop iteration, globbing into the filesystem and executing
+    # whichever file sorted first. The verification still worked; the noise it
+    # printed taught every operator to ignore stderr during deployments.)
     done < <({
         printf '%s\n' index.html sw.js manifest.webmanifest css/styles.css js/app.js js/chat.js js/dialogs.js js/desktop-bridge.js js/ssh-keys.js js/backup.js js/advanced-crypto.js js/crypto-config.js
         ls js/chat/*.js 2>/dev/null

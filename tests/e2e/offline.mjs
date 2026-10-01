@@ -245,13 +245,18 @@ const opened = await page.evaluate(async ({ seal, payload }) => {
       { name: 'AES-GCM', iv: new Uint8Array(payload.iv) }, key, bytes(payload.cipher)
     );
     const message = JSON.parse(new TextDecoder().decode(opened));
-    const inner = message?.payload
+    /* v2 wraps the message together with the session key and the return
+       route; v1 held the message alone. The message itself is one level
+       deeper in the v2 shape, and the payload under it is the same one
+       key both ways. */
+    const wrapper = message;
+    const inner = (wrapper.message ?? wrapper)?.payload
       ? await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: new Uint8Array(message.payload.iv) }, key, bytes(message.payload.cipher))
+        { name: 'AES-GCM', iv: new Uint8Array((wrapper.message ?? wrapper).payload.iv) }, key, bytes((wrapper.message ?? wrapper).payload.cipher))
       : null;
     return {
       text: inner ? new TextDecoder().decode(inner).slice(0, 120) : '',
-      type: message?.type || '',
+      type: (wrapper.message ?? wrapper)?.type || '',
       /* v2 wraps the message together with the session key and with where to
          write back. v1 held the message alone. */
       shape: ('message' in (message || {})) ? 'v2' : 'v1',

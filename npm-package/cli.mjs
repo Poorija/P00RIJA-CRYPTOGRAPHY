@@ -20,10 +20,11 @@
  * library only: no dependencies, no telemetry, no install scripts.
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { get } from 'node:https';
 import { createServer } from 'node:http';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -107,10 +108,20 @@ function servePwa() {
     '.json': 'application/json',
     '.webmanifest': 'application/manifest+json',
   };
-  const server = createServer(async (request, response) => {
-    const requested = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+    const server = createServer(async (request, response) => {
+    let requested;
+    try {
+      requested = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+    } catch (_error) {
+      response.writeHead(400).end();
+      return;
+    }
     let file = path.join(root, requested === '/' ? 'index.html' : requested);
-    if (!file.startsWith(root)) { response.writeHead(403).end(); return; }
+    // The traversal guard needs the separator: a sibling directory whose name
+    // shares this root as a prefix ("app-anything") passed the old prefix
+    // check. Same root, or one step inside it, and nothing else.
+    const inside = file === root || file.startsWith(root + path.sep);
+    if (!inside) { response.writeHead(403).end(); return; }
     if (!existsSync(file) || statSync(file).isDirectory()) file = path.join(root, 'index.html');
     response.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream' });
     createReadStream(file).pipe(response);
@@ -135,10 +146,32 @@ if (args.includes('--pwa')) {
     .catch((error) => fail(`could not reach GitHub: ${error.message}`));
   const asset = pickAsset(release.assets || []);
   if (!asset) fail('no installer for this platform in the latest release');
+  /* The release publishes SHA256SUMS.txt and nothing consumed it: a
+     compromised account or a swapped asset handed the installer over with no
+     automatic way for the person to notice. The manifest is fetched and the
+     bytes are checked before the file is called an installer. */
+  const sumsAsset = (release.assets || []).find((entry) => entry.name === 'SHA256SUMS.txt');
   const destination = path.join(os.tmpdir(), asset.name);
   log(`Downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)…`);
   await download(asset.browser_download_url, destination)
     .catch((error) => fail(`download failed: ${error.message}`));
+  if (sumsAsset) {
+    const sumsDestination = path.join(os.tmpdir(), 'SHA256SUMS.txt');
+    await download(sumsAsset.browser_download_url, sumsDestination)
+      .catch(() => undefined);
+    if (existsSync(sumsDestination)) {
+      const wanted = (readFileSync(sumsDestination, 'utf8').split('\n')
+        .find((line) => line.includes(asset.name)) || '').trim().split(/\s+/)[0];
+      if (wanted) {
+        const actual = createHash('sha256').update(readFileSync(destination)).digest('hex');
+        if (wanted.toLowerCase() !== actual) {
+          rmSync(destination, { force: true });
+          fail(`checksum mismatch for ${asset.name} — the file has been deleted, nothing was run`);
+        }
+        ok(`Checksum verified against SHA256SUMS.txt (${actual.slice(0, 16)}…)`);
+      }
+    }
+  }
   ok(`Installer saved to ${destination}`);
   log('Open the file to install — checksums live in SHA256SUMS.txt of the release.');
 }

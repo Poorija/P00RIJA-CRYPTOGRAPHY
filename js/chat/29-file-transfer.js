@@ -304,6 +304,33 @@ function notePeerAwaitingKeyAccept(session) {
   notify(t('فایل رد شد.', 'The file was declined.'), 'info');
 }
 
+/* The relay socket drains at the speed of the network, and a sender that
+   outruns it does not speed the file up — the bytes simply pile up in the
+   browser's own send buffer until the tab has copies of half the file in
+   memory. The live channel has awaited this since the beginning; the relay
+   leg now waits too, at the same watermarks. */
+const RELAY_SEND_HIGH_WATER = DATA_CHANNEL_HIGH_WATER;
+const RELAY_SEND_LOW_WATER = DATA_CHANNEL_LOW_WATER;
+function waitForRelaySocketDrain() {
+return new Promise((resolve) => {
+const ws = chatState.ws;
+if (!ws || ws.readyState !== WebSocket.OPEN) return resolve(false);
+if (ws.bufferedAmount <= RELAY_SEND_HIGH_WATER) return resolve(true);
+const started = Date.now();
+const poll = window.setInterval(() => {
+if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN
+|| Date.now() - started > TRANSFER_STALL_TIMEOUT_MS) {
+window.clearInterval(poll);
+resolve(Boolean(chatState.ws?.readyState === WebSocket.OPEN));
+return;
+}
+if (chatState.ws.bufferedAmount <= RELAY_SEND_LOW_WATER) {
+window.clearInterval(poll);
+resolve(true);
+}
+}, 40);
+});
+}
 /* Sends one blob to one session as `file-start` plus N `file-chunk` messages.
    Returns true when every piece was handed off — to the channel or, if the
    channel is not there, to the relay. The route is re-decided per chunk, so a
@@ -325,6 +352,9 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
       }
     }
     if (!peerRecord) return false;
+    /* Paced, not blasted: the relay socket has a buffer of its own, and the
+       browser holds whatever it is handed faster than the network drains. */
+    if (!await waitForRelaySocketDrain()) return false;
     const message = build(false);
     return sendSealedRelay(peerRecord, session, message, {
       createdAt: message.createdAt || createdAt,
@@ -337,8 +367,9 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
   const started = await deliver(() => ({ ...startMessage, v: 2, totalChunks, chunkBytes: FILE_CHUNK_BYTES }), () => { startWentLive = true; });
   if (!started) return false;
   /* Kept so a receiver that ends up with a gap can ask for those chunks again.
-     The blob costs nothing to hold — it is a handle to the file on disk. */
-  chatState.outgoingFiles.set(transferId, { blob, session, peerRecord });
+     The blob costs nothing to hold — it is a handle to the file on disk. The
+     message id rides along so the banner can find this transfer to cancel it. */
+  chatState.outgoingFiles.set(transferId, { blob, session, peerRecord, messageId: startMessage.messageId || '' });
   if (startWentLive && blob.size >= FILE_GATE_MIN_BYTES) {
     const consent = await waitForTransferConsent(transferId, session, blob.size, startMessage);
     if (consent !== 'accepted') {
@@ -366,6 +397,12 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
     }
   }
   let sent = 0;
+  /* The loop used to run bare: one exception — a file handle the picker had
+     already revoked, a key renegotiated mid-transfer — left the caller's
+     banner stuck at its last percentage for ever, because the failure path
+     that clears it only ran on a clean false. Nothing here may throw past
+     the transfer's own accounting. */
+  try {
   for (let index = 0; index < totalChunks; index += 1) {
     /* A decline can land mid-upload too — the moment the recipient refuses,
      the upload stops rather than filling their channel with bytes they asked
@@ -392,10 +429,23 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
     sent += slice.size;
     onProgress?.(sent, blob.size);
   }
+  } catch (error) {
+    console.warn('[Chat] the upload stopped on an error:', error);
+    chatState.outgoingFiles.delete(transferId);
+    return false;
+  }
   /* The window starts once the last chunk is out, not when the first was: a
      450 MB transfer takes longer than the window itself. */
   window.setTimeout(() => chatState.outgoingFiles.delete(transferId), TRANSFER_STALL_TIMEOUT_MS * 5);
   return true;
+}
+/* The sender's own way out. A decline stops an upload; this is the same flag
+   from this side — the banner is one tap, rather than a reload. */
+function cancelOutgoingTransfer(transferId) {
+const entry = transferId ? chatState.outgoingFiles.get(transferId) : null;
+if (!entry) return false;
+entry.aborted = true;
+return true;
 }
 /* Waits for the recipient's answer to a live file-start. 'accepted' lets the
    chunks flow; anything else cancels the upload before it begins. The banner
@@ -773,7 +823,14 @@ try {
    encrypted with the session key itself; enclosing it would be telling
    somebody who already has it. */
 body = await encryptForSession(session,
-new TextEncoder().encode(JSON.stringify({ message, homeRelay: returnRoute })));
+new TextEncoder().encode(JSON.stringify({
+message,
+homeRelay: returnRoute,
+/* A per-sender counter, inside the authenticated body: a relay that
+   replays an envelope it once carried hands back a number the receiver
+   has already seen, and ordering games become visible instead of free. */
+seq: session.sendSeq = (session.sendSeq || 0) + 1,
+})));
 body.v = 2;
 } catch (error) {
 console.warn('[Chat] could not seal the envelope metadata; sending it plainly', error);
@@ -790,6 +847,10 @@ createdAt, seal, messageClass, body, kex, notify: wakesTheDevice, scope,
    in queued/error frames has to ride on the envelope itself. */
 const relayTag = sanitizeRemoteId(message?.id || message?.messageId || '');
 if (relayTag) envelope.tag = relayTag;
+/* The sender's key vouches for the sender's name. Best effort: an old
+   receiver ignores the field, and a first contact has no pin to check
+   against yet. */
+await signOfflineEnvelope(envelope);
 return sendRelayEnvelope(peerRecord, envelope);
 }
 /* Everything the hello frame carries, sent to somebody the hello frame cannot
@@ -971,8 +1032,13 @@ function askIfPeerIsThere(peerRecord, { force = false } = {}) {
   keepAskingAboutTheOpenConversation();
   /* And hand them ours, asking for theirs, when something is missing. Opening a
      conversation is the moment a missing photograph is noticed, so it is the
-     moment to fix it. */
-  if (!peerRecord.avatarData) {
+     moment to fix it — but only for somebody who can answer. A card to an
+     absent contact is a queued envelope with the whole avatar inside, and
+     this runs on the presence loop: one a minute, for a person who cannot
+     reply until they return, is a thousand-odd envelopes a day landing in
+     their mailbox and evicting the mail that was real. Their presence
+     answer is what says they are there; the card follows it. */
+  if (!peerRecord.avatarData && typeof peerLooksOnline === 'function' && peerLooksOnline(peerRecord)) {
     sendProfileCard(peerRecord, { askForTheirs: true });
   }
   const tag = `presence-${fingerprint.slice(0, 12)}-${Date.now().toString(36)}`;
@@ -1139,6 +1205,15 @@ const EPHEMERAL_RELAY_TYPES = new Set([
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
   'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+  /* The group-call verbs carry the same staleness the 1:1 ones do — a stored
+     mute-toggle rings nobody and means nothing minutes later — and a group
+     call running for an hour emits them continuously. Every one of them used
+     to be persisted and pushed, so an offline member's device was woken once
+     per reaction per participant, and their mailbox filled with frames whose
+     moment had passed until the retention sweep pushed real mail back out.
+     gcall-invite stays out for the same reason call-invite does: it is the
+     one that rings somebody who was away. */
+  'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
 ]);
 function sendRelayEnvelope(peerRecord, payload) {
 if (hasActiveServerRestriction()) {
@@ -1195,6 +1270,14 @@ return true;
  * routableHomeRelay is the part that decides whether the claim is worth
  * acting on at all -- a hello is not an address; see 18-file-manager-2.js. */
 function transitRouteFor(peerRecord) {
+/* The person's own switch. Off means: route everything through the relay I am
+   connected to, even for contacts whose home relay is elsewhere — a decision
+   about metadata they are entitled to make, taken once in Settings →
+   Connection & TURN. Default is on, which is the arrangement the two-relay
+   privacy design exists for. The typeof guard keeps the function honest when
+   it is lifted out of the page and driven standalone, which the transit
+   suite does to test the routing decisions against a real relay. */
+if (typeof chatState !== 'undefined' && chatState?.profile?.crossRelayComm === false) return null;
 const home = typeof routableHomeRelay === 'function' ? routableHomeRelay(peerRecord) : null;
 if (!home) return null;
 const mine = relayPinFor(chatServerOrigin())?.id || '';
@@ -1236,24 +1319,34 @@ fallBackToDirect(frame, peerRecord, error?.message || '');
    on every message would be noise, and noise is how a warning stops being
    read. */
 function fallBackToDirect(frame, peerRecord, reason = '') {
-if (chatState.ws?.readyState === WebSocket.OPEN) chatState.ws.send(JSON.stringify(frame));
+/* The message goes out through this relay — so mark it, don't write a note.
+   A note per conversation was the old answer, and it failed both ways: too
+   loud the first time (a full system-note bubble for a piece of routing the
+   person cannot act on), and too quiet after it (the once-per-conversation
+   flag suppressed the truth for every message that followed). The message
+   itself now carries the fact: a small route icon beside its timestamp,
+   click it for the sentence. The icon is per-message, always correct, and
+   costs the thread nothing. */
+let sent = false;
+if (chatState.ws?.readyState === WebSocket.OPEN) {
+try { chatState.ws.send(JSON.stringify(frame)); sent = true; } catch (_error) { sent = false; }
+}
+if (!sent) return;
 const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
 if (!conversationId) return;
-chatState.transitFallbackNoted = chatState.transitFallbackNoted || new Set();
-if (chatState.transitFallbackNoted.has(conversationId)) return;
-chatState.transitFallbackNoted.add(conversationId);
-appendHistory(conversationId, {
-id: `transit-fallback-${Date.now()}`,
-type: 'system-note',
-direction: 'in',
-noteKind: 'transit-fallback',
-text: t(
-'این گفتگو قرار بود از مسیر رلهٔ دیگری برود، ولی آن مسیر در دسترس نبود و پیام از رلهٔ خودتان رفت. رلهٔ شما در این حالت می‌بیند که با چه کسی حرف می‌زنید. محتوای پیام همچنان رمزنگاری‌شده است.',
-'This conversation was meant to go through another relay, but that route was unavailable and the message went through your own. Your relay can see who you are talking to when that happens. The contents are still encrypted.',
-),
-createdAt: new Date().toISOString(),
-});
-renderPeers();
+/* Find the history entry this frame belongs to and set its flag. The tag on
+   the frame is the message id the sender used; without one there is nothing
+   to mark, and a system frame that carries no message has no icon to earn. */
+const messageId = String(frame?.payload?.tag || frame?.tag || frame?.payload?.id || frame?.payload?.messageId || '');
+if (!messageId) return;
+const history = chatState.history[conversationId] || [];
+const entry = history.find((item) => item.id === messageId);
+if (entry) {
+entry.transitFallback = true;
+storeHistory();
+/* Only the visible thread needs the icon — the flag lives in storage. */
+if (chatState.activeConversationId === conversationId) renderMessages();
+}
 }
 function relaySessionEvent(peerRecord, message) {
 if (!peerRecord || !message) return false;
@@ -1357,9 +1450,27 @@ session = {
 peerId: fromId,
 remoteFingerprint: message.fromFingerprint || '',
 };
-chatState.sessions.set(fromId, session);
-}
-/* A sealed envelope keeps its contents in `body`; only the seal opens it, and
+	chatState.sessions.set(fromId, session);
+	}
+	/* Who this claims to be, vouched for — or not — by the key that name is
+	   pinned to. Checked before anything is opened: the signature covers the
+	   sealed body and the claim, neither of which needs decrypting first. A
+	   verdict of forged means a pinned key disagrees with what arrived, and
+	   the envelope is acknowledged away rather than rendered: it can never
+	   become genuine by being redelivered. */
+	const senderVerdict = await verifyOfflineEnvelopeSender(payload, fromId);
+	if (senderVerdict === 'forged') {
+	chatState.forgedEnvelopes = (chatState.forgedEnvelopes || 0) + 1;
+	console.warn(`[Chat] an envelope arrived claiming to be ${fromId} whose signature the pinned key refuses`);
+	if (chatState.forgedEnvelopes === 1) {
+	notify(t(
+	'پیامی رسید که خودش را یک مخاطب جا زده و امضایش رد شد؛ نادیده گرفته شد.',
+	'A message arrived posing as a contact and its signature was refused; it was ignored.',
+	), 'warning');
+	}
+	return true;
+	}
+	/* A sealed envelope keeps its contents in `body`; only the seal opens it, and
    only the recipient's private key opens the seal. `message` is the older,
    plaintext shape — still read so anything already queued keeps working. */
 let innerMessage = payload.message;
@@ -1417,11 +1528,22 @@ app().base64ToArrayBuffer(payload.body.cipher),
 const opened = JSON.parse(new TextDecoder().decode(plain));
 /* v2 envelopes wrap the message together with the key its contents were
    encrypted under; v1 held the message alone. */
-if (payload.body.v === 2 && opened && typeof opened === 'object' && 'message' in opened) {
-innerMessage = opened.message;
-enclosedSessionKeyRaw = String(opened.sessionKeyRaw || '');
-if (opened.homeRelay) noteSenderHomeRelay(payload, opened.homeRelay);
-} else {
+	if (payload.body.v === 2 && opened && typeof opened === 'object' && 'message' in opened) {
+	/* The counter travels inside the authenticated body, so the relay cannot
+	   subtract from it or reset it. A number the session has already passed is
+	   a replay of something already rendered — dropped and acknowledged,
+	   because redelivery will not make it newer. */
+	if (typeof opened.seq === 'number' && Number.isFinite(opened.seq)) {
+	if (typeof session.recvSeq === 'number' && opened.seq <= session.recvSeq) {
+		console.warn(`[Chat] dropped a replayed envelope from ${fromId} (seq ${opened.seq} <= ${session.recvSeq})`);
+		return true;
+	}
+	session.recvSeq = opened.seq;
+	}
+	innerMessage = opened.message;
+	enclosedSessionKeyRaw = String(opened.sessionKeyRaw || '');
+	if (opened.homeRelay) noteSenderHomeRelay(payload, opened.homeRelay);
+	} else {
 innerMessage = opened;
 }
 	} catch (error) {
@@ -1666,7 +1788,11 @@ const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, remotePublicKe
 clearSessionKeyFallback(session);
 session.cryptoKey = cryptoKey;
 session.keyReady = true;
-session.keySource = 'negotiated';
+/* Named for what it is: a key wrapped to a never-changing public key is no
+   forward secrecy at all, whatever the word that used to sit here. The name
+   is what tells the far side whether to accept a chat-key from this
+   connection, so it must not flatter the path that produced it. */
+session.keySource = 'legacy';
 session.keyNegotiatedFor = session.connection;
 await persistSessionKey(session, rawKey);
 if (session.connection?.open) {
@@ -1825,36 +1951,53 @@ renderPeers();
 renderActivePeer();
 return;
 }
-if (message.type === 'chat-key') {
-// `if (session.cryptoKey) return` used to stand here, and it is what broke
-// the pair for good: a key revived from storage made this side reject the
-// fresh one the peer had just minted, so each end encrypted under a key the
-// other did not hold. Only the owner's own freshly minted key outranks an
-// incoming one.
-if (sessionKeyOwner(session) && session.keySource === 'negotiated'
-&& session.keyNegotiatedFor === session.connection) return;
-const privateKey = await importIdentityPrivateKey();
-const raw = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, app().base64ToArrayBuffer(message.wrappedKey));
-clearSessionKeyFallback(session);
-session.cryptoKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
-session.keyReady = true;
-session.keySource = 'negotiated';
-session.keyNegotiatedFor = session.connection;
-await persistSessionKey(session, raw);
-renderActivePeer();
-renderMessages();
-return;
-}
+	if (message.type === 'chat-key') {
+	// `if (session.cryptoKey) return` used to stand here, and it is what broke
+	// the pair for good: a key revived from storage made this side reject the
+	// fresh one the peer had just minted, so each end encrypted under a key the
+	// other did not hold. Only the owner's own freshly minted key outranks an
+	// incoming one — of either kind, now that legacy has its own name.
+	if (sessionKeyOwner(session) && session.keyReady
+	&& session.keyNegotiatedFor === session.connection) return;
+	/* A peer that can do the exchange does not deliver keys this way, and a
+	   chat-key from one that can is not an old build being accommodated — it
+	   is the exchange being bypassed. The kex path binds both contributions
+	   to the pinned identity keys; this path hands the session to whatever
+	   key the connection cares to wrap, so for a peer who has offered or
+	   answered an exchange — or who publishes a prekey, which no pre-kex
+	   build ever did — the answer is no. The 4-second fallback still catches
+	   the genuinely old build: it publishes no prekey and speaks no kex. */
+	const peerRecord = typeof findPeerRecordByPeerId === 'function'
+	? findPeerRecordByPeerId(session.peerId) : null;
+	if (session.peerDidKex || peerRecord?.prekeyPublic) {
+	console.warn('[Chat] refused a legacy chat-key from a peer that can do the key exchange');
+	return;
+	}
+	const privateKey = await importIdentityPrivateKey();
+	const raw = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, app().base64ToArrayBuffer(message.wrappedKey));
+	clearSessionKeyFallback(session);
+	session.cryptoKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+	session.keyReady = true;
+	session.keySource = 'legacy';
+	session.keyNegotiatedFor = session.connection;
+	await persistSessionKey(session, raw);
+	renderActivePeer();
+	renderMessages();
+	return;
+	}
 if (message.type === 'kex-offer') {
 /* Their ephemeral public, sealed to us. Answer with ours, then derive.
    The fallback timer has to stop first: an exchange is a round trip, and the
    non-owner's "the key never arrived" timer would otherwise fire mid-exchange
    and mint a key of its own — which is exactly how the two sides ended up
    holding different keys while both reported a healthy negotiated session. */
-clearSessionKeyFallback(session);
-try {
-const theirPublic = await openKexContribution(message.pub);
-const ephemeral = await generateEcdhPair();
+	clearSessionKeyFallback(session);
+	try {
+	const theirPublic = await openKexContribution(message.pub);
+	/* They can do this. Remembered, so a chat-key arriving later on the same
+	   connection is read as the bypass it would be. */
+	session.peerDidKex = true;
+	const ephemeral = await generateEcdhPair();
 const remotePublicKey = await importIdentityPublicKey(session.remotePublicKeyData);
 const sealed = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, remotePublicKey,
 new TextEncoder().encode(ephemeral.publicKeyData));
@@ -1869,11 +2012,13 @@ console.warn('[Chat] could not answer a key exchange:', error);
 }
 return;
 }
-if (message.type === 'kex-answer') {
-try {
-if (!session.kexPrivate) return;
-const theirPublic = await openKexContribution(message.pub);
-await completeKex(session, theirPublic, session.kexPrivate);
+	if (message.type === 'kex-answer') {
+	try {
+	if (!session.kexPrivate) return;
+	const theirPublic = await openKexContribution(message.pub);
+	/* An answer is proof of the same capability an offer is. */
+	session.peerDidKex = true;
+	await completeKex(session, theirPublic, session.kexPrivate);
 } catch (error) {
 console.warn('[Chat] could not finish a key exchange:', error);
 }
@@ -2075,10 +2220,21 @@ return;
 	/* The transfer record used to take totalChunks and size as claimed, so a
 	   hostile or broken peer could pre-allocate an enormous array (or one that
 	   never fills and rings the watchdog forever). The chunk count is clamped
-	   and an impossible size is refused outright. */
+	   and an impossible size is refused outright.
+	   The clamp and the ceiling have to describe the same file, though: the
+	   sender is allowed 4 GB, the clamp here used to allow 20,000 chunks —
+	   64 KB each is barely 1.2 GB — so everything above that line was silently
+	   truncated on receipt: the first 20,000 chunks assembled into a shorter
+	   file, stored, and acknowledged as delivered, and both sides believed a
+	   complete transfer had happened. The count is now derived from the same
+	   ceiling the sender answers to, and a count that cannot be the claimed
+	   size (allowing one short tail chunk) is refused rather than cut to fit. */
 	const claimedSize = Number(message.size);
-	const totalChunks = Math.min(Math.max(1, Number(message.totalChunks) || 0), 20000);
-	if (!Number.isFinite(claimedSize) || claimedSize > MAX_FILE_BYTES) {
+	const claimedChunks = Math.max(1, Number(message.totalChunks) || 0);
+	const maxChunks = Math.ceil(MAX_FILE_BYTES / FILE_CHUNK_BYTES);
+	const totalChunks = Math.min(claimedChunks, maxChunks);
+	if (!Number.isFinite(claimedSize) || claimedSize > MAX_FILE_BYTES
+	|| Math.abs(claimedChunks - Math.ceil(claimedSize / FILE_CHUNK_BYTES)) > 1) {
 	notify(t(
 	'یک فایل با حجم نامعتبر یا بیش از حد مجاز نادیده گرفته شد.',
 	'A file with an invalid or oversized length was ignored.',

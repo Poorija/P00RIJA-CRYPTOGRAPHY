@@ -180,7 +180,23 @@ good "Code replaced"
 
 if command -v docker >/dev/null 2>&1 && [ -f config/docker-compose.yaml ]; then
     say "Rebuilding and restarting the services"
-    if docker compose -f config/docker-compose.yaml up -d --build; then
+    # --env-file, because the compose file lives in config/ and compose looks
+    # for the environment beside the YAML, not beside this script: without it
+    # the required variables (DOMAIN, the TURN pair, MONITOR_PASSWORD) are
+    # read as missing and the stack refuses to come back up — on a server that
+    # was just updated, with the snapshot prompt already on screen.
+    ENV_FILE="${POORIJA_ENV_FILE:-$ROOT/.env}"
+    if [ ! -f "$ENV_FILE" ]; then
+        fail "No .env at $ENV_FILE — the stack cannot start without it."
+        dim "Point at one with POORIJA_ENV_FILE=/path/to/.env"
+        exit 1
+    fi
+    # Same project name discovery sync-to-server uses, so the update restarts
+    # the SAME stack rather than a second one beside it.
+    PROJECT_NAME="${POORIJA_COMPOSE_PROJECT:-$(docker inspect Poorija-Cryptography_ChatSignal \
+        --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)}"
+    [ -n "$PROJECT_NAME" ] || PROJECT_NAME="config"
+    if docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f config/docker-compose.yaml up -d --build; then
         good "Services are up on $REMOTE_VERSION"
     else
         fail "The services did not come back. Restore with:"

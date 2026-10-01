@@ -184,6 +184,13 @@ try {
   section('a client on each');
   const a = await openApp('north', { origin: A_APP, relay: A_RELAY });
   const b = await openApp('south', { origin: B_APP, relay: B_RELAY });
+  /* The relay pin is fetched asynchronously after the WebSocket connects, and
+   * against real servers with real latency the 5.5s inside openApp is not
+   * always enough. Without the pin the identity card carries an empty relay,
+   * and every check below that depends on routing falls like dominoes. Wait
+   * for both to have pinned before reading anything. */
+  await waitFor(a, () => Boolean(window.relayPinFor?.(window.chatServerOrigin?.())?.id), { timeoutMs: 45000 });
+  await waitFor(b, () => Boolean(window.relayPinFor?.(window.chatServerOrigin?.())?.id), { timeoutMs: 45000 });
   const factsA = await relayFacts(a);
   const factsB = await relayFacts(b);
   check('the first client got a peer id from its own relay', factsA.peerId.length > 8, factsA.peerId.slice(0, 16));

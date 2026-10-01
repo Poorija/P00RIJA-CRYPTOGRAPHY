@@ -387,9 +387,15 @@ members: normalized.members || existing.members,
 manual: existing.manual || normalized.manual,
 pinned: existing.pinned || normalized.pinned,
 pinOrder: existing.pinOrder || normalized.pinOrder,
-status: options.online ? 'online' : (normalized.status || existing.status || 'offline'),
-lastSeenAt,
-});
+	/* The relay says three things about a peer — online, away, gone — and the
+	   merge used to hear only two of them: `online: true` flattened an away
+	   peer into an online one, so a frozen or backgrounded device showed a
+	   green dot and its correspondents kept handing messages to a channel
+	   nobody was draining. Away is the relay's word for "the socket is there
+	   and the person is not"; it outranks the socket. */
+	status: options.online ? (normalized.status === 'away' ? 'away' : 'online') : (normalized.status || existing.status || 'offline'),
+	lastSeenAt,
+	});
 return existing;
 }
 /* First sight is what gets pinned — unless this identity's trust was already
@@ -740,7 +746,11 @@ if (!peer || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return
 const now = Date.now();
 if (chatState.lastTypingSentAt && now - chatState.lastTypingSentAt < 3000) return;
 chatState.lastTypingSentAt = now;
-sendRelayEnvelope(peer, { type: 'typing' });
+/* The sender travels inside the payload, not on the envelope: a relay
+   delivering over transit blanks the envelope-level fingerprint (nothing was
+   proved on that leg), so without this the far side hunted for a peer by a
+   name that was not there. */
+sendRelayEnvelope(peer, { type: 'typing', fromFingerprint: chatState.identity?.fingerprint || '' });
 }
 function handleRemoteTyping(fingerprint) {
 const peer = chatState.peers.find((p) => p.fingerprint === fingerprint);

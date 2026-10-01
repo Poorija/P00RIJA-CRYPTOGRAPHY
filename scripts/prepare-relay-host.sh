@@ -153,7 +153,12 @@ fi
 log "Install directory"
 for dir in "$HOME_DIR/$INSTALL_REL" "$HOME_DIR/backups"; do
     mkdir -p "$dir"
-    chown -R "$ACCOUNT:$ACCOUNT" "$(dirname "$dir")"
+    # The directory it was asked for, and only that. The chown used to run on
+    # the PARENT of each path — the second iteration's parent is the whole
+    # home directory, so one run of this script handed every file under an
+    # account's home to the relay user, including files deliberately left
+    # root-owned.
+    chown "$ACCOUNT:$ACCOUNT" "$dir"
     printf "    %s\n" "$dir"
 done
 chmod 700 "$HOME_DIR/backups"

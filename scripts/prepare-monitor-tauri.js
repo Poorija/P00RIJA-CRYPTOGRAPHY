@@ -18,11 +18,28 @@ const outDir = path.join(root, 'dist', 'tauri-monitor');
 const entries = [
   'assets',
   'css',
-  'data',
   'fonts',
   'js',
   'vendor'
 ];
+
+/* Nothing under the server's state directory may ship inside a binary.
+ * data/ holds vapid.json — the Web Push PRIVATE key of whichever relay this
+ * checkout happens to have run. The main app's prepare step refuses exactly
+ * this, with a post-copy audit of what actually shipped; the monitor build
+ * had simply never been given the list. Anyone extracting the assets of a
+ * monitor binary built on a relay host would have taken the key that lets
+ * them push as that server. */
+const NEVER_BUNDLE = ['data', 'certs', 'vapid', 'keystore'];
+function bundleFilter(file) {
+  const relative = path.relative(root, file);
+  const base = path.basename(relative);
+  if (NEVER_BUNDLE.some((word) => relative === word || relative.startsWith(word + path.sep)
+    || base.includes(word) || base === '.env' || base.endsWith('.pem') || base.endsWith('.key'))) {
+    return false;
+  }
+  return !file.endsWith('.DS_Store');
+}
 
 // Use native rm -rf for maximum robustness on macOS/Linux to avoid ENOTEMPTY issues
 try {
@@ -48,9 +65,32 @@ for (const entry of entries) {
   if (!fs.existsSync(source)) continue;
   fs.cpSync(source, target, {
     recursive: true,
-    filter: (file) => !file.endsWith('.DS_Store')
+    filter: bundleFilter
   });
 }
+
+/* The audit of what actually shipped, not what was asked for: a directory
+ * copied by a list can grow a secret when nobody is watching the list. */
+(function auditShipped() {
+  const offenders = [];
+  (function walk(dir) {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (fs.statSync(full).isDirectory()) walk(full);
+      else {
+        const rel = path.relative(outDir, full);
+        const base = path.basename(rel);
+        if (NEVER_BUNDLE.some((word) => rel.startsWith(word + path.sep) || base.includes(word))
+          || base === '.env' || base.endsWith('.pem') || base.endsWith('.key')) offenders.push(rel);
+      }
+    }
+  })(outDir);
+  if (offenders.length) {
+    console.error('Refusing to build: the monitor bundle would ship server secrets:');
+    for (const rel of offenders) console.error('  ' + rel);
+    process.exit(1);
+  }
+})();
 
 const monitorSource = path.join(root, 'monitor-client.html');
 const monitorTarget = path.join(outDir, 'index.html');

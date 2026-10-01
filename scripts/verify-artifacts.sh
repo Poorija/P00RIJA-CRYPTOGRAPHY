@@ -32,20 +32,24 @@ check_binary() {
     local missing=""
     # Substring, not whole-line: `strings` runs the asset keys together with
     # whatever bytes sit next to them in the table, so an exact-line match
-    # finds nothing even when the key is there. Piping straight from `strings`
-    # each time rather than holding the dump in a variable — it is tens of
-    # megabytes and a shell variable mangles it.
+    # finds nothing even when the key is there. A temp file, not a shell
+    # variable — the dump is tens of megabytes and a shell variable mangles
+    # it — and one dump per binary rather than one per key: the same
+    # multi-hundred-megabyte scan four times was most of the suite's runtime.
     # `grep -c`, not `grep -q`: -q exits on the first match and closes the
     # pipe, `strings` dies of SIGPIPE, and `set -o pipefail` then reports the
     # whole pipeline as failed — turning every hit into a miss.
     # js/chat/01-constants.js stands in for the chat module: it is the first
     # part every build loads, and naming the old single js/chat.js here made
     # every installer report as broken.
+    local dump="${TMPDIR:-/tmp}/poorija-verify-strings.$$"
+    strings -a "$path" > "$dump"
     for key in "/js/dialogs.js" "/js/desktop-bridge.js" "/js/chat/01-constants.js" "/index.html"; do
         local hits
-        hits="$(strings -a "$path" | grep -Fc -- "$key")"
+        hits="$(grep -Fc -- "$key" "$dump")"
         [ "${hits:-0}" -gt 0 ] || missing="$missing $key"
     done
+    rm -f "$dump"
     if [ -n "$missing" ]; then
         printf "${ERROR}  FAIL   %-26s missing:%s${NC}\n" "$label" "$missing"
         fail=$((fail + 1))

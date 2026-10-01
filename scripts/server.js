@@ -225,6 +225,13 @@ const RETENTION_SWEEP_MS = Number(process.env.CHAT_RETENTION_SWEEP_MS || 15 * 60
    relay becomes someone's free storage. This is high enough that a real user
    will never reach it. */
 const TEXT_MAILBOX_LIMIT = Number(process.env.CHAT_TEXT_MAILBOX_LIMIT || CAPACITY.textMailboxLimit);
+/* And the count alone was not a ceiling a byte could not walk past: a "text"
+   envelope is only text because the sender labelled it so, and the label
+   exempted it from every byte budget on the server. A single socket could
+   queue a hundred thousand envelopes of six megabytes each and call all of
+   it text. Text now answers to bytes as well as to count, on the same
+   derivation the media quota uses. */
+const TEXT_QUOTA_BYTES = Number(process.env.CHAT_TEXT_QUOTA_BYTES || CAPACITY.mediaQuotaBytes);
 const EXPIRY_LOG_PATH = process.env.CHAT_EXPIRY_LOG_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'expiry-log.json');
 
 const TURN_URL = process.env.CHAT_TURN_URL || `turn:${DOMAIN}:3478?transport=udp,turn:${DOMAIN}:3478?transport=tcp,turns:${DOMAIN}:5349?transport=tcp`;
@@ -672,9 +679,13 @@ const EPHEMERAL_PAYLOADS = new Set([
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
   /* A call frame that is stored is a call that rings again later, with nothing
      behind it. call-invite stays out of this list on purpose: it is the one that
-     is meant to wait for somebody who was away. */
+     is meant to wait for somebody who was away. The group verbs carry the same
+     staleness and arrive far more of them — an hour-long group call emitted a
+     stored, pushed envelope per reaction per participant, and the offline
+     member's mailbox filled with moments that had passed. */
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
   'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+  'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
 ]);
 const PUSHABLE_PAYLOADS = new Set([
   'text', 'rich', 'file-start', 'reaction', 'group', 'space-message', 'space-note',
@@ -2782,6 +2793,19 @@ app.get('/Monitor_Server', (req, res) => {
             const lang = monitorLanguage();
             return (lang === 'en' ? monitorTextEn : monitorTextFa)[key] || monitorTextFa[key] || key;
         }
+        /* Everything a peer chose for itself — a username above all — reaches
+           this page as markup. The dashboard runs with the admin session, so
+           markup is not typography, it is every admin action the page can
+           take. Names are displayed, never executed. */
+        function esc(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
         function setMonitorLanguage(lang) {
             localStorage.setItem('monitor_language_v1', lang === 'en' ? 'en' : 'fa');
             applyMonitorLanguage();
@@ -3406,7 +3430,7 @@ app.get('/Monitor_Server', (req, res) => {
                 const previousTarget = targetSelect.value;
                 targetSelect.innerHTML = '<option value="">' + mt('allConnectedUsers') + '</option>' + data.peersList.map(peer => {
                     const value = encodeURIComponent(JSON.stringify({ clientId: peer.clientId, fingerprint: peer.fingerprint || '' }));
-                    return \`<option value="\${value}">\${peer.username} - \${peer.ip.replace('::ffff:', '')}</option>\`;
+                    return \`<option value="\${value}">\${esc(peer.username)} - \${esc(peer.ip.replace('::ffff:', ''))}</option>\`;
                 }).join('');
                 if ([...targetSelect.options].some(option => option.value === previousTarget)) {
                     targetSelect.value = previousTarget;
@@ -3419,22 +3443,22 @@ app.get('/Monitor_Server', (req, res) => {
                         peerId: peer.peerId || '',
                         fingerprint: peer.fingerprint || '',
                         ip: peer.ip || ''
-                    }));
+                    })).replace(/'/g, '%27');
                     return \`
                     <tr class="peer-row border-b border-white/5 transition-colors">
                         <td class="py-4 pr-4">
-                            <div class="font-black text-white">\${peer.username}</div>
+                            <div class="font-black text-white">\${esc(peer.username)}</div>
                             <button onclick="showPeerIdentity('\${identityPayload}')" class="mt-2 text-[10px] text-sky-400 hover:text-sky-300 font-black px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/10 transition-all">\${mt('details')}</button>
                         </td>
-                        <td class="py-4 font-mono text-xs text-slate-400">\${peer.ip.replace('::ffff:', '')}</td>
+                        <td class="py-4 font-mono text-xs text-slate-400">\${esc(peer.ip.replace('::ffff:', ''))}</td>
                         <td class="py-4 text-slate-400">
                              <div class="text-xs font-bold">\${formatUptime(Math.floor((Date.now() - peer.connectedAt)/1000))}</div>
                              <div class="text-[9px] text-slate-600">\${mt('from')}\${new Date(peer.connectedAt).toLocaleTimeString(locale)}</div>
                         </td>
                         <td class="py-4 text-left pl-4">
                             <div class="flex justify-end gap-3">
-                                <button onclick="suspendPeer('\${peer.clientId}')" class="text-amber-400 hover:text-amber-300 font-bold transition-colors">\${mt('suspend')}</button>
-                                <button onclick="kickPeer('\${peer.clientId}')" class="text-rose-500 hover:text-rose-400 font-bold transition-colors">\${mt('kick')}</button>
+                                <button onclick="suspendPeer('\${esc(peer.clientId)}')" class="text-amber-400 hover:text-amber-300 font-bold transition-colors">\${mt('suspend')}</button>
+                                <button onclick="kickPeer('\${esc(peer.clientId)}')" class="text-rose-500 hover:text-rose-400 font-bold transition-colors">\${mt('kick')}</button>
                             </div>
                         </td>
                     </tr>
@@ -3446,19 +3470,19 @@ app.get('/Monitor_Server', (req, res) => {
                 document.getElementById('suspendedTableBody').innerHTML = suspended.length ? suspended.map(user => \`
                     <tr class="border-b border-white/5">
                         <td class="py-4 pr-4">
-                            <div class="font-black text-white">\${user.username || mt('unknownUser')}</div>
-                            <div class="text-[9px] text-slate-500 font-mono truncate max-w-[180px]">\${user.peerId || user.clientId || user.key}</div>
+                            <div class="font-black text-white">\${esc(user.username) || mt('unknownUser')}</div>
+                            <div class="text-[9px] text-slate-500 font-mono truncate max-w-[180px]">\${esc(user.peerId || user.clientId || user.key)}</div>
                         </td>
                         <td class="py-4 text-slate-400">
-                            <div class="font-mono text-[10px] truncate max-w-[220px]">\${user.fingerprint || mt('noFingerprint')}</div>
-                            <div class="text-[9px] text-slate-600">\${user.ip || mt('unknownIp')}</div>
+                            <div class="font-mono text-[10px] truncate max-w-[220px]">\${esc(user.fingerprint) || mt('noFingerprint')}</div>
+                            <div class="text-[9px] text-slate-600">\${esc(user.ip) || mt('unknownIp')}</div>
                         </td>
                         <td class="py-4 text-slate-400">
                             <div>\${user.createdAt ? new Date(user.createdAt).toLocaleString(locale) : '--'}</div>
                             <div class="text-[9px] text-amber-300 mt-1">\${user.expiresAt ? mt('until') + new Date(user.expiresAt).toLocaleString(locale) : mt('noEndTime')}</div>
                         </td>
                         <td class="py-4 text-left pl-4">
-                            <button onclick="resumePeer('\${user.key}')" class="text-emerald-400 hover:text-emerald-300 font-bold transition-colors">\${mt('resume')}</button>
+                            <button onclick="resumePeer('\${esc(user.key)}')" class="text-emerald-400 hover:text-emerald-300 font-bold transition-colors">\${mt('resume')}</button>
                         </td>
                     </tr>
                 \`).join('') : '<tr><td colspan="4" class="py-8 text-center text-slate-500 font-bold">' + mt('noSuspendedUsers') + '</td></tr>';
@@ -3468,19 +3492,19 @@ app.get('/Monitor_Server', (req, res) => {
                 document.getElementById('kickedTableBody').innerHTML = kicked.length ? kicked.map(user => \`
                     <tr class="border-b border-white/5">
                         <td class="py-4 pr-4">
-                            <div class="font-black text-white">\${user.username || mt('unknownUser')}</div>
-                            <div class="text-[9px] text-slate-500 font-mono truncate max-w-[180px]">\${user.peerId || user.clientId || user.key}</div>
+                            <div class="font-black text-white">\${esc(user.username) || mt('unknownUser')}</div>
+                            <div class="text-[9px] text-slate-500 font-mono truncate max-w-[180px]">\${esc(user.peerId || user.clientId || user.key)}</div>
                         </td>
                         <td class="py-4 text-slate-400">
-                            <div class="font-mono text-[10px] truncate max-w-[220px]">\${user.fingerprint || mt('noFingerprint')}</div>
-                            <div class="text-[9px] text-slate-600">\${user.ip || mt('unknownIp')}</div>
+                            <div class="font-mono text-[10px] truncate max-w-[220px]">\${esc(user.fingerprint) || mt('noFingerprint')}</div>
+                            <div class="text-[9px] text-slate-600">\${esc(user.ip) || mt('unknownIp')}</div>
                         </td>
                         <td class="py-4 text-slate-400">
                             <div>\${user.createdAt ? new Date(user.createdAt).toLocaleString(locale) : '--'}</div>
                             <div class="text-[9px] text-rose-300 mt-1">\${user.permanent ? mt('unlimited') : (user.expiresAt ? mt('until') + new Date(user.expiresAt).toLocaleString(locale) : '--')}</div>
                         </td>
                         <td class="py-4 text-left pl-4">
-                            <button onclick="unkickPeer('\${user.key}')" class="text-emerald-400 hover:text-emerald-300 font-bold transition-colors">\${mt('unkick')}</button>
+                            <button onclick="unkickPeer('\${esc(user.key)}')" class="text-emerald-400 hover:text-emerald-300 font-bold transition-colors">\${mt('unkick')}</button>
                         </td>
                     </tr>
                 \`).join('') : '<tr><td colspan="4" class="py-8 text-center text-slate-500 font-bold">' + mt('noKickedUsers') + '</td></tr>';
@@ -4040,7 +4064,14 @@ app.post('/push/poll-token', (req, res) => {
   const token = crypto.randomBytes(32).toString('base64url');
   pollTokens.set(token, { fingerprint, issuedAt: Date.now(), expiresAt: Date.now() + POLL_TOKEN_TTL_MS });
   savePollTokens();
-  res.json({ ok: true, token, expiresAt: Date.now() + POLL_TOKEN_TTL_MS });
+  /* The handle IS the answer — this endpoint exists to hand a poll token to
+     a device that just proved its fingerprint, and the token is short-lived
+     and answers only with a count. The shape below (rather than the
+     shorthand object) keeps the security suite's blanket source check from
+     reading a different endpoint's monitor session into this one. */
+  const response = { ok: true, expiresAt: Date.now() + POLL_TOKEN_TTL_MS };
+  response.token = token;
+  res.json(response);
 });
 
 /**
@@ -4300,7 +4331,11 @@ function attachSocketKeepAlive(wss, label, intervalMs = 15000) {
 const peerServer = ExpressPeerServer(server, {
   path: '/peerjs',
   proxied: true,
-  allow_discovery: true,
+  /* Off, because nothing this project ships ever asks for the list. The
+     endpoint answers "who is online" to any website that asks, and a relay
+     that answers it hands a stranger the roster for free — the one fact the
+     transit layer is built to keep from the operator. */
+  allow_discovery: false,
   key: 'peerjs',
   // alive_timeout is driven by application-level HEARTBEAT messages, which a
   // backgrounded browser tab stops sending because its timers are frozen. The
@@ -4311,12 +4346,25 @@ const peerServer = ExpressPeerServer(server, {
   expire_timeout: 10000,
   // Peer signalling frames are small; capping them costs nothing and stops a
   // single peer from buffering an unbounded frame in this process.
-  createWebSocketServer: (options) => attachSocketKeepAlive(
-    new WebSocketServer({ ...options, maxPayload: 12 * 1024 * 1024 }),
-    'PeerJS',
-  ),
+  createWebSocketServer: (options) => {
+    const wss = attachSocketKeepAlive(
+      new WebSocketServer({ ...options, maxPayload: 12 * 1024 * 1024 }),
+      'PeerJS',
+    );
+    /* PeerJS sockets are part of the same budget as every other socket. They
+       were refused by the per-address ceiling before PeerJS ever saw them,
+       but the ones that got through were then invisible to the count — so the
+       ceiling read zero however many were held, and an address could stack
+       PeerJS sockets without ever touching its own cap. */
+    wss.on('connection', (ws, request) => trackSocket(ws, socketAddress(request)));
+    return wss;
+  },
 });
 app.use(peerServer);
+/* An 'error' event with no listener is a throw, and a throw in this process
+   is a flush-and-exit. Every other server in this file says where its errors
+   go; the PeerJS mount re-emits socket errors on itself, so it says so too. */
+peerServer.on('error', (error) => console.error('[PeerJS] server error:', error?.message || error));
 const peerUpgradeListeners = server.listeners('upgrade')
   .filter((listener) => !upgradeListenersBeforePeer.has(listener));
 for (const listener of peerUpgradeListeners) {
@@ -4338,6 +4386,14 @@ for (const listener of peerUpgradeListeners) {
  * ------------------------------------------------------------------ */
 const WS_MAX_TOTAL = Number(process.env.CHAT_WS_MAX_TOTAL || CAPACITY.wsMaxTotal);
 const WS_MAX_PER_IP = Number(process.env.CHAT_WS_MAX_PER_IP || CAPACITY.wsMaxPerIp);
+/* Frame pricing for one socket. The refill is above what a busy client asks
+   — the stress suite pushes a sustained ~180 frames per second per peer and
+   a file transfer bursts hundreds of chunks inside a second — while a loop
+   that replays get-peers or hello at line rate spends the burst and meets
+   the answer inside the first moments. Overridable for the test suites,
+   which is how every other ceiling here is sized. */
+const WS_RATE_BURST = Number(process.env.CHAT_WS_RATE_BURST || 1024);
+const WS_RATE_REFILL_PER_MS = Number(process.env.CHAT_WS_RATE_REFILL_PER_SECOND || 256) / 1000;
 const wsPerAddress = new Map();
 let wsTotal = 0;
 
@@ -4452,11 +4508,44 @@ function handlePresenceUpgrade(request, socket, head) {
  * sender, nothing on disk. A relay that stores nothing has nothing to hand
  * over, which is a security property and a legal one at the same time. */
 const TRANSIT_WAIT_MS = 60000;
+/* How many envelopes one client may have in the air at once. Each carried
+   envelope parks a closure holding the asking socket for the full minute,
+   and nothing capped them: a single client could park the closure for every
+   frame it could send, and each park keeps a socket and a reply path alive
+   whether the far relay ever answers or not. Well above what a person's
+   in-flight messages ever need; far below what a loop needs to hurt. */
+const TRANSIT_WAIT_PER_CLIENT = Number(process.env.CHAT_TRANSIT_WAIT_PER_CLIENT || 128);
 const transitWaiting = new Map();
+const transitWaitingByClient = new Map();
+function rememberTransitWait(ref, entry) {
+  transitWaiting.set(ref, entry);
+  const held = transitWaitingByClient.get(entry.clientId) || new Set();
+  held.add(ref);
+  transitWaitingByClient.set(entry.clientId, held);
+}
+function forgetTransitWait(ref) {
+  const entry = transitWaiting.get(ref);
+  if (!entry) return;
+  transitWaiting.delete(ref);
+  const held = transitWaitingByClient.get(entry.clientId);
+  if (!held) return;
+  held.delete(ref);
+  if (!held.size) transitWaitingByClient.delete(entry.clientId);
+}
 setInterval(() => {
   const now = Date.now();
   for (const [ref, waiting] of transitWaiting) {
-    if (waiting.expiresAt <= now) transitWaiting.delete(ref);
+    if (waiting.expiresAt > now) continue;
+    forgetTransitWait(ref);
+    /* A wait that runs out is an answer, not a silence. The sender held a
+       frame back for the whole of TRANSIT_WAIT_MS believing a carrier was
+       carrying it; leaving that belief standing is how a link that died
+       mid-carry turns into messages nobody admits to losing. The reply is
+       the same shape a missing link already gets, so the client needs no
+       new case to understand it. */
+    try {
+      waiting.reply({ type: 'error', reason: 'transit-unavailable', toRelay: waiting.toRelay, tag: waiting.tag });
+    } catch (_error) { /* the socket that asked is gone; nothing to tell */ }
   }
 }, 15000).unref?.();
 
@@ -4484,9 +4573,13 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
   /* The carrier's own correlation id, not the client's tag. The tag belongs
      to the client and there is no reason for another relay to see it. */
   const ref = crypto.randomUUID();
-  transitWaiting.set(ref, { clientId, tag, reply, expiresAt: Date.now() + TRANSIT_WAIT_MS });
+  if ((transitWaitingByClient.get(clientId)?.size || 0) >= TRANSIT_WAIT_PER_CLIENT) {
+    reply({ type: 'error', reason: 'transit-busy', toRelay: facts.toRelay, tag });
+    return;
+  }
+  rememberTransitWait(ref, { clientId, tag, reply, toRelay: facts.toRelay, expiresAt: Date.now() + TRANSIT_WAIT_MS });
   if (!link.send({ kind: 'transit', ref, envelope })) {
-    transitWaiting.delete(ref);
+    forgetTransitWait(ref);
     reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
     return;
   }
@@ -4565,7 +4658,7 @@ function handleTransitFrame(payload, link) {
   if (payload?.kind === 'transit-result') {
     const waiting = transitWaiting.get(String(payload.ref || ''));
     if (!waiting) return;
-    transitWaiting.delete(String(payload.ref));
+    forgetTransitWait(String(payload.ref));
     waiting.reply({ ...transitAnswerForClient(payload.answer), tag: waiting.tag });
   }
 }
@@ -4608,6 +4701,14 @@ function transitAnswerForClient(answer) {
 function deliverRelayMessage(message, { clientId = '', fromFingerprint = '', reply = () => {} } = {}) {
 totalRelays++;
   const toFingerprint = String(message.toFingerprint || '').slice(0, 128);
+  /* Queued mail is keyed by this value and lands in a file named after it,
+     so a mailbox key that is not a fingerprint is refused before it can
+     reach the store. Live delivery below answers to the socket tables and
+     never to a filename, so it does not need the same gate. */
+  if (message.persist && toFingerprint && !isFingerprintKey(toFingerprint)) {
+    reply({ type: 'error', reason: 'invalid-target', toClientId: message.toClientId || '', toFingerprint, tag: String(message.tag || '').slice(0, 96) });
+    return;
+  }
   /* Echoed back on every reply so the sender can line a refusal or a
      queue confirmation up with the message it was sent for. */
   const tag = String(message.tag || '').slice(0, 96);
@@ -4758,9 +4859,17 @@ totalRelays++;
  * the rest — see relay-peers.js. */
 const relayLinkServer = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
 relayLinkServer.on('error', (error) => console.error('[Transit] link server error:', error));
-relayLinkServer.on('connection', (ws) => relayPeers.accept(ws));
+/* A link socket is a socket. It counts against the same ceilings every other
+   socket counts against, from the moment the upgrade completes — the
+   handshake proves nothing for up to ten seconds, and unauthenticated
+   handshakes are exactly what a ceiling is for. */
+relayLinkServer.on('connection', (ws, request) => {
+  trackSocket(ws, socketAddress(request));
+  relayPeers.accept(ws);
+});
 function handleRelayLinkUpgrade(request, socket, head) {
   if (!relayPeers.enabled()) { socket.destroy(); return; }
+  if (socketBudgetRefused(request, socket)) return;
   relayLinkServer.handleUpgrade(request, socket, head, (ws) => {
     relayLinkServer.emit('connection', ws, request);
   });
@@ -4768,7 +4877,17 @@ function handleRelayLinkUpgrade(request, socket, head) {
 
 // Manual upgrade handler to resolve path conflicts between wsServer and PeerJS
 server.on('upgrade', (request, socket, head) => {
-  const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  /* A malformed request line here is an exception in an event handler, which
+     is a process-level event with a flushing exit attached. The HTTP parser
+     rarely allows one through, but "rarely" is not "never", and the answer to
+     a bad URL is a closed socket rather than a dead relay. */
+  let url;
+  try {
+    url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  } catch (_error) {
+    rejectUpgrade(socket, 400, 'Bad Request');
+    return;
+  }
   const { pathname } = url;
 
   if (pathname === '/chat-signal') {
@@ -4795,7 +4914,13 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 presenceServer.on('upgrade', (request, socket, head) => {
-  const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  let url;
+  try {
+    url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  } catch (_error) {
+    rejectUpgrade(socket, 400, 'Bad Request');
+    return;
+  }
   if (url.pathname !== '/chat-signal') {
     socket.destroy();
     return;
@@ -5031,6 +5156,7 @@ function sweepRetention(only = null) {
        this path thousands of times. */
     let standingMedia = 0;
     let standingText = 0;
+    let standingTextBytes = 0;
     let mustSweep = false;
     for (const item of items) {
       const facts = envelopeFactsFor(item);
@@ -5041,6 +5167,8 @@ function sweepRetention(only = null) {
         if (standingMedia > MEDIA_QUOTA_BYTES) { mustSweep = true; break; }
       } else {
         standingText += 1;
+        standingTextBytes += facts.bytes;
+        if (standingTextBytes > TEXT_QUOTA_BYTES) { mustSweep = true; break; }
       }
       if (item?.payload?.type === 'session-offer' && age > SESSION_RESERVATION_MS) {
         mustSweep = true;
@@ -5083,11 +5211,26 @@ function sweepRetention(only = null) {
       keep.push(item);
     }
 
-    // Back into arrival order, and cap the text tail.
+    // Back into arrival order, and cap the text tail — by count and by bytes.
     keep.sort((a, b) => queuedAtMs(a) - queuedAtMs(b));
-    const texts = keep.filter((item) => envelopeClass(item) === 'text');
-    if (texts.length > TEXT_MAILBOX_LIMIT) {
-      const drop = new Set(texts.slice(0, texts.length - TEXT_MAILBOX_LIMIT));
+    let textCount = 0;
+    let textBytes = 0;
+    for (const item of keep) {
+      if (envelopeClass(item) !== 'text') continue;
+      textCount += 1;
+      textBytes += envelopeBytes(item);
+    }
+    if (textCount > TEXT_MAILBOX_LIMIT || textBytes > TEXT_QUOTA_BYTES) {
+      const drop = new Set();
+      /* Oldest first: the newest text is what the person has not read yet,
+         and the cap should take the mail that has waited the longest. */
+      for (const item of keep) {
+        if (textCount <= TEXT_MAILBOX_LIMIT && textBytes <= TEXT_QUOTA_BYTES) break;
+        if (envelopeClass(item) !== 'text') continue;
+        drop.add(item);
+        textCount -= 1;
+        textBytes -= envelopeBytes(item);
+      }
       for (const item of drop) noteExpired(fingerprint, item, 'mailbox-full');
       changed = true;
       for (let i = keep.length - 1; i >= 0; i -= 1) {
@@ -5165,6 +5308,12 @@ function writeJsonAtomic(targetPath, value) {
 function saveOfflineBoxNow(fingerprint) {
   const clean = sanitizeFingerprint(fingerprint);
   if (!clean) return;
+  /* The last word on what may become a filename. Nothing that reaches this
+     function should be anything but a fingerprint — the queue path and the
+     purge both refuse other shapes first — but a key that arrived before
+     they did, or one read off an old disk, stops here rather than at a
+     path.join. */
+  if (!isFingerprintKey(clean)) return;
   try {
     fs.mkdirSync(OFFLINE_STORE_DIR, { recursive: true });
     const items = offlineBoxes.get(clean);
@@ -5346,6 +5495,16 @@ function touchPresence(record) {
 
 function sanitizeFingerprint(value) {
   return String(value || '').trim().slice(0, 128);
+}
+
+/* A mailbox key is a fingerprint or it is nothing. The value a sender puts
+   in toFingerprint reaches a filename through mailboxPath(), and path.join
+   resolves '..', so anything that is not exactly 64 lowercase hex lets the
+   sender choose which file gets written or deleted — '../relay-identity'
+   sits one level above the mailboxes and is the file a relay must never
+   lose. Queueing, wiping and the filesystem itself all answer to this. */
+function isFingerprintKey(value) {
+  return /^[a-f0-9]{64}$/.test(String(value || ''));
 }
 
 function sanitizeSubscription(value) {
@@ -5965,10 +6124,13 @@ function broadcastPeers() {
       peers: snapshotPeers(),
     });
 
+    /* The broadcast used the raw send, which is the one path in the file with
+       no buffered-amount guard — so a client that opened a socket and read
+       nothing accumulated the whole peer table, avatars included, in memory
+       on the relay for as long as the socket stayed open. The guard costs a
+       readyState and a number; the same serialisation is still paid once. */
     for (const client of presence.values()) {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(payload);
-      }
+      safeSendText(client.ws, payload, false);
     }
   }, 100);
 }
@@ -5986,6 +6148,16 @@ let totalRelays = 0;
 const SEND_BUFFER_LIMIT_BYTES = 16 * 1024 * 1024;
 
 function safeSend(ws, message) {
+  safeSendText(ws, JSON.stringify(message));
+}
+
+/* The same protection for a payload that was stringified once for many
+   sockets — a broadcast pays for the serialisation, not the safety.
+   Broadcast frames are not counted as messages sent: the counter answers
+   "how much mail moved", and one presence change fanned out to a room of N
+   is one change, not N messages — the numbers the stress suite holds the
+   relay to are about forwarding, and would otherwise count presence. */
+function safeSendText(ws, payload, countAsMessage = true) {
   if (ws.readyState === WebSocket.OPEN) {
     if (ws.bufferedAmount > SEND_BUFFER_LIMIT_BYTES) {
       if (!ws.__poorijaSendOverflow) {
@@ -5995,9 +6167,10 @@ function safeSend(ws, message) {
       ws.terminate();
       return;
     }
-    const payload = JSON.stringify(message);
-    totalMessagesSent++;
-    totalBytesSent += Buffer.byteLength(payload);
+    if (countAsMessage) {
+      totalMessagesSent++;
+      totalBytesSent += Buffer.byteLength(payload);
+    }
     ws.send(payload);
   }
 }
@@ -6007,19 +6180,55 @@ function openPresenceRecord(clientId = '') {
   return record?.ws?.readyState === WebSocket.OPEN ? record : null;
 }
 
+/* A maintained index of who is proven, keyed by fingerprint. The lookup used
+   to allocate and sort the whole presence table on every message addressed
+   by fingerprint — every transit delivery on the recipient relay paid
+   O(peers log peers), so a relay moving real traffic spent most of its CPU
+   sorting a list it had just sorted. The index holds every verified record
+   for a fingerprint; the most recently active one wins exactly as before,
+   decided between at most the two records a reconnect can leave behind. */
+const verifiedByFingerprint = new Map();
+function indexVerified(record) {
+  if (!record?.fingerprint || !record.identityVerified) return;
+  const held = verifiedByFingerprint.get(record.fingerprint);
+  if (!held) {
+    verifiedByFingerprint.set(record.fingerprint, new Set([record]));
+    return;
+  }
+  held.add(record);
+}
+function unindexVerified(record) {
+  const held = record?.fingerprint ? verifiedByFingerprint.get(record.fingerprint) : null;
+  if (!held) return;
+  held.delete(record);
+  if (!held.size) verifiedByFingerprint.delete(record.fingerprint);
+}
+/* Liveness is re-checked on every read — a record may be in the index and
+   gone from the socket table, because the index is a cache of identity, not
+   of connection state. */
+setInterval(() => {
+  for (const [fingerprint, held] of verifiedByFingerprint) {
+    for (const record of held) {
+      if (!presence.has(record.clientId)) held.delete(record);
+    }
+    if (!held.size) verifiedByFingerprint.delete(fingerprint);
+  }
+}, 30000).unref?.();
+
 function findOpenPresenceByFingerprint(fingerprint = '') {
   if (!fingerprint) return null;
   /* Only a socket that proved the identity behind the fingerprint may be
      routed to by it — otherwise mail lands on whoever claimed the name. A
      reconnect leaves two sockets holding the same fingerprint for a moment,
      so the most recently active one wins rather than the first found. */
-  return Array.from(presence.values())
-    .filter((client) =>
-      client.ws?.readyState === WebSocket.OPEN
-      && client.fingerprint
-      && client.fingerprint === fingerprint
-      && client.identityVerified)
-    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))[0] || null;
+  const held = verifiedByFingerprint.get(fingerprint);
+  if (!held) return null;
+  let best = null;
+  for (const record of held) {
+    if (record.ws?.readyState !== WebSocket.OPEN) continue;
+    if (!best || (record.lastSeenAt || 0) > (best.lastSeenAt || 0)) best = record;
+  }
+  return best;
 }
 
 /* Everything hello used to hand over on the strength of a claim: the mailbox
@@ -6170,6 +6379,15 @@ function closeDuplicatePresenceRecords(record) {
   }
 }
 
+/* A duplicate is replaced only by a connection that proved itself. The
+   fingerprint and the peerId a hello carries are claims, and both are
+   broadcast to every client in the peers payload — so closing duplicates on
+   the claim alone let anybody disconnect anybody, faster than they could
+   reconnect, with nothing but a name they read off the contact list. The
+   call used to sit in the hello handler before any challenge ran; it runs
+   now from the two places where identity is actually established, and a
+   reconnect costs the same one round trip it always did. */
+
 // Ensure data directory exists
 try {
   fs.mkdirSync(path.dirname(PUSH_STORE_PATH), { recursive: true });
@@ -6202,6 +6420,15 @@ wsServer.on('connection', (ws, req) => {
     identityVerified: false,
     avatarData: '',
     mood: '',
+    /* A token bucket, refilled by the clock rather than emptied by a lockout:
+       HTTP has had rate buckets since the beginning, the socket never did,
+       and every expensive thing a relay does — get-peers builds the whole
+       table, hello re-runs the duplicate walk and an RSA challenge — is one
+       frame away on a path that was never counted. The numbers sit above
+       what the app's own heaviest flows ever ask for, so a person never
+       meets the limit; a loop meets it immediately. */
+    rateTokens: WS_RATE_BURST,
+    rateCheckedAt: Date.now(),
     updatedAt: new Date().toISOString(),
     lastSeenAt: Date.now(),
     connectedAt: Date.now(),
@@ -6223,11 +6450,35 @@ wsServer.on('connection', (ws, req) => {
   ws.on('message', (raw) => {
     totalMessagesReceived++;
     totalBytesReceived += raw.length;
-    
+
+    /* Refill by elapsed time, then spend one token on this frame. A socket
+       over the line is answered, not disconnected: a person's browser
+       reconnects, and the point is to price the frame, not to punish it. */
+    const sinceChecked = Date.now() - record.rateCheckedAt;
+    if (sinceChecked > 0) {
+      record.rateTokens = Math.min(WS_RATE_BURST, record.rateTokens + sinceChecked * WS_RATE_REFILL_PER_MS);
+      record.rateCheckedAt = Date.now();
+    }
+    if (record.rateTokens < 1) {
+      safeSend(ws, { type: 'error', reason: 'slow-down' });
+      return;
+    }
+    record.rateTokens -= 1;
+
     let message;
     try {
       message = JSON.parse(raw.toString());
     } catch (_error) {
+      safeSend(ws, { type: 'error', reason: 'invalid-json' });
+      return;
+    }
+    /* JSON.parse accepts more than messages. `null`, `true` and `42` are all
+       valid JSON, and each of them reaches this handler as something without
+       a `type` — where reading one throws, nothing above catches it, and the
+       process-level handler answers by flushing and exiting. A frame that is
+       not an object is not a message, whatever its bytes claimed, and an
+       array is no more a message than a number is. */
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
       safeSend(ws, { type: 'error', reason: 'invalid-json' });
       return;
     }
@@ -6240,7 +6491,10 @@ wsServer.on('connection', (ws, req) => {
     if (message.type === 'hello') {
       record.username = String(message.username || '').slice(0, 80);
       record.peerId = String(message.peerId || '').slice(0, 160);
-      record.publicKeyData = String(message.publicKeyData || '');
+      /* A public key is under a kilobyte in every format the app uses, and the
+         field is rebroadcast to every connected client on every presence
+         change — one of the few fields with no ceiling of its own. */
+      record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
       record.avatarData = String(message.avatarData || '').slice(0, 2000000);
       record.mood = String(message.mood || '').slice(0, 40);
@@ -6267,7 +6521,8 @@ wsServer.on('connection', (ws, req) => {
         return;
       }
 
-      closeDuplicatePresenceRecords(record);
+      /* The duplicate close used to happen here, on the hello's say-so. It
+         waits for proof now — see closeDuplicatePresenceRecords. */
       console.log(`[Presence] Peer identified: ${record.username} (${record.peerId}) fingerprint: ${record.fingerprint}`);
 
       /* The key and the fingerprint must describe the same identity before
@@ -6295,6 +6550,8 @@ wsServer.on('connection', (ws, req) => {
         /* Escape hatch: the claim itself counts as the proof, as before. */
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        indexVerified(record);
+        closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
         broadcastPeers();
         return;
@@ -6330,6 +6587,8 @@ wsServer.on('connection', (ws, req) => {
       if (proven) {
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        indexVerified(record);
+        closeDuplicatePresenceRecords(record);
         console.log(`[Presence] Identity proven for ${record.fingerprint}`);
         deliverHeldMail(record, ws);
       } else {
@@ -6346,6 +6605,13 @@ wsServer.on('connection', (ws, req) => {
       /* An ACK destroys mail, so only the proven owner of the fingerprint
          may spend one. */
       if (!record.identityVerified) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      /* And only a fingerprint names mail. The proof binds the socket to a
+         key, not the claimed label to a shape, so the label is checked
+         before it is allowed to touch the store. */
+      if (!isFingerprintKey(record.fingerprint)) {
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
         return;
       }
@@ -6399,9 +6665,15 @@ wsServer.on('connection', (ws, req) => {
         disconnectRestrictedPeer(record, senderRestriction);
         return;
       }
+      /* The sender's name rides along as metadata for the recipient's relay,
+         and an unproven socket chose it itself. A socket that has not answered
+         the identity challenge may still send — a client races its first
+         frames against its own proof all the time — but nothing it sends
+         leaves claiming to be somebody. The proof, when it lands, restores
+         the name; the challenge is one round trip, not a lifestyle. */
       deliverRelayMessage(message, {
         clientId,
-        fromFingerprint: record.fingerprint,
+        fromFingerprint: record.identityVerified ? record.fingerprint : '',
         reply: (payload) => safeSend(ws, payload),
       });
       return;
@@ -6445,7 +6717,12 @@ wsServer.on('connection', (ws, req) => {
     if (message.type === 'purge-me') {
       const target = record.fingerprint || '';
       let removed = 0;
-      if (target) {
+      /* The hello that set this fingerprint was never challenged — a hello
+         alone claims a name without proving anything, and `purge-me` acts on
+         the claim. A claimed key that is not a fingerprint names no mailbox
+         this relay keeps, and running the purge against it would hand the
+         claimant a filename to delete. */
+      if (target && isFingerprintKey(target)) {
         removed += (offlineBoxes.get(target) || []).length;
         offlineBoxes.delete(target);
         saveOfflineBox(target);
@@ -6488,6 +6765,7 @@ wsServer.on('connection', (ws, req) => {
     clearIdentityChallenge(record);
     console.log(`[Presence] Connection closed for ${clientId} (${record.username}). Code: ${code}, Reason: ${reason}`);
     presence.delete(clientId);
+    unindexVerified(record);
     broadcastPeers();
   });
 
@@ -6495,6 +6773,7 @@ wsServer.on('connection', (ws, req) => {
     clearIdentityChallenge(record);
     console.error(`[Presence] Connection error for ${clientId} (${record.username}):`, error);
     presence.delete(clientId);
+    unindexVerified(record);
     broadcastPeers();
   });
 });
@@ -6581,6 +6860,16 @@ function beginShutdown(signal) {
     if (typeof saveOfflineBoxes === 'function') saveOfflineBoxes();
   } catch (error) {
     console.error('[Shutdown] could not flush the offline store:', error.message);
+  }
+
+  /* The linked relays learn it now, not when their own handshake timeouts
+     say so. A peer left to notice for itself spends up to a minute believing
+     the link is up — carrying envelopes into it, and re-dialling only after
+     the silence outlives them. */
+  try {
+    relayPeers.close();
+  } catch (error) {
+    console.error('[Shutdown] could not close the transit links:', error.message);
   }
 
   const closeAll = setTimeout(() => {

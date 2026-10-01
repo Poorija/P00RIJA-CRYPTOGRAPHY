@@ -176,7 +176,16 @@ function makeRelayCall(peerRecord, { callId, metadata = {}, mode = 'voice' }) {
    * contact's own record wins whenever it already has something routable. */
   let callRoute = null;
   const signal = (payload) => {
-    const frame = { ...payload, callId };
+    /* Who is speaking, inside the payload: over transit the envelope's sender
+       field is blank by design, and without this the far end could not tell
+       an answer of this call's contact from noise — it resolved the sender
+       from the payload or not at all. */
+    const frame = {
+      ...payload,
+      callId,
+      fromFingerprint: chatState.identity?.fingerprint || '',
+      peerId: payload.peerId || chatState.peerId || '',
+    };
     if (typeof transitRouteFor === 'function' && transitRouteFor(peerRecord)) {
       return sendRelayEnvelope(peerRecord, frame);
     }
@@ -388,6 +397,14 @@ function relayCallOfferArrived(peerRecord, payload) {
       mode,
       username: payload.metadata?.username || payload.name || peerRecord.name || '',
       peerId: payload.metadata?.peerId || payload.peerId || '',
+      /* A leg of a group call is a group call, and the only thing that says
+         so is the group's id in the offer's metadata. Dropping it here made
+         the callee read a group leg as a 1:1 call: a full-screen ringing
+         modal stacked over the group stage the member had already joined,
+         and a second parallel call if they answered. The roster keyed on
+         this field is what puts the leg where it belongs instead. */
+      groupCall: payload.metadata?.groupCall || '',
+      spaceId: payload.metadata?.spaceId || '',
     },
   });
   if (payload.fromHomeRelay) call.useRouteForThisCall(payload.fromHomeRelay);
@@ -475,9 +492,13 @@ function handleRelayCallSignal(message) {
     return true;
   }
   /* The call was set up with one contact; a payload about it from anybody else
-     is not part of it. */
-  if (peerRecord && call.fingerprint && peerRecord.fingerprint !== call.fingerprint) {
-    console.warn('[RelayCall] a signal for this call came from the wrong contact; dropped.');
+     is not part of it. The offer path drops what a non-contact sends, and the
+     answer and candidate paths answer to the same rule — the guard used to
+     run only when the sender resolved to a record, so a sender that resolved
+     to nobody slipped through to a live call on the strength of the callId
+     alone. */
+  if (!peerRecord || (call.fingerprint && peerRecord.fingerprint !== call.fingerprint)) {
+    console.warn('[RelayCall] a signal for this call came from outside its contact; dropped.');
     return true;
   }
 

@@ -714,7 +714,25 @@ RSYNC_BASE=(-az --human-readable --exclude '.DS_Store' --exclude '*.bak'
 # first costs a few seconds and turns "the deployment broke something" from a
 # problem into a one-line rollback.
 log "Snapshotting the server before overwriting it"
-scp "${SSH_OPTS[@]}" scripts/server-backup.sh "$USER_NAME@$HOST:$REMOTE_DIR/scripts/server-backup.sh" >/dev/null 2>&1
+# scp, not ssh: -P is scp's port and -p is its preserve flag, so SSH_OPTS
+# (built for ssh, where -p IS the port) cannot be passed straight through —
+# handed over as-is, the port became a nonexistent source file and the
+# upload failed inside its own redirection, leaving whatever copy the server
+# already held to run as today's snapshot. The port is lifted out and only
+# the options scp understands make the trip.
+SCP_PORT=""
+if printf '%s\n' "${SSH_OPTS[@]}" | grep -q '^-p$'; then
+    SCP_PORT="$(printf '%s\n' "${SSH_OPTS[@]}" | awk 'prev=="-p"{print; exit} {prev=$0}')"
+fi
+scp -P "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+    $( [ -n "$KEY" ] && [ -f "$KEY" ] && printf -- '-i %s -o IdentitiesOnly=yes ' "$KEY" ) \
+    scripts/server-backup.sh "$USER_NAME@$HOST:$REMOTE_DIR/scripts/server-backup.sh"
+if [ $? -ne 0 ]; then
+    fail "Could not upload scripts/server-backup.sh to the server."
+    echo "  Without it there is no snapshot, and without a snapshot this stops."
+    exit 1
+fi
 BACKUP_LABEL="before deploying $(grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' index.html | head -1 | sed 's/^?v=//')"
 if remote "bash '$REMOTE_DIR/scripts/server-backup.sh' '$BACKUP_LABEL'" 2>&1 | sed 's/^/  /'; then
     ok "snapshot taken — roll back with: scripts/server-backup.sh --restore <hash>"
