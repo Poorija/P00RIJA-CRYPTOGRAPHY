@@ -97,3 +97,10 @@ tools/forbidden-paths.txt
 # image, not the repository. The test suites reproduce that layout to run
 # the relay from source and a crashed run can leave the copy behind.
 standalone-relay/lib/
+
+# Tool droppings that appear next to the tree while it is being worked on:
+# the browser automation harness writes its snapshots beside the repo, and
+# editor-specific ignore files arrive unasked. Neither belongs in a commit,
+# and `git add -A` will pick up anything not named here.
+.playwright-mcp/
+.zcodeignore

@@ -405,6 +405,12 @@ updateChatShellMode();
 renderPeers();
 renderActivePeer();
 });
+/* Their face, full size: the header avatar is a thumbnail and used to answer
+   no tap at all. The popup reads the live record, so it always shows what the
+   thread shows — never a stale copy of either. */
+document.getElementById('chatActiveAvatar')?.addEventListener('click', () => {
+openPeerPhotoCard(getActiveConversation());
+});
 document.getElementById('chatProfileAvatarBtn')?.addEventListener('click', () => toggleAvatarChooser(true));
 document.querySelectorAll('[data-chat-avatar-close]').forEach((target) => {
 target.addEventListener('click', () => toggleAvatarChooser(false));
@@ -1098,6 +1104,21 @@ if (event.key === 'Escape') closeSafetyPanel();
 // --- group management --------------------------------------------------
 document.getElementById('chatSpaceInfo')?.addEventListener('click', async (event) => {
 if (event.target.closest('[data-space-info-close]')) { closeSpaceInfoPanel(); return; }
+/* A member's avatar opens the same photo card the header avatar does. The
+   row carries its own copy of what the popup needs (the roster is rebuilt
+   from the peer records on every render, and the popup is one tap away from
+   whatever the sheet is showing right now); anything missing — no avatar, no
+   status — simply draws less. */
+const memberPhoto = event.target.closest('[data-peer-photo-key]');
+if (memberPhoto) {
+openPeerPhotoCard({
+peerId: memberPhoto.getAttribute('data-peer-photo-key'),
+username: memberPhoto.getAttribute('data-peer-photo-name') || '',
+avatarData: memberPhoto.getAttribute('data-peer-photo-avatar') || '',
+mood: memberPhoto.getAttribute('data-peer-photo-mood') || '',
+});
+return;
+}
 if (event.target.closest('[data-space-rename]')) { renameActiveSpace(); return; }
 if (event.target.closest('[data-space-desc]')) { editActiveSpaceDescription(); return; }
 if (event.target.closest('[data-space-avatar]')) { document.getElementById('chatGroupAvatarInput')?.click(); return; }

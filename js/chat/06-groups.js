@@ -302,6 +302,9 @@ function spaceMemberRecords(space) {
       key: memberKey,
       name: peer?.username || peer?.name || memberKey.slice(0, 12),
       avatarData: sanitizeAvatarData(peer?.avatarData || ''),
+      /* Carried for the member's photo popup, not for the row: the roster line
+         has no room for a status, and the popup has nothing to say without it. */
+      mood: String(peer?.mood || '').trim(),
       online: peerLooksOnline(peer),
       isSelf: false,
       role: spaceRoleOf(space, memberKey),
@@ -573,7 +576,7 @@ function renderSpaceInfoPanel() {
         <div class="chat-space-member-list">
           ${members.map((row) => `
             <div class="chat-space-member ${row.online ? 'is-online' : ''}">
-              <span class="chat-space-member-avatar" title="${app().escapeHTML(row.online ? t('آنلاین', 'Online') : t('آفلاین', 'Offline'))}">${row.avatarData ? `<img src="${sanitizeAvatarData(row.avatarData)}" alt="">` : app().escapeHTML(initials(row.name))}</span>
+              <span class="chat-space-member-avatar${row.isSelf ? '' : ' is-tappable'}" ${row.isSelf ? '' : `data-peer-photo-key="${app().escapeHTML(row.key)}" data-peer-photo-name="${app().escapeHTML(row.name)}" ${row.avatarData ? `data-peer-photo-avatar="${app().escapeHTML(row.avatarData)}"` : ''} ${row.mood ? `data-peer-photo-mood="${app().escapeHTML(row.mood)}"` : ''}`} title="${app().escapeHTML(row.online ? t('آنلاین', 'Online') : t('آفلاین', 'Offline'))}">${row.avatarData ? `<img src="${sanitizeAvatarData(row.avatarData)}" alt="">` : app().escapeHTML(initials(row.name))}</span>
               <span class="chat-space-member-body">
                 <span class="chat-space-member-name">${app().escapeHTML(row.name)}${row.isSelf ? ` <em>(${app().escapeHTML(t('شما', 'you'))})</em>` : ''}</span>
                 <span class="chat-space-member-role role-${row.role}">${app().escapeHTML(roleLabel(row.role))}</span>

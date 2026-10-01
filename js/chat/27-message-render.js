@@ -1691,3 +1691,55 @@ conversationUnread: unreadCount
 }
 }
 }
+
+/* ---- the other person's face, at a size worth looking at ----------------
+ *
+ * The header avatar and the roster avatar are thumbnails, and tapping them
+ * used to do nothing. Both now open one card: the photo as large as the
+ * screen can spare, the name, and the status the person set themselves —
+ * nothing else in it, no buttons to mis-tap. Escape, the X or the backdrop
+ * close it. Same shape as the safety card (backdrop plus a centred card,
+ * appended to body because .chat-shell clips fixed children).
+ *
+ * Takes the peer record from wherever the caller had it: the header has the
+ * live record, the roster row carries its own copy as data attributes. */
+let peerPhotoCardElement = null;
+
+function peerPhotoCardKeydown(event) {
+  if (event.key === 'Escape') closePeerPhotoCard();
+}
+
+function closePeerPhotoCard() {
+  peerPhotoCardElement?.remove();
+  peerPhotoCardElement = null;
+  document.removeEventListener('keydown', peerPhotoCardKeydown);
+}
+
+function openPeerPhotoCard(peer) {
+  /* A group has no face of its own and no status line; the empty pane has no
+     peer at all. Both arrive here only by mistake, and the honest answer is
+     to do nothing rather than draw an empty card. */
+  if (!peer || peer.type === 'group') return;
+  closePeerPhotoCard();
+  const name = peer.username || peer.name || peer.peerId || t('کاربر', 'User');
+  const mood = String(peer.mood || '').trim();
+  const avatarHtml = peer.avatarData
+    ? `<img src="${peer.avatarData}" alt="">`
+    : `<span class="chat-peer-photo-initials">${app().escapeHTML(initials(name))}</span>`;
+  const host = document.createElement('div');
+  host.className = 'chat-peer-photo';
+  host.innerHTML = `
+    <div class="chat-peer-photo-backdrop" data-peer-photo-close></div>
+    <section class="chat-peer-photo-card" role="dialog" aria-modal="true" aria-label="${app().escapeHTML(t('تصویر پروفایل', 'Profile photo'))}">
+      <button type="button" class="chat-peer-photo-close" data-peer-photo-close aria-label="${app().escapeHTML(t('بستن', 'Close'))}"><i class="fas fa-xmark"></i></button>
+      <div class="chat-peer-photo-frame">${avatarHtml}</div>
+      <div class="chat-peer-photo-name">${app().escapeHTML(name)}</div>
+      ${mood ? `<div class="chat-peer-photo-mood">${app().escapeHTML(mood)}</div>` : ''}
+    </section>`;
+  host.addEventListener('click', (event) => {
+    if (event.target.closest('[data-peer-photo-close]')) closePeerPhotoCard();
+  });
+  document.addEventListener('keydown', peerPhotoCardKeydown);
+  document.body.appendChild(host);
+  peerPhotoCardElement = host;
+}

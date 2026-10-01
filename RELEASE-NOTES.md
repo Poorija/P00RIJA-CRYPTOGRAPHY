@@ -1,17 +1,33 @@
-# P00RIJA Cryptography 2.91.11
+# P00RIJA Cryptography 2.91.21
 
-Version 2.91.11 · build chat-v95
+Version 2.91.21 · build chat-v96
 
-این نسخه دربارهٔ صحنهٔ استفاده است، نه ماشین زیر آن: پک استیکری که با یک
-دکمه به دست طرف مقابل می‌رسد، سوئیچ‌هایی که روی هر دستگاهی یک شکل می‌افتند،
-و ردیف اموجی‌هایی که زیر کیبورد iOS گم نمی‌شوند.
+این نسخه دربارهٔ صحنهٔ استفاده است، نه ماشین زیر آن: چهرهٔ طرف مقابل که با
+یک لمس بزرگ می‌شود، پک استیکری که با یک دکمه به دستش می‌رسد، سوئیچ‌هایی که
+روی هر دستگاهی یک شکل می‌افتند، و ردیف اموجی‌هایی که زیر کیبورد iOS گم
+نمی‌شوند.
 
 This release is about the moment of use rather than the machinery underneath
-it: a sticker pack that reaches the other person with one button, switches
-that draw one shape on every device, and emoji rows that do not vanish under
-the iOS keyboard.
+it: the other person's face one tap away at full size, a sticker pack that
+reaches them with one button, switches that draw one shape on every device,
+and emoji rows that do not vanish under the iOS keyboard.
 
 ---
+
+## تصویر بزرگ پروفایل، با یک لمس
+
+آواتارِ بالای گفتگو یک عکس کوچک است و تا حالا لمسش هیچ کاری نمی‌کرد. حالا
+با زدنش، همان عکس در اندازه‌ای که ارزش دیدن دارد باز می‌شود — همراه نام و
+وضعیتی که خودِ طرف مقابل برای خودش نوشته، اگر نوشته باشد. چیزی جز این در
+کارت نیست: هیچ دکمه‌ای نیست که اشتباه لمس شود و Esc یا ضربه به پس‌زمینه
+می‌بنددش. آواتار اعضای گروه، در صفحهٔ اطلاعات گروه، همین کار را می‌کند.
+
+The avatar at the top of a conversation is a thumbnail, and until now tapping
+it did nothing. It now opens that same photo at a size worth looking at,
+together with the name and the status the person wrote for themselves, if
+they wrote one. Nothing else is in the card — no button to mis-tap — and
+Escape or a tap on the backdrop closes it. The member avatars in a group's
+info sheet do the same.
 
 ## اشتراک‌گذاری پک استیکر — تکی و با هم
 
@@ -116,7 +132,7 @@ sha256sum -c SHA256SUMS.txt
 روی ویندوز (PowerShell) · on Windows:
 
 ```powershell
-Get-FileHash ".\P00RIJA Cryptography_2.91.11_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.91.21_x64-setup.exe" -Algorithm SHA256
 ```
 
 برای یک فایل تکی، چک‌سام را با سطر مربوط به همان فایل در `SHA256SUMS.txt`
