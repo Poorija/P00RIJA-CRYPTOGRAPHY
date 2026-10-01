@@ -2,7 +2,7 @@
 
 # Relays: installing them, and linking them to each other
 
-For v2.77.0 · build chat-v85
+For v2.91.21 · build chat-v96
 
 This is the operational guide for running more than one relay and having them
 carry for each other. It covers what to put on which kind of server, how to
@@ -351,6 +351,17 @@ were connected. The only thing it keeps is an in-memory record of which socket
 asked, for as long as it takes to answer. A relay that stores nothing has
 nothing to hand over — which is a security property and a legal one at once.
 
+### The user's own switch (from 2.91)
+
+Everything above is what the *servers* do. The person at the keyboard also has
+a say, per device, in Secure Chat ← Settings ← Connection & TURN: the
+"cross-relay" switch. On (the default) is the behaviour this document
+describes — messages, files and calls to a contact on another relay ride the
+encrypted link between the two. Off sends everything through the sender's own
+relay: the contents stay end-to-end encrypted either way, but the sender's
+relay sees who they talk to, and the message carries the small route icon
+instead. The choice is part of the profile and travels with it.
+
 ---
 
 ## 7. Keep `relay-identity.json`
@@ -645,6 +656,15 @@ candidate ریلی فقط یک آدرس است، پس چیزی بین دو نص�
 به هم وصل بودند. تنها چیزی که نگه می‌دارد یک رکورد در حافظه است — کدام سوکت
 پرسید — به اندازهٔ زمان یک پاسخ. سروری که چیزی ذخیره نمی‌کند، چیزی برای تحویل
 دادن ندارد.
+
+**کلید خودِ کاربر (از 2.91):** هرچه بالا آمد کارِ *سرورها* بود. نفرِ پشت
+صفحه‌کلید هم به ازای هر دستگاه حرف دارد، در چت امن ← تنظیمات ← اتصال و TURN:
+کلید «ارتباط بین رله‌ها». روشن (پیش‌فرض) همان رفتاری است که این سند توضیح
+می‌دهد — پیام، فایل و تماسِ مخاطبِ روی رلهٔ دیگر از مسیر رمزنگاری‌شدهٔ میان
+دو رله می‌رود. خاموش همه‌چیز را از رلهٔ خودِ فرستنده می‌فرستد: محتوا در هر دو
+حالت رمزنگاری‌شدهٔ سر-تا-سر می‌ماند، ولی رلهٔ فرستنده می‌بیند با چه کسی حرف
+می‌زنید، و پیام به‌جای آن آیکون کوچکِ مسیر را می‌گیرد. این انتخاب بخشی از
+پروفایل است و همراهش سفر می‌کند.
 
 ### ۷. `relay-identity.json` را نگه دارید
 
