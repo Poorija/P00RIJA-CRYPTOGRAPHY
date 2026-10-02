@@ -164,7 +164,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       </select>
       <select id="langSel"><option value="fa">فارسی</option><option value="en">English</option></select>
       <select id="refreshSel">
-        <option value="5000">5s</option><option value="10000" selected>10s</option>
+        <option value="1000">1s 🔴</option><option value="5000">5s</option><option value="10000" selected>10s</option>
         <option value="30000">30s</option><option value="60000">60s</option><option value="0">✋</option>
       </select>
       <button class="btn" id="refreshNow"><i class="fas fa-rotate"></i><span data-t>نوسازی</span></button>
@@ -334,12 +334,18 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       <div class="card">
         <h3><i class="fas fa-hard-drive"></i><span data-t>دیسک و پاکسازی</span></h3>
         <div class="hint" id="diskInfo" style="margin-bottom:10px">…</div>
-        <div class="row">
-          <button class="btn warn" id="clStale"><i class="fas fa-images"></i><span data-t>حذف تگ‌های قدیمی برنامه</span> <span class="tag mut" id="clStaleSize"></span></button>
-          <button class="btn warn" id="clDangling"><i class="fas fa-layer-group"></i><span data-t>حذف لایه‌های بی‌صاحب</span> <span class="tag mut" id="clDanglingSize"></span></button>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" id="clAllStale"><i class="fas fa-check-double"></i><span data-t>انتخاب همهٔ تگ‌ها</span></button>
+          <button class="btn bad" id="clStale"><i class="fas fa-trash-can"></i><span data-t>حذف تگ‌های تیک‌خورده</span> <span class="tag mut" id="clStaleSize"></span></button>
           <button class="btn" id="clTemps"><i class="fas fa-broom"></i><span data-t>پاک‌کردن فایل‌های موقت</span></button>
           <span class="hint" id="clResult"></span>
         </div>
+        <div id="clStaleList" style="margin-bottom:12px"></div>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn" id="clAllDangling"><i class="fas fa-check-double"></i><span data-t>انتخاب همهٔ لایه‌ها</span></button>
+          <button class="btn bad" id="clDangling"><i class="fas fa-trash-can"></i><span data-t>حذف لایه‌های تیک‌خورده</span> <span class="tag mut" id="clDanglingSize"></span></button>
+        </div>
+        <div id="clDanglingList"></div>
       </div>
       <div class="card">
         <h3><i class="fab fa-docker"></i><span data-t>ایمیج‌های داکر</span></h3>
@@ -594,7 +600,7 @@ async function loadHealth() {
     drawLine($('chCpu'), series.cpu, '#a78bfa');
     drawLine($('chQueue2'), series.mem, '#34d399');
     drawLine($('chMsgs'), series.msgs, '#f472b6');
-    drawBars($('chNet'), series.netIn.map((v, i) => v - (series.netOut[i] || 0)), true);
+    drawDual($('chNet'), series.netIn, series.netOut);
     drawLine($('chDisk'), series.disk, '#fbbf24');
     $('chCpuNow').textContent = Math.round(data.cpuLoad || 0) + '%';
     $('chMemNow').textContent = fmtBytes((data.memory?.rss || 0) * 1024 * 1024);
@@ -609,7 +615,14 @@ async function loadHealth() {
     $('statCards').innerHTML = [
       card('fa-users', t('peers'), data.peers ?? 0, (data.capacity?.sockets?.inUse ?? '—') + ' / ' + (data.capacity?.sockets?.max ?? '—') + ' sockets'),
       card('fa-microchip', t('cpu'), cpuPct + '%', bar(cpuPct, cpuPct > 80), true),
-      card('fa-memory', t('ram'), heapPct + '%', fmtBytes((data.memory?.heapUsed || 0) * 1024 * 1024) + ' / ' + fmtBytes((data.memory?.heapTotal || 0) * 1024 * 1024) + bar(heapPct, heapPct > 85), true),
+      (() => {
+        const cm = data.containerMem;
+        if (cm) {
+          const pct = cm.limitMb ? Math.min(100, Math.round((cm.usageMb / cm.limitMb) * 100)) : 0;
+          return card('fa-memory', t('ram'), cm.usageMb + ' MB', (cm.limitMb ? 'از ' + cm.limitMb + ' MB' : 'نامحدود') + bar(pct, pct > 85), true);
+        }
+        return card('fa-memory', t('ram'), heapPct + '%', fmtBytes((data.memory?.heapUsed || 0) * 1024 * 1024) + ' / ' + fmtBytes((data.memory?.heapTotal || 0) * 1024 * 1024) + bar(heapPct, heapPct > 85), true);
+      })(),
       card('fa-hard-drive', t('disk'), diskPct + '%', fmtBytes(diskUsed * 1024 * 1024) + ' / ' + fmtBytes((data.storage?.total || 0) * 1024 * 1024) + bar(diskPct, diskPct > 85), true),
       card('fa-envelopes', t('queue'), data.queuedMessages ?? 0, (data.relay?.mailboxes?.count ?? 0) + ' ' + (LANG === 'fa' ? 'میل‌باکس' : 'mailboxes')),
       card('fa-tower-broadcast', 'Transit', (data.transit?.up ?? 0) + ' / ' + (data.transit?.allowed ?? 0), t('linked')),
@@ -880,27 +893,44 @@ $('ramTable').addEventListener('click', async (event) => {
 });
 
 /* ---------- disk and cleanup ---------- */
+let lastDisk = null;
 async function loadDisk() {
   const data = await api('/Monitor_Server/ops-disk');
   if (!data.ok) { $('diskInfo').textContent = data.reason || t('fail'); return; }
+  lastDisk = data;
   const cleanup = data.cleanup || {};
   $('diskInfo').innerHTML =
     (LANG === 'fa' ? 'دیسک: ' + fmtBytes((data.disk?.total || 0) - (data.disk?.free || 0)) + ' از ' + fmtBytes(data.disk?.total || 0) + ' مصرف (' + fmtBytes(data.disk?.free || 0) + ' آزاد)' : 'disk: ' + fmtBytes((data.disk?.total || 0) - (data.disk?.free || 0)) + ' of ' + fmtBytes(data.disk?.total || 0)) +
-    ' · ' + (LANG === 'fa' ? 'ایمیج‌ها ' : 'images ') + fmtBytes(data.docker?.imagesBytes) +
-    ' · ' + (LANG === 'fa' ? 'حجم‌ها ' : 'volumes ') + fmtBytes(data.docker?.volumesBytes);
+    ' · ' + (LANG === 'fa' ? 'ایمیج‌ها: ' : 'images: ') + fmtBytes(data.docker?.imagesBytes);
   $('clStaleSize').textContent = cleanup.staleSelfImages?.length ? cleanup.staleSelfImages.length + ' (' + fmtBytes(cleanup.staleSelfBytes) + ')' : '0';
-  $('clDanglingSize').textContent = cleanup.danglingCount ? cleanup.danglingCount + ' (' + fmtBytes(cleanup.danglingBytes) + ')' : '0';
+  $('clDanglingSize').textContent = cleanup.danglingImages?.length ? cleanup.danglingImages.length + ' (' + fmtBytes(cleanup.danglingBytes) + ')' : '0';
+  /* Each image the operator may drop, ticked one by one or all at once —
+     the ref that goes to the server is the exact one this list printed. */
+  const staleRows = (cleanup.staleSelfImages || []).map((image) =>
+    '<label class="row" style="padding:6px 8px;border:1px solid var(--line);border-radius:10px;margin-bottom:4px"><input type="checkbox" data-cl-ref="' + esc(image.ref) + '"> <span class="mono">' + esc(image.ref) + '</span> <span class="tag mut">' + fmtBytes(image.size) + '</span></label>'
+  ).join('');
+  $('clStaleList').innerHTML = staleRows || '<div class="empty">' + t('empty') + '</div>';
+  const danglingRows = (cleanup.danglingImages || []).map((image) =>
+    '<label class="row" style="padding:6px 8px;border:1px solid var(--line);border-radius:10px;margin-bottom:4px"><input type="checkbox" data-cl-ref="' + esc(image.ref) + '"> <span class="mono">' + esc(String(image.ref).slice(0, 19)) + '…</span> <span class="tag mut">' + fmtBytes(image.size) + '</span></label>'
+  ).join('');
+  $('clDanglingList').innerHTML = danglingRows || '<div class="empty">' + t('empty') + '</div>';
 }
-async function cleanup(what) {
-  const result = await api('/Monitor_Server/ops-cleanup', { what });
-  const freed = fmtBytes(result.freedBytes || 0);
-  $('clResult').textContent = result.ok ? (LANG === 'fa' ? 'آزاد شد: ' : 'freed: ') + freed : t('fail');
+function tickedRefs(scope) {
+  return Array.from((scope || document).querySelectorAll('[data-cl-ref]:checked')).map((box) => box.getAttribute('data-cl-ref'));
+}
+async function cleanupRefs(refs) {
+  if (!refs.length) { toast(LANG === 'fa' ? 'چیزی تیک نخورده است' : 'nothing ticked', 'err'); return; }
+  if (!confirm(t('confirmDelete') + ' (' + refs.length + ')')) return;
+  const result = await api('/Monitor_Server/ops-cleanup', { what: 'selected', refs });
+  $('clResult').textContent = result.ok ? (LANG === 'fa' ? 'حذف شد: ' + (result.removed?.length || 0) + ' · آزاد شد: ' : 'removed: ' + (result.removed?.length || 0) + ' · freed: ') + fmtBytes(result.freedBytes || 0) : (result.reason || t('fail'));
   toast($('clResult').textContent, result.ok ? 'ok' : 'err');
   loadDisk();
 }
-$('clStale').addEventListener('click', () => confirm(t('confirmDelete')) && cleanup('stale-images'));
-$('clDangling').addEventListener('click', () => confirm(t('confirmDelete')) && cleanup('dangling'));
-$('clTemps').addEventListener('click', () => cleanup('temps'));
+$('clStale').addEventListener('click', () => cleanupRefs(tickedRefs($('clStaleList'))));
+$('clDangling').addEventListener('click', () => cleanupRefs(tickedRefs($('clDanglingList'))));
+$('clAllStale').addEventListener('click', () => { $('clStaleList').querySelectorAll('input[type=checkbox]').forEach((box) => { box.checked = true; }); });
+$('clAllDangling').addEventListener('click', () => { $('clDanglingList').querySelectorAll('input[type=checkbox]').forEach((box) => { box.checked = true; }); });
+$('clTemps').addEventListener('click', async () => { const result = await api('/Monitor_Server/ops-cleanup', { what: 'temps' }); toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err'); });
 
 /* ---------- relays ---------- */
 async function loadTransit() {
@@ -1124,6 +1154,29 @@ async function loadReports() {
     '<tr><td class="hint">' + fmtTime(event.at) + '</td><td><span class="tag mut">' + esc(event.kind) + '</span></td><td>' + esc(event.text) + '</td></tr>'
   ).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
 }
+function drawDual(canvas, dataIn, dataOut) {
+  /* Two lines on one card: traffic in (accent) above, traffic out (violet),
+     scaled to whichever is larger — a quiet relay still draws two visible
+     lines instead of an empty frame. */
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+  const h = canvas.height = 150 * devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  const max = Math.max(...dataIn, ...dataOut, 1);
+  const plot = (data, color) => {
+    if (data.length < 2) return;
+    const stepX = w / (data.length - 1);
+    ctx.beginPath();
+    data.forEach((v, i) => { const x = i * stepX; const y = h - 6 - (v / max) * (h - 18); if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.strokeStyle = color; ctx.lineWidth = 1.6 * devicePixelRatio; ctx.stroke();
+  };
+  plot(dataOut, '#a78bfa');
+  plot(dataIn, '#38bdf8');
+  ctx.font = (10 * devicePixelRatio) + 'px sans-serif';
+  ctx.fillStyle = '#38bdf8'; ctx.fillText('in ' + fmtBytes(dataIn[dataIn.length - 1] || 0) + '/s', 8 * devicePixelRatio, 14 * devicePixelRatio);
+  ctx.fillStyle = '#a78bfa'; ctx.fillText('out ' + fmtBytes(dataOut[dataOut.length - 1] || 0) + '/s', 8 * devicePixelRatio, 28 * devicePixelRatio);
+}
 function drawBars(canvas, data, diverging) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -1214,11 +1267,17 @@ $('uSearch').addEventListener('input', () => { if (lastHealth) loadHealth(); });
 /* ---------- system: memory tools ---------- */
 $('optRam').addEventListener('click', async () => {
   const result = await api('/admin/optimize-ram');
-  $('optResult').textContent = result.ok ? (LANG === 'fa' ? 'آزاد شد: ' : 'freed: ') + (result.freedMB ?? result.saved ?? '?') + ' MB' : t('fail');
+  $('optResult').textContent = result.ok
+    ? (LANG === 'fa' ? 'هرپ ' : 'heap ') + ': ' + (result.saved ?? 0) + ' MB ' + (LANG === 'fa' ? 'آزاد شد' : 'freed') + (result.gcTriggered ? '' : (' — ' + (LANG === 'fa' ? 'gc در دسترس نیست' : 'gc unavailable')))
+    : (result.reason || t('fail'));
+  toast($('optResult').textContent, result.ok ? 'ok' : 'err');
+  loadHealth();
 });
 $('clrMem').addEventListener('click', async () => {
   const result = await api('/admin/clear-memory');
-  $('optResult').textContent = result.ok ? t('ok') : t('fail');
+  $('optResult').textContent = result.ok ? (LANG === 'fa' ? 'انجام شد — ' : 'done — ') + JSON.stringify(result).slice(0, 90) : (result.reason || t('fail'));
+  toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err');
+  loadHealth();
 });
 
 /* ---------- theme, refresh, shortcuts ---------- */

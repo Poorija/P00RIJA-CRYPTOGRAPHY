@@ -883,6 +883,28 @@ console.error('Failed to process offline relay message in queue:', error);
 }));
 return;
 }
+if (payload.type === 'system-note') {
+/* The server's announce centre: a note the RELAY itself wrote, carried the
+   same way mail is — online as a relay frame, offline out of the mailbox.
+   It is not sealed (the server cannot seal what it cannot read), and that
+   is the point: it is the server's own voice, shown in the system
+   conversation the old broadcast already used. An attachment, when there
+   is one, rides along as a small data URL and renders inside the note. */
+appendHistory('system', {
+id: generateId('sys'),
+type: 'system-note',
+text: payload.message || payload.text || '',
+title: payload.title || '',
+attachment: payload.attachment || null,
+direction: 'in',
+status: 'delivered',
+createdAt: payload.queuedAt || new Date().toISOString(),
+system: true,
+});
+notify(payload.title ? `${payload.title}: ${(payload.message || '').slice(0, 80)}` : String(payload.message || '').slice(0, 100), 'info');
+ackRelayMessage(message.relayId);
+return;
+}
 if (payload.type === 'typing') {
 /* The payload's name first: over transit the envelope-level fingerprint is
    blank by design, and the payload is where the sender put it. */

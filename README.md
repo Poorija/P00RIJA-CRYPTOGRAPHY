@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.91.22-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.91.23-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -350,15 +350,15 @@ The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA Cryptography_2.91.22_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.91.22_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA Cryptography_2.91.23_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.91.23_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.91.22-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.91.23-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
 A native install has no origin to learn a relay from — the web app does, because
@@ -1127,15 +1127,15 @@ sudo bash scripts/setup.sh --quick --domain chat.example.com \
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA Cryptography_2.91.22_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.91.22_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA Cryptography_2.91.23_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.91.23_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.91.22-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.91.23-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
 نصب نیتیو مبدأیی ندارد که از رویش رله را یاد بگیرد — برنامهٔ وب دارد، چون از

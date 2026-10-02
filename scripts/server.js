@@ -1254,6 +1254,33 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     cpuModel: String(os.cpus()[0]?.model || '').trim().slice(0, 60),
     turnUrls: TURN_URLS.slice(0, 4),
     activeCalls: activeCalls.size,
+    /* The relay container's own memory as the kernel prices it: what the
+       cgroup allows and what is in use. This — not the node heap — is the
+       number the overview card draws, so it matches whatever ceiling the
+       machine tab set, 512 MB or unlimited alike. */
+    containerMem: (() => {
+      try {
+        const maxRaw = String(fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8')).trim();
+        const current = Number(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8'));
+        /* "max" means no ceiling — an unlimited container is a fact worth
+           showing, not a reason to fall back to the heap number. */
+        if (maxRaw === 'max' && Number.isFinite(current) && current > 0) {
+          return { limitMb: 0, usageMb: Math.round(current / 1048576) };
+        }
+        const max = Number(maxRaw);
+        if (Number.isFinite(max) && Number.isFinite(current) && current > 0 && max > 0) {
+          return { limitMb: Math.round(max / 1048576), usageMb: Math.round(current / 1048576) };
+        }
+      } catch (_error) { /* cgroup v1 or no limit exposed */ }
+      try {
+        const limit = Number(fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8'));
+        const usage = Number(fs.readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8'));
+        if (Number.isFinite(limit) && Number.isFinite(usage) && usage > 0) {
+          return { limitMb: (limit > 0 && limit < 1e15) ? Math.round(limit / 1048576) : 0, usageMb: Math.round(usage / 1048576) };
+        }
+      } catch (_error) { /* not a cgroup v1 host either */ }
+      return null;
+    })(),
     queuedMessages: Array.from(offlineBoxes.values()).reduce((sum, box) => sum + box.length, 0),
     pushSubscribers: Array.from(pushSubscriptions.values()).reduce((sum, items) => sum + items.length, 0),
     turnEnabled: TURN_URLS.length > 0,
@@ -4708,7 +4735,20 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
     queued += 1;
     const target = findOpenPresenceByFingerprint(fingerprint);
     if (target?.ws && target.ws.readyState === WebSocket.OPEN) {
-      safeSend(target.ws, { type: 'relay', fromClientId: 'server-announce', fromFingerprint: 'monitor', payload });
+      /* Two frames on purpose. The broadcast frame is the one every client
+         already renders into the system conversation, online, right now.
+         The relay frame rides the held-mail path so a client that was busy
+         reconnecting still gets it from the mailbox once — the client keys
+         both on the payload type, and de-duplicates by entry id. */
+      safeSend(target.ws, {
+        type: 'system-broadcast',
+        kind: attachment?.kind === 'audio' ? 'voice' : (attachment?.kind === 'file' ? 'file' : 'text'),
+        message: message || attachment.name,
+        fileName: attachment?.name || '',
+        fileData: attachment?.dataUrl || '',
+        timestamp: Date.now(),
+      });
+      safeSend(target.ws, { type: 'relay', fromClientId: 'server-announce', fromFingerprint: 'monitor', relayId: crypto.randomUUID(), payload });
       live += 1;
     }
     /* The wake-up, online or not — a phone that is closed still buzzes. */
@@ -4832,8 +4872,9 @@ app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
       imagesBytes: images.reduce((sum, image) => sum + (image.size || 0), 0),
     },
     cleanup: {
-      staleSelfImages: staleSelf.map((image) => ({ tags: image.tags.join(', '), size: image.size })),
+      staleSelfImages: staleSelf.map((image) => ({ ref: image.tags[0] || '', tags: image.tags, size: image.size })),
       staleSelfBytes: staleSelf.reduce((sum, image) => sum + image.size, 0),
+      danglingImages: dangling.map((image) => ({ ref: String(image.id || ''), size: image.size })),
       danglingCount: dangling.length,
       danglingBytes: dangling.reduce((sum, image) => sum + image.size, 0),
     },
@@ -4843,6 +4884,25 @@ app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
 app.post('/Monitor_Server/ops-cleanup', authMiddleware, async (req, res) => {
   if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
   const what = String(req.body?.what || '');
+  /* Selective mode: the dashboard sends the exact refs the operator ticked —
+     image tags ("poorija-crypto:v2.99") or image ids ("sha256:…" truncated is
+     not accepted; the disk listing hands out the full ref it wants gone). */
+  const chosen = Array.isArray(req.body?.refs) ? req.body.refs.map(String).filter((ref) => /^[\w.:\/@-]+$/.test(ref) && ref.length < 200) : [];
+  if (what === 'selected' && chosen.length) {
+    let freedBytes = 0;
+    const gone = [];
+    for (const ref of chosen) {
+      const inspect = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(ref)}/json`);
+      if (!inspect.ok) continue;
+      const inUse = Number(inspect.data?.Containers || 0) > 0;
+      if (inUse) continue;
+      freedBytes += Number(inspect.data?.Size || 0);
+      const removed = await dockerEngineRequest('DELETE', `/v1.44/images/${encodeURIComponent(ref)}?force=1&noprune=0`, null, { timeoutMs: 120000 });
+      if (!removed.unreachable && removed.status < 300) gone.push(ref);
+    }
+    monitorLog(`Selective cleanup removed ${gone.length} image ref(s), ${Math.round(freedBytes / 1048576)} MB`);
+    return res.json({ ok: true, what, removed: gone, freedBytes });
+  }
   const APP_IMAGE_TAG = process.env.APP_VERSION || '';
   const dfRaw = await dockerEngineJson('GET', '/v1.44/images/json');
   const df = { data: { Images: dfRaw.data || [] } };
