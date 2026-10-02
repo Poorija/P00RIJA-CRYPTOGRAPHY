@@ -220,6 +220,10 @@ fi
 ok "compose file resolves"
 
 log "Building images (no cache)"
+# The image tag is the app version, so containers and images say what they
+# run instead of a number frozen in 2024. Read from package.json, the one
+# place the version already lives.
+APP_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
 "${COMPOSE_CMD[@]}" build --no-cache poorija-cryptography chat-signal || {
     fail "The image build failed; the running stack was left alone."
     exit 1
@@ -230,7 +234,7 @@ log "Restarting the stack"
 # the docker HOST sees them, for the bind mounts its job containers use.
 # Handed in on the command line rather than written into .env: they are this
 # machine's facts, not settings a person should be able to get wrong.
-OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" \
+OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION" \
 "${COMPOSE_CMD[@]}" up -d poorija-cryptography chat-signal || {
     fail "Bringing the stack up failed."
     exit 1

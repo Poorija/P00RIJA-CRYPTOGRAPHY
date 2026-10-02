@@ -515,9 +515,26 @@ ${meta}
 `;
 }
 if (entry.type === 'system-note') {
+/* A server announcement may carry an attachment (image/sticker/audio/file,
+   as a small data URL). The text is the note; the attachment renders under
+   it — an inline picture or sticker, a player for sound, a download chip
+   for anything else. Anything missing just renders as the note alone. */
+const attachment = entry.attachment && entry.attachment.dataUrl ? entry.attachment : null;
+let attachmentHtml = '';
+if (attachment) {
+const label = app().escapeHTML(attachment.name || 'attachment');
+if (attachment.kind === 'image' || attachment.kind === 'sticker' || String(attachment.mimeType || '').startsWith('image/')) {
+attachmentHtml = `<img class="chat-system-attachment ${attachment.kind === 'sticker' ? 'is-sticker' : ''}" src="${attachment.dataUrl}" alt="${label}" draggable="false">`;
+} else if (attachment.kind === 'audio' || String(attachment.mimeType || '').startsWith('audio/')) {
+attachmentHtml = `<audio class="chat-system-attachment" controls preload="metadata" src="${attachment.dataUrl}"></audio>`;
+} else {
+attachmentHtml = `<a class="chat-system-attachment chat-system-attachment-file" href="${attachment.dataUrl}" download="${label}"><i class="fas fa-paperclip"></i> ${label}</a>`;
+}
+}
 return `
 <div class="chat-system-note ${entry.noteKind === 'key-change' ? 'is-key-change' : ''}" data-id="${eid(entry.id)}">
 <span>${app().escapeHTML(entry.text || '')}</span>
+${attachmentHtml}
 </div>`;
 }
 if (entry.type === 'call-log') {

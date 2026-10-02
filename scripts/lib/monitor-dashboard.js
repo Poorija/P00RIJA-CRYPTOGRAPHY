@@ -176,12 +176,20 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       <div class="grid cards" id="statCards"></div>
       <div class="grid three">
         <div class="card"><h3><i class="fas fa-users"></i><span data-t>کاربران متصل</span></h3><canvas id="chPeers"></canvas></div>
-        <div class="card"><h3><i class="fas fa-microchip"></i><span data-t>پردازنده و حافظه</span></h3><canvas id="chCpu"></canvas></div>
-        <div class="card"><h3><i class="fas fa-envelopes"></i><span data-t>پیام‌های در صف</span></h3><canvas id="chQueue"></canvas></div>
+        <div class="card"><h3><i class="fas fa-microchip"></i><span data-t>پردازنده</span> <span class="tag mut" id="chCpuNow"></span></h3><canvas id="chCpu"></canvas></div>
+        <div class="card"><h3><i class="fas fa-memory"></i><span data-t>حافظه</span> <span class="tag mut" id="chMemNow"></span></h3><canvas id="chQueue2"></canvas></div>
+      </div>
+      <div class="grid three">
+        <div class="card"><h3><i class="fas fa-right-left"></i><span data-t>پیام‌ها در ثانیه</span></h3><canvas id="chMsgs"></canvas></div>
+        <div class="card"><h3><i class="fas fa-network-wired"></i><span data-t>شبکه — ورودی/خروجی</span></h3><canvas id="chNet"></canvas></div>
+        <div class="card"><h3><i class="fas fa-hard-drive"></i><span data-t>مصرف دیسک</span> <span class="tag mut" id="chDiskNow"></span></h3><canvas id="chDisk"></canvas></div>
       </div>
       <div class="card">
         <h3><i class="fas fa-heart-pulse"></i><span data-t>سلامت رله</span></h3>
         <div class="grid three" id="relayHealth" style="gap:10px"></div>
+        <div style="overflow:auto;margin-top:10px"><table id="relayDiscards"><thead><tr>
+          <th data-t>دورریخته‌شده‌ها</th><th data-t>شمار</th><th data-t>آخرین</th>
+        </tr></thead><tbody></tbody></table></div>
       </div>
     </section>
 
@@ -239,13 +247,27 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
         <table id="alTable"><tbody></tbody></table>
       </div>
       <div class="card">
-        <h3><i class="fas fa-bullhorn"></i><span data-t>پیام همگانی</span></h3>
+        <h3><i class="fas fa-bullhorn"></i><span data-t>مرکز پیام سرور — به همه، آنلاین و آفلاین، با پوش نوتیفیکیشن</span></h3>
+        <div class="hint" style="margin-bottom:10px">
+          <span data-t>پیام برای هر هویتی که این رله می‌شناسد صف می‌شود، به متصل‌ها زنده می‌رسد و به همهٔ دستگاه‌هایی که پوش دارند نوتیف می‌فرستد — گیرندهٔ آفلاین موقع برگشت، پیام را در گفتگو می‌بیند. پیوست (تصویر/استیکر/فایل/صدا تا ۲MB) همراه پیام در چت می‌نشیند.</span>
+        </div>
         <div class="row" style="margin-bottom:8px">
-          <input type="text" id="bcTarget" placeholder="clientId (خالی = همه)" style="direction:ltr;min-width:200px">
+          <input type="text" id="anTitle" data-p="عنوان نوتیفیکیشن" style="min-width:180px">
+          <select id="anKind">
+            <option value="">— بدون پیوست —</option>
+            <option value="image">تصویر</option><option value="sticker">استیکر</option>
+            <option value="audio">صدا</option><option value="file">فایل</option>
+          </select>
+          <input type="file" id="anFile" style="max-width:220px">
         </div>
         <div class="row">
-          <input type="text" id="bcMsg" data-p="متن پیام" style="flex:1;min-width:200px">
-          <button class="btn acc" id="bcSend"><i class="fas fa-paper-plane"></i><span data-t>ارسال</span></button>
+          <input type="text" id="anMsg" data-p="متن پیام" style="flex:1;min-width:200px">
+          <button class="btn acc" id="anSend"><i class="fas fa-paper-plane"></i><span data-t>ارسال به همه</span></button>
+          <span class="hint" id="anResult"></span>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="bcTarget" placeholder="clientId (پخش قدیمی — فقط متصل‌ها)" style="direction:ltr;min-width:200px">
+          <button class="btn" id="bcSend"><i class="fas fa-tower-broadcast"></i><span data-t>پخش زنده</span></button>
         </div>
       </div>
     </section>
@@ -297,6 +319,16 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
         <div style="overflow:auto"><table id="bkTable"><thead><tr>
           <th data-t>نام</th><th data-t>حجم</th><th></th><th></th><th></th>
         </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-memory"></i><span data-t>رم سرور و کانتینرها</span></h3>
+        <div class="hint" id="ramHost" style="margin-bottom:8px">…</div>
+        <div style="overflow:auto;margin-bottom:10px"><table id="ramTable"><thead><tr>
+          <th data-t>کانتینر</th><th data-t>سقف فعلی</th><th data-t>مصرف الان</th><th data-t>سقف جدید (MB)</th><th></th>
+        </tr></thead><tbody></tbody></table></div>
+        <div class="row">
+          <span class="hint" id="ramAdvice"></span>
+        </div>
       </div>
       <div class="card">
         <h3><i class="fab fa-docker"></i><span data-t>ایمیج‌های داکر</span></h3>
@@ -471,7 +503,7 @@ function esc(text) { const d = document.createElement('div'); d.textContent = St
 function confirmKey(key) { return confirm(t(key)); }
 
 /* ---------- charts (tiny canvas lines, no libraries) ---------- */
-const series = { peers: [], cpu: [], queue: [] };
+const series = { peers: [], cpu: [], mem: [], msgs: [], netIn: [], netOut: [], disk: [] };
 function drawLine(canvas, data, color) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -507,7 +539,7 @@ function refreshTab(name) {
   if (name === 'users') loadHealth();
   if (name === 'relays') loadTransit();
   if (name === 'traffic') loadTraffic();
-  if (name === 'machine') { loadBackups(); loadImages(); ghCheck(); }
+  if (name === 'machine') { loadBackups(); loadImages(); ghCheck(); loadRam(); }
   if (name === 'reports') loadReports();
   if (name === 'system') loadHealth();
 }
@@ -533,11 +565,29 @@ async function loadHealth() {
     lastHealth = data;
     $('statusPill').classList.add('live');
     $('statusText').textContent = t('online') + ' · ' + fmtTime(new Date().toISOString());
-    series.peers.push(data.peers || 0); series.cpu.push(data.cpu?.percent || 0); series.queue.push(data.queuedMessages || 0);
-    for (const key of ['peers','cpu','queue']) { series[key] = series[key].slice(-90); }
+    /* Six live charts, all deltas computed here from consecutive polls — the
+       relay keeps totals, the dashboard keeps the slope. */
+    const traffic = data.traffic || { msgsIn: 0, msgsOut: 0, bytesIn: 0, bytesOut: 0 };
+    const prev = lastHealth;
+    const deltaPerSec = (nowV, thenV) => (prev ? Math.max(0, (nowV - thenV) / Math.max(1, 10)) : 0);
+    const diskUsedNow = data.storage ? Math.max(0, (data.storage.total || 0) - (data.storage.free || 0)) : 0;
+    series.peers.push(data.peers || 0);
+    series.cpu.push(data.cpuLoad || 0);
+    series.mem.push(data.memory?.rss || 0);
+    series.msgs.push(deltaPerSec(traffic.msgsIn + traffic.msgsOut, (prev?.traffic?.msgsIn || 0) + (prev?.traffic?.msgsOut || 0)));
+    series.netIn.push(deltaPerSec(traffic.bytesIn, prev?.traffic?.bytesIn || 0));
+    series.netOut.push(deltaPerSec(traffic.bytesOut, prev?.traffic?.bytesOut || 0));
+    series.disk.push(diskUsedNow);
+    for (const key of Object.keys(series)) { series[key] = series[key].slice(-90); }
     drawLine($('chPeers'), series.peers, '#38bdf8');
     drawLine($('chCpu'), series.cpu, '#a78bfa');
-    drawLine($('chQueue'), series.queue, '#34d399');
+    drawLine($('chQueue2'), series.mem, '#34d399');
+    drawLine($('chMsgs'), series.msgs, '#f472b6');
+    drawBars($('chNet'), series.netIn.map((v, i) => v - (series.netOut[i] || 0)), true);
+    drawLine($('chDisk'), series.disk, '#fbbf24');
+    $('chCpuNow').textContent = Math.round(data.cpuLoad || 0) + '%';
+    $('chMemNow').textContent = fmtBytes((data.memory?.rss || 0) * 1024 * 1024);
+    $('chDiskNow').textContent = fmtBytes(diskUsedNow * 1024 * 1024);
 
     /* /healthz speaks its own dialect: cpuLoad is the percent, memory is
        MB-valued {rss, heapUsed, heapTotal}, storage is MB {total, free}. */
@@ -585,13 +635,24 @@ async function loadHealth() {
     $('suspTable').querySelector('tbody').innerHTML = (data.suspendedUsers || []).map(suspRow).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
     $('kickTable').querySelector('tbody').innerHTML = (data.kickedUsers || []).map(kickRow).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
 
-    /* relay health */
+    /* relay health — drawn as the things an operator says out loud (a chip
+       grid), never a JSON dump; unknown keys still surface as chips. */
     const relay = data.relay || {};
-    $('relayHealth').innerHTML = [
-      '<div class="hint"><b>limits</b><br>' + esc(JSON.stringify(relay.limits || {})) + '</div>',
-      '<div class="hint"><b>mailboxes</b><br>' + esc(JSON.stringify(relay.mailboxes || {})) + '</div>',
-      '<div class="hint"><b>discarded</b><br>' + esc(JSON.stringify(relay.discarded?.summary || {})) + '</div>',
-    ].join('');
+    const chipRow = (heading, obj) => {
+      const entries = Object.entries(obj || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
+      if (!entries.length) return '';
+      return '<div class="card" style="background:var(--panel2)"><h3>' + heading + '</h3><div class="row">' +
+        entries.map(([k, v]) => '<span class="tag mut">' + esc(k) + ': <b>' + esc(String(v)) + '</b></span>').join('') +
+        '</div></div>';
+    };
+    $('relayHealth').innerHTML =
+      chipRow(LANG === 'fa' ? 'محدودیت‌ها' : 'limits', relay.limits) +
+      chipRow(LANG === 'fa' ? 'میل‌باکس‌ها' : 'mailboxes', relay.mailboxes) +
+      chipRow(LANG === 'fa' ? 'سوکت‌ها' : 'sockets', relay.sockets) +
+      chipRow(LANG === 'fa' ? 'تعدادیل' : 'throttle', relay.throttle);
+    const discardRows = Object.entries(relay.discarded?.summary || {})
+      .map(([reason, count]) => '<tr><td><span class="tag bad">' + esc(reason) + '</span></td><td>' + esc(String(count)) + '</td><td>' + fmtTime((relay.discarded?.recent || [])[0]?.at) + '</td></tr>');
+    $('relayDiscards').querySelector('tbody').innerHTML = discardRows.join('') || '<tr><td colspan="3" class="empty">' + t('empty') + '</td></tr>';
 
     /* system cards + logs — TURN and RelayID drew blank on day one because
        /healthz never carried them; both arrive now, with copy buttons. */
@@ -607,7 +668,7 @@ async function loadHealth() {
       const copy = event.target.closest('[data-copy]');
       if (copy) navigator.clipboard.writeText(copy.getAttribute('data-copy'));
     });
-    $('logs').textContent = (data.logs || []).slice(-140).join('\\n');
+    $('logs').textContent = (data.logs || []).slice(-140).map((line) => (typeof line === 'string' ? line : JSON.stringify(line))).join('\\n');
   } catch (error) {
     $('statusPill').classList.remove('live');
     $('statusText').textContent = t('offline');
@@ -732,10 +793,81 @@ $('alTable').addEventListener('click', async (event) => {
   loadAllowlist();
 });
 
-/* broadcast */
+/* broadcast (live sockets only) */
 $('bcSend').addEventListener('click', async () => {
-  const result = await api('/admin/broadcast', { message: $('bcMsg').value, clientId: $('bcTarget').value.trim() || undefined });
+  const result = await api('/admin/broadcast', { message: $('anMsg').value || $('bcTarget').value, clientId: $('bcTarget').value.trim() || undefined });
   toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err');
+});
+
+/* ---------- the announce centre: everyone, online and offline, with push */
+$('anSend').addEventListener('click', async () => {
+  const button = $('anSend');
+  button.disabled = true;
+  try {
+    const body = { message: $('anMsg').value.trim(), title: $('anTitle').value.trim() };
+    const kind = $('anKind').value;
+    const file = ($('anFile').files || [])[0];
+    if (kind && file) {
+      if (file.size > 2 * 1024 * 1024) { toast(LANG === 'fa' ? 'پیوست بیشتر از ۲ مگابایت است' : 'attachment over 2MB', 'err'); return; }
+      body.attachment = {
+        kind,
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        dataUrl: await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        }),
+      };
+    }
+    const result = await api('/Monitor_Server/announce', body);
+    $('anResult').textContent = result.ok
+      ? (LANG === 'fa' ? 'رسید به ' : 'reached ') + result.reached + (LANG === 'fa' ? ' هویت (' + result.live + ' زنده) + پوش' : ' identities (' + result.live + ' live) + push')
+      : (result.reason || t('fail'));
+    toast($('anResult').textContent, result.ok ? 'ok' : 'err');
+    if (result.ok) { $('anMsg').value = ''; $('anFile').value = ''; $('anKind').value = ''; }
+  } finally { button.disabled = false; }
+});
+
+/* ---------- container memory ---------- */
+async function loadRam() {
+  const data = await api('/Monitor_Server/ops-memory');
+  if (!data.ok) { $('ramHost').textContent = data.reason || t('fail'); $('ramTable').querySelector('tbody').innerHTML = ''; return; }
+  const host = data.host || {};
+  const stackUse = (data.containers || []).reduce((sum, row) => sum + (row.limitMb || 0), 0);
+  $('ramHost').innerHTML = (LANG === 'fa'
+    ? 'رم فیزیکی سرور: <b>' + (host.totalMb || '—') + ' MB</b> · ' + (host.cpus || '—') + ' هسته · داکر ' + esc(host.engine || '')
+    : 'physical RAM: <b>' + (host.totalMb || '—') + ' MB</b> · ' + (host.cpus || '—') + ' cores · docker ' + esc(host.engine || ''))
+    + (stackUse ? ' — ' + (LANG === 'fa' ? 'سهم کل استک: ' + stackUse + ' MB (' + Math.round(stackUse / host.totalMb * 100) + '%)' : 'stack share: ' + stackUse + ' MB') : '');
+  const rows = (data.containers || []).map((row) => {
+    const suggested = row.limitMb ? Math.max(128, Math.ceil(row.usageMb * 2 / 64) * 64) : Math.max(128, Math.ceil(row.usageMb * 2 / 64) * 64);
+    return '<tr><td class="mono">' + esc(row.name.replace('Poorija-Cryptography_', '')) + '</td>' +
+      '<td>' + (row.limitMb ? row.limitMb + ' MB' : '<span class="tag warnc">نامحدود</span>') + '</td>' +
+      '<td>' + row.usageMb + ' MB</td>' +
+      '<td><input type="number" min="64" max="16384" step="64" value="' + suggested + '" data-ram-for="' + esc(row.name) + '" style="width:90px"></td>' +
+      '<td><div class="row"><button class="btn acc" data-ram-apply="' + esc(row.name) + '"><i class="fas fa-check"></i></button>' +
+      '<button class="btn" data-ram-restart="' + esc(row.name) + '"><i class="fas fa-arrows-rotate"></i></button></div></td></tr>';
+  });
+  $('ramTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="5" class="empty">' + t('empty') + '</td></tr>';
+  $('ramAdvice').textContent = LANG === 'fa'
+    ? 'پیشنهاد هوشمند: مقدار پیش‌فرض هر خانه = ۲ برابر مصرف فعلی (گرد به ۶۴). «✓» سقف را زنده اعمال می‌کند؛ «↻» کانتینر را ری‌استارت می‌کند.'
+    : 'suggested default per row = 2× current usage (rounded to 64). checkmark applies the ceiling live; arrows restart the container.';
+}
+$('ramTable').addEventListener('click', async (event) => {
+  const apply = event.target.closest('[data-ram-apply]');
+  const restart = event.target.closest('[data-ram-restart]');
+  if (apply) {
+    const input = document.querySelector('[data-ram-for="' + apply.getAttribute('data-ram-apply') + '"]');
+    const result = await api('/Monitor_Server/ops-memory-set', { container: apply.getAttribute('data-ram-apply'), mb: Number(input.value) });
+    toast(result.ok ? t('ok') : (result.reason || t('fail')), result.ok ? 'ok' : 'err');
+    if (result.ok) loadRam();
+  }
+  if (restart) {
+    const name = restart.getAttribute('data-ram-restart');
+    const result = await api('/Monitor_Server/ops-stack-restart');
+    toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err');
+  }
 });
 
 /* ---------- relays ---------- */
@@ -941,13 +1073,33 @@ async function loadReports() {
     '<tr><td class="hint">' + fmtTime(event.at) + '</td><td><span class="tag mut">' + esc(event.kind) + '</span></td><td>' + esc(event.text) + '</td></tr>'
   ).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
 }
-function drawBars(canvas, data) {
+function drawBars(canvas, data, diverging) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width = canvas.clientWidth * devicePixelRatio;
-  const h = canvas.height = 180 * devicePixelRatio;
+  const h = canvas.height = (diverging ? 150 : 180) * devicePixelRatio;
   ctx.clearRect(0, 0, w, h);
   if (!data.length) return;
+  if (diverging) {
+    /* In above the axis, out below it — one chart, both directions. */
+    const max = Math.max(...data.map((v) => Math.abs(v)), 1);
+    const mid = h / 2;
+    const bw = w / data.length;
+    const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#38bdf8';
+    data.forEach((v, i) => {
+      const bh = (Math.abs(v) / max) * (mid - 8);
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.7;
+      const x = i * bw + bw * 0.15;
+      if (v >= 0) ctx.fillRect(x, mid - bh - 2, bw * 0.7, bh);
+      else ctx.fillRect(x, mid + 2, bw * 0.7, bh);
+    });
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#7d93b8';
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
   const max = Math.max(...data, 1);
   const bw = w / data.length;
   data.forEach((v, i) => {
@@ -955,7 +1107,8 @@ function drawBars(canvas, data) {
     ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#38bdf8';
     ctx.globalAlpha = 0.35 + 0.65 * (v / max);
     ctx.beginPath();
-    ctx.roundRect(i * bw + bw * 0.15, h - bh - 8, bw * 0.7, bh, 3 * devicePixelRatio);
+    if (ctx.roundRect) ctx.roundRect(i * bw + bw * 0.15, h - bh - 8, bw * 0.7, bh, 3 * devicePixelRatio);
+    else ctx.rect(i * bw + bw * 0.15, h - bh - 8, bw * 0.7, bh);
     ctx.fill();
   });
   ctx.globalAlpha = 1;
@@ -1061,6 +1214,27 @@ $('refreshNow').addEventListener('click', () => refreshTab(document.querySelecto
 
 /* ---------- loop ---------- */
 applyLang();
+/* The GitHub check answers on login, not on request: a chip beside the
+   status says whether the running build is the newest published one. */
+(async () => {
+  try {
+    const data = await api('/Monitor_Server/ops-github-check');
+    if (!data.reachable) return;
+    const chip = document.createElement('span');
+    chip.className = 'pill';
+    if (data.updateAvailable) {
+      chip.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> GitHub: ' + esc(data.latest.tag);
+      chip.style.borderColor = '#fbbf2455';
+      chip.style.color = 'var(--warn)';
+      chip.style.cursor = 'pointer';
+      chip.title = LANG === 'fa' ? 'از تب سرور اعمال کنید' : 'apply from the machine tab';
+      chip.addEventListener('click', () => document.querySelector('#nav button[data-tab="machine"]').click());
+    } else {
+      chip.innerHTML = '<i class="fas fa-circle-check"></i> ' + esc(data.running.version || '');
+    }
+    $('statusPill').after(chip);
+  } catch (_error) { /* the dashboard works without it */ }
+})();
 loadHealth();
 loadAllowlist();
 setInterval(() => {

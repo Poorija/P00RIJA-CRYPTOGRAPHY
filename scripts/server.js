@@ -4595,6 +4595,129 @@ app.post('/Monitor_Server/expiry-log', authMiddleware, (req, res) => {
   }
 });
 
+/* ---- the announce centre ----------------------------------------------------
+ *
+ * The old broadcast reached whoever was holding a socket; everyone else
+ * learned nothing until they came back. This reaches every identity the
+ * relay has ever served: a queued mailbox entry (so it is waiting on the
+ * next connection), a live frame to anyone connected now, and a push
+ * notification to every device that subscribed one — online or not.
+ *
+ * Attachments ride the entry the way chat media never can (server-origin,
+ * already in the clear to the server, capped small), and the app renders
+ * them from the system note it already knows how to draw. */
+
+const ANNOUNCE_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
+  const message = String(req.body?.message || '').trim().slice(0, 2000);
+  const title = String(req.body?.title || '').trim().slice(0, 120) || 'پیام از سرور';
+  if (!message && !req.body?.attachment) return res.status(400).json({ ok: false, reason: 'empty' });
+  const attachmentRaw = req.body?.attachment || null;
+  let attachment = null;
+  if (attachmentRaw) {
+    const dataUrl = String(attachmentRaw.dataUrl || '');
+    if (!/^data:[\w./+-]+;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return res.status(400).json({ ok: false, reason: 'bad-data-url' });
+    if (Buffer.byteLength(dataUrl) > ANNOUNCE_MAX_ATTACHMENT_BYTES) return res.status(400).json({ ok: false, reason: 'attachment-too-large' });
+    attachment = {
+      kind: ['image', 'sticker', 'file', 'audio'].includes(attachmentRaw.kind) ? attachmentRaw.kind : 'file',
+      name: String(attachmentRaw.name || 'attachment').slice(0, 120),
+      mimeType: String(attachmentRaw.mimeType || 'application/octet-stream').slice(0, 100),
+      dataUrl,
+    };
+  }
+  /* Everyone this relay has ever served: connected now, or holding a mailbox.
+     That is the honest definition of "all users" a relay can stand behind. */
+  const fingerprints = new Set();
+  for (const key of offlineBoxes.keys()) fingerprints.add(key);
+  for (const record of presence.values()) {
+    const fp = sanitizeFingerprint(identitySnapshot(record)?.fingerprint || '');
+    if (fp) fingerprints.add(fp);
+  }
+  let queued = 0;
+  let live = 0;
+  const payload = { type: 'system-note', message: message || attachment.name, title, attachment };
+  for (const fingerprint of fingerprints) {
+    const items = offlineBoxes.get(fingerprint) || [];
+    items.push({
+      type: 'relay',
+      relayId: crypto.randomUUID(),
+      fromClientId: 'server-announce',
+      fromFingerprint: 'monitor',
+      payload,
+      queuedAt: Date.now(),
+    });
+    offlineBoxes.set(fingerprint, items);
+    queued += 1;
+    const target = findOpenPresenceByFingerprint(fingerprint);
+    if (target?.ws && target.ws.readyState === WebSocket.OPEN) {
+      safeSend(target.ws, { type: 'relay', fromClientId: 'server-announce', fromFingerprint: 'monitor', payload });
+      live += 1;
+    }
+    /* The wake-up, online or not — a phone that is closed still buzzes. */
+    sendAdminPushNotification(fingerprint, (title + ': ' + (message || attachment.name)).slice(0, 178), 'admin-announce').catch(() => {});
+  }
+  await saveOfflineBoxes();
+  monitorLog(`Announcement to ${queued} identit${queued === 1 ? 'y' : 'ies'} (${live} live, push attempted)`);
+  res.json({ ok: true, reached: queued, live });
+});
+
+/* ---- container memory -------------------------------------------------------
+ *
+ * What the machine really has, what each container is allowed, and the knob
+ * itself: the engine's update endpoint changes a live container's memory
+ * ceiling without a restart, and the restart button beside it is for when
+ * the workload should be given a clean start on the new number. */
+
+app.post('/Monitor_Server/ops-memory', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const info = await dockerEngineJson('GET', '/v1.44/info');
+  const containers = await dockerEngineJson('GET', '/v1.44/containers/json?all=1');
+  const rows = [];
+  for (const container of containers.data || []) {
+    const name = String((container.Names || [])[0] || '').replace(/^\//, '');
+    if (!/Poorija-Cryptography/.test(name)) continue;
+    const detail = await dockerEngineJson('GET', `/v1.44/containers/${container.Id}/json`);
+    const stats = await dockerEngineRequest('GET', `/v1.44/containers/${container.Id}/stats?stream=false`, null, { timeoutMs: 20000 });
+    const statData = opsParseJson(stats.body);
+    const limitBytes = Number(detail.data?.HostConfig?.Memory || 0);
+    const usageBytes = Number(statData?.memory_stats?.usage || 0);
+    rows.push({
+      id: container.Id.slice(0, 12),
+      name,
+      limitMb: Math.round(limitBytes / 1024 / 1024) || null,
+      usageMb: Math.round(usageBytes / 1024 / 1024) || 0,
+      unlimited: !limitBytes,
+    });
+  }
+  res.json({
+    ok: true,
+    host: {
+      totalMb: Math.round(Number(info.data?.MemTotal || 0) / 1024 / 1024),
+      cpus: info.data?.NCPU || 0,
+      engine: info.data?.ServerVersion || '',
+    },
+    containers: rows,
+  });
+});
+
+app.post('/Monitor_Server/ops-memory-set', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const name = String(req.body?.container || '').trim();
+  const megabytes = Math.max(64, Math.min(16384, Math.round(Number(req.body?.mb || 0))));
+  if (!/^Poorija-Cryptography_[\w-]+$/.test(name) || !megabytes) return res.status(400).json({ ok: false, reason: 'bad-request' });
+  const containers = await dockerEngineJson('GET', '/v1.44/containers/json?all=1');
+  const target = (containers.data || []).find((container) => ((container.Names || [])[0] || '').replace(/^\//, '') === name);
+  if (!target) return res.status(404).json({ ok: false, reason: 'no-such-container' });
+  /* MemorySwap at twice the ceiling is the standard pairing: the heap may
+     breathe past RSS a little, but never past a wall anyone can point at. */
+  const update = await dockerEngineJson('POST', `/v1.44/containers/${target.Id}/update`, {
+    Memory: megabytes * 1024 * 1024,
+    MemorySwap: megabytes * 2 * 1024 * 1024,
+  });
+  monitorLog(`Memory of ${name} set to ${megabytes} MB (${update.ok ? 'applied live' : 'failed'})`);
+  res.json({ ok: update.ok, container: name, mb: megabytes, note: update.ok ? 'applied to the running container; restart it if you want a clean start on the new number' : String(update.data?.message || '').slice(0, 200) });
+});
+
 /* ---- machine half: docker, archives, backups --------------------------------
  *
  * All of it goes through the docker engine API over a socket the deployment
@@ -4640,6 +4763,9 @@ async function dockerEngineJson(method, urlPath, payload) {
   let parsed = null;
   try { parsed = JSON.parse(response.body); } catch (_error) { parsed = null; }
   return { ok: response.status >= 200 && response.status < 300, status: response.status, data: parsed };
+}
+function opsParseJson(text) {
+  try { return JSON.parse(text); } catch (_error) { return null; }
 }
 
 /* One short-lived container, fixed argument list, two mounts it may see: the

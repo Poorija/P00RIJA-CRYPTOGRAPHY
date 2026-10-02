@@ -1,6 +1,6 @@
-# P00RIJA Cryptography 2.91.21
+# P00RIJA Cryptography 2.91.22
 
-Version 2.91.21 · build chat-v96
+Version 2.91.22 · build chat-v97
 
 این نسخه همهٔ فاصلهٔ از 2.77.0 تا امروز را پوشش می‌دهد: یک ممیزی کامل که از
 ریله تا نصاب را گشت، باگ‌هایی که پیدا شد و همه‌شان فیکس شدند، رفتارهایی که
@@ -213,7 +213,7 @@ sha256sum -c SHA256SUMS.txt
 روی ویندوز (PowerShell) · on Windows:
 
 ```powershell
-Get-FileHash ".\P00RIJA Cryptography_2.91.21_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.91.22_x64-setup.exe" -Algorithm SHA256
 ```
 
 برای یک فایل تکی، چک‌سام را با سطر مربوط به همان فایل در `SHA256SUMS.txt`

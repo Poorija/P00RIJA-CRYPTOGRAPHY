@@ -17936,6 +17936,36 @@ html body #mainApp #content-chat .chat-system-note {
   text-align: center;
   line-height: 1.6;
 }
+/* A server announcement with an attachment: the pill loosens into a card so
+   the picture or player fits, the sticker stays stamp-sized, and a file is
+   a chip that saves. */
+html body #mainApp #content-chat .chat-system-note:has(.chat-system-attachment) {
+  border-radius: 1rem;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: center;
+}
+html body #mainApp #content-chat .chat-system-attachment {
+  max-width: 100%;
+  border-radius: 0.8rem;
+}
+html body #mainApp #content-chat img.chat-system-attachment { max-height: 16rem; object-fit: contain; }
+html body #mainApp #content-chat img.chat-system-attachment.is-sticker { max-height: 8rem; }
+html body #mainApp #content-chat audio.chat-system-attachment { width: min(100%, 16rem); height: 2.2rem; }
+html body #mainApp #content-chat .chat-system-attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.7rem;
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-decoration: none;
+}
 html body .chat-space-info { position: fixed; inset: 0; z-index: 90; }
 html body .chat-space-info.hidden { display: none; }
 html body .chat-space-info-backdrop {
