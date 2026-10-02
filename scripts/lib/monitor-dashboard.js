@@ -32,6 +32,12 @@ function monitorDashboardHtml({ version, buildTag, monitorVersion, port, presenc
   --bg:#070d1a;--panel:#0d1628;--panel2:#111d33;--line:#1e2f4d;--ink:#dbe7ff;--muted:#7d93b8;
   --accent:#38bdf8;--good:#34d399;--warn:#fbbf24;--bad:#f87171;--violet:#a78bfa;--radius:14px;
 }
+/* Three more voices for the same dashboard. The body class is all any of
+   them needs — the variables do the rest, charts included. */
+body.theme-light{--bg:#f1f5fb;--panel:#ffffff;--panel2:#eef3fa;--line:#d7e1ef;--ink:#17233c;--muted:#5b6d8c}
+body.theme-light{background:radial-gradient(1200px 600px at 85% -10%,#dbeafe55,transparent),var(--bg)}
+body.theme-ocean{--bg:#04121f;--panel:#072033;--panel2:#0a2942;--line:#123a58;--ink:#d5f0ff;--muted:#6fa3c2;--accent:#22d3ee;--violet:#67e8f9}
+body.theme-midnight{--bg:#0a0618;--panel:#140f2e;--panel2:#1a1440;--line:#2d2260;--ink:#e6e0ff;--muted:#8d84c2;--accent:#c084fc;--violet:#f472b6;--good:#4ade80}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:radial-gradient(1200px 600px at 85% -10%,#12305533,transparent),var(--bg);color:var(--ink);
   font-family:Vazirmatn,Tahoma,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
@@ -138,6 +144,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       <button data-tab="relays"><i class="fas fa-diagram-project"></i><span data-t>رله‌ها</span></button>
       <button data-tab="traffic"><i class="fas fa-chart-line"></i><span data-t>ترافیک</span></button>
       <button data-tab="machine"><i class="fas fa-server"></i><span data-t>سرور و بکاپ</span></button>
+      <button data-tab="reports"><i class="fas fa-file-lines"></i><span data-t>گزارش‌ها</span></button>
       <button data-tab="bootstrap"><i class="fas fa-rocket"></i><span data-t>نصب خام</span></button>
       <button data-tab="system"><i class="fas fa-gears"></i><span data-t>سیستم</span></button>
     </nav>
@@ -151,7 +158,15 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       <h1 id="tabTitle">نمای کلی</h1>
       <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">…</span></span>
       <div class="grow"></div>
+      <select id="themeSel">
+        <option value="">.dark</option><option value="theme-light">light</option>
+        <option value="theme-ocean">ocean</option><option value="theme-midnight">midnight</option>
+      </select>
       <select id="langSel"><option value="fa">فارسی</option><option value="en">English</option></select>
+      <select id="refreshSel">
+        <option value="5000">5s</option><option value="10000" selected>10s</option>
+        <option value="30000">30s</option><option value="60000">60s</option><option value="0">✋</option>
+      </select>
       <button class="btn" id="refreshNow"><i class="fas fa-rotate"></i><span data-t>نوسازی</span></button>
       <button class="btn bad" id="logoutBtn"><i class="fas fa-power-off"></i><span data-t>خروج</span></button>
     </div>
@@ -189,14 +204,24 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
           <th>#</th><th data-t>شناسه</th><th data-t>فرستنده</th><th data-t>نوع</th><th data-t>حجم</th><th data-t>زمان</th><th></th>
         </tr></thead><tbody></tbody></table></div>
       </div>
+      <div class="card">
+        <h3><i class="fas fa-hourglass-end"></i><span data-t>دفتر انقضا — چه چیزی، کِی و چرا حذف شد</span></h3>
+        <div style="overflow:auto;max-height:260px"><table id="expiryTable"><thead><tr>
+          <th data-t>زمان</th><th data-t>علت</th><th data-t>گیرنده</th><th>KB</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
     </section>
 
     <!-- ============ users ============ -->
     <section class="tab" data-tab="users">
       <div class="card">
         <h3><i class="fas fa-users"></i><span data-t>کاربران متصل</span> <span class="tag mut" id="uCount"></span></h3>
+        <div class="row" style="margin-bottom:10px">
+          <input type="text" id="uSearch" data-p="جستجو: نام / شناسه / IP" style="flex:1;min-width:180px;direction:ltr;text-align:start">
+          <span class="hint" data-t>علامت «بین‌رله» یعنی ترافیک این کاربر از لینک رله‌ها گذشته است.</span>
+        </div>
         <div style="overflow:auto"><table id="uTable"><thead><tr>
-          <th data-t>نام</th><th data-t>شناسه</th><th>IP</th><th data-t>اتصال از</th><th data-t>آخرین فعالیت</th><th data-t>عملیات</th>
+          <th data-t>نام</th><th data-t>شناسه</th><th>IP</th><th data-t>اتصال از</th><th data-t>آخرین فعالیت</th><th data-t>وضعیت</th><th data-t>عملیات</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div class="grid two">
@@ -296,6 +321,39 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
       </div>
     </section>
 
+    <!-- ============ reports ============ -->
+    <section class="tab" data-tab="reports">
+      <div class="grid cards">
+        <div class="card"><h3><i class="fas fa-phone"></i><span data-t>تماس‌های زنده</span></h3><div class="big" id="rpCallsN">—</div><div class="sub" id="rpCallsSub"></div></div>
+        <div class="card"><h3><i class="fas fa-tower-broadcast"></i><span data-t>فعال بین‌رله‌ای</span></h3><div class="big" id="rpTransitN">—</div><div class="sub" id="rpTransitSub"></div></div>
+        <div class="card"><h3><i class="fas fa-clock-rotate-left"></i><span data-t>ساعت آخر</span></h3><div class="big" id="rpHourMsgs">—</div><div class="sub" id="rpHourBytes"></div></div>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-users-phone"></i><span data-t>تماس‌های زنده و فعالیت بین‌رله‌ای</span></h3>
+        <div style="overflow:auto"><table id="rpCalls"><thead><tr>
+          <th data-t>کاربر</th><th data-t>مقصد</th><th data-t>نوع</th><th data-t>شروع</th>
+        </tr></thead><tbody></tbody></table></div>
+        <div class="hint" id="rpTransitList" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-chart-column"></i><span data-t>ترافیک ساعتی (۴۸ ساعت اخیر)</span></h3>
+        <canvas id="chHourly" style="height:180px"></canvas>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-bolt"></i><span data-t>رخدادها</span></h3>
+        <div style="overflow:auto;max-height:320px"><table id="rpEvents"><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-file-arrow-down"></i><span data-t>خروجی گزارش</span></h3>
+        <div class="row">
+          <button class="btn acc" id="expTraffic"><i class="fas fa-download"></i>CSV — <span data-t>ترافیک</span></button>
+          <button class="btn acc" id="expQueues"><i class="fas fa-download"></i>CSV — <span data-t>صف‌ها</span></button>
+          <button class="btn acc" id="expUsers"><i class="fas fa-download"></i>CSV — <span data-t>کاربران</span></button>
+          <button class="btn" id="expSnapshot"><i class="fas fa-download"></i>JSON — <span data-t>اسنپ‌شات کامل</span></button>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ bootstrap ============ -->
     <section class="tab" data-tab="bootstrap">
       <div class="card">
@@ -313,6 +371,15 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
     <!-- ============ system ============ -->
     <section class="tab" data-tab="system">
       <div class="grid cards" id="sysCards"></div>
+      <div class="card">
+        <h3><i class="fas fa-memory"></i><span data-t>بهینه‌سازی</span></h3>
+        <div class="hint" style="margin-bottom:8px"><span data-t>«آزادسازی رم» فرآیند زباله‌روب را صدا می‌زند؛ «پاک‌سازی حافظه» رکوردهای منقضی و سوکت‌های بسته را می‌اندازد. هر دو بی‌خطرند و اتصال کسی را نمی‌بُرند.</span></div>
+        <div class="row">
+          <button class="btn acc" id="optRam"><i class="fas fa-broom"></i><span data-t>آزادسازی رم</span></button>
+          <button class="btn" id="clrMem"><i class="fas fa-filter-circle-xmark"></i><span data-t>پاک‌سازی حافظه</span></button>
+          <span class="hint" id="optResult"></span>
+        </div>
+      </div>
       <div class="card">
         <h3><i class="fas fa-key"></i><span data-t>تغییر رمز مانیتور</span></h3>
         <div class="row">
@@ -436,11 +503,12 @@ document.querySelectorAll('#nav button').forEach((button) => {
 });
 function refreshTab(name) {
   if (name === 'over') loadHealth();
-  if (name === 'queues') loadQueues();
+  if (name === 'queues') { loadQueues(); loadExpiry(); }
   if (name === 'users') loadHealth();
   if (name === 'relays') loadTransit();
   if (name === 'traffic') loadTraffic();
   if (name === 'machine') { loadBackups(); loadImages(); ghCheck(); }
+  if (name === 'reports') loadReports();
   if (name === 'system') loadHealth();
 }
 
@@ -486,19 +554,32 @@ async function loadHealth() {
       card('fa-tower-broadcast', 'Transit', (data.transit?.up ?? 0) + ' / ' + (data.transit?.allowed ?? 0), t('linked')),
     ].join('');
 
-    /* users table */
-    const rows = (data.peersList || []).map((peer) => {
+    /* users table — searchable, and the cross-relay badge a sender earns the
+       moment their traffic rides a transit link. */
+    const query = String($('uSearch').value || '').trim().toLowerCase();
+    const allPeers = data.peersList || [];
+    const peers = query
+      ? allPeers.filter((peer) => String(peer.username || '').toLowerCase().includes(query)
+        || String(peer.fingerprint || '').toLowerCase().includes(query)
+        || String(peer.ip || '').includes(query))
+      : allPeers;
+    const rows = peers.map((peer) => {
       const since = fmtTime(peer.connectedAt ? new Date(peer.connectedAt).toISOString() : '');
+      const crossRelay = typeof peer.crossRelayMinutes === 'number';
+      const badge = crossRelay
+        ? '<span class="tag warnc" title="' + (peer.crossRelayMinutes || 0) + ' min">بین‌رله</span>'
+        : '';
       return '<tr><td>' + esc(peer.username || peer.peerId || '') + '</td>' +
         '<td class="mono">' + esc((peer.fingerprint || peer.clientId || '').slice(0, 12)) + '</td>' +
         '<td class="mono">' + esc(peer.ip || '') + '</td><td>' + since + '</td><td>' + fmtTime(peer.lastSeenAt ? new Date(peer.lastSeenAt).toISOString() : '') + '</td>' +
+        '<td>' + badge + '</td>' +
         '<td><div class="row">' +
         '<button class="btn warn" data-suspend="' + esc(peer.clientId) + '"><i class="fas fa-pause"></i>' + t('suspend') + '</button>' +
         '<button class="btn bad" data-kick="' + esc(peer.clientId) + '"><i class="fas fa-ban"></i>' + t('kick') + '</button>' +
         '</div></td></tr>';
     });
-    $('uTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">' + t('empty') + '</td></tr>';
-    $('uCount').textContent = (data.peersList || []).length;
+    $('uTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">' + t('empty') + '</td></tr>';
+    $('uCount').textContent = peers.length + (query ? ' / ' + allPeers.length : '');
 
     /* suspended / kicked */
     $('suspTable').querySelector('tbody').innerHTML = (data.suspendedUsers || []).map(suspRow).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
@@ -512,13 +593,20 @@ async function loadHealth() {
       '<div class="hint"><b>discarded</b><br>' + esc(JSON.stringify(relay.discarded?.summary || {})) + '</div>',
     ].join('');
 
-    /* system cards + logs */
+    /* system cards + logs — TURN and RelayID drew blank on day one because
+       /healthz never carried them; both arrive now, with copy buttons. */
+    const turnOn = data.turnEnabled;
+    const turnList = (data.turnUrls || []).map((url) => esc(String(url))).join('<br>') || '—';
     $('sysCards').innerHTML = [
-      card('fa-server', 'Node', esc(data.nodeVersion || ''), esc(data.platform || '')),
-      card('fa-clock', LANG === 'fa' ? 'به‌روز بودن' : 'Uptime', Math.round((data.uptime || 0) / 60) + ' min', ''),
-      card('fa-tower-cell', 'TURN', data.turnEnabled ? '<span class="tag good">on</span>' : '<span class="tag bad">off</span>', ''),
-      card('fa-fingerprint', 'Relay ID', '<span class="mono">' + esc(String(data.relayId || '').slice(0, 16)) + '</span>', ''),
+      card('fa-server', 'Node ' + esc(data.nodeVersion || ''), esc(data.hostname || ''), esc(String(data.cpus || '') + ' × ' + (data.cpuModel || ''))),
+      card('fa-clock', LANG === 'fa' ? 'به‌روز بودن' : 'Uptime', Math.round((data.uptime || 0) / 60) + ' min', 'load: ' + esc(String((data.loadAvg || [])[0] ?? '—'))),
+      card('fa-tower-cell', 'TURN', '<span class="tag ' + (turnOn ? 'good' : 'bad') + '">' + (turnOn ? 'on' : 'off') + '</span><div class="mono" style="font-size:10px;margin-top:6px">' + turnList + '</div>', '', true),
+      card('fa-fingerprint', 'Relay ID', '<span class="mono" style="font-size:11px;word-break:break-all">' + esc(String(data.relayId || '').slice(0, 32)) + '</span><button class="btn" style="margin-top:6px" data-copy="' + esc(String(data.relayId || '')) + '"><i class="fas fa-copy"></i> copy</button>', '', true),
     ].join('');
+    $('sysCards').addEventListener('click', (event) => {
+      const copy = event.target.closest('[data-copy]');
+      if (copy) navigator.clipboard.writeText(copy.getAttribute('data-copy'));
+    });
     $('logs').textContent = (data.logs || []).slice(-140).join('\\n');
   } catch (error) {
     $('statusPill').classList.remove('live');
@@ -822,6 +910,153 @@ $('logoutBtn').addEventListener('click', async () => {
   localStorage.removeItem('monitor_token_v2');
   location.replace('/Monitor_Server?logged_out=' + Date.now());
 });
+/* ---------- reports ---------- */
+let lastReports = null;
+async function loadReports() {
+  const data = await api('/Monitor_Server/reports');
+  lastReports = data;
+  $('rpCallsN').textContent = String((data.activeCalls || []).length);
+  $('rpCallsSub').textContent = (data.transitActive || []).length + ' ' + (LANG === 'fa' ? 'کاربر اخیراً بین‌رله‌ای' : 'users crossed a relay recently');
+  $('rpTransitN').textContent = String((data.transitActive || []).length);
+  $('rpTransitSub').textContent = (LANG === 'fa' ? 'ارسال از لینک رله‌ها در ۳۰ دقیقهٔ اخیر' : 'sent via a relay link in the last 30 min');
+  const last = (data.hourly || []).slice(-2);
+  if (last.length === 2) {
+    const msgs = last[1].msgsIn - last[0].msgsIn;
+    const bytes = (last[1].bytesIn + last[1].bytesOut) - (last[0].bytesIn + last[0].bytesOut);
+    $('rpHourMsgs').textContent = String(msgs);
+    $('rpHourBytes').textContent = fmtBytes(Math.max(0, bytes));
+  }
+  $('rpCalls').querySelector('tbody').innerHTML = (data.activeCalls || []).map((call) =>
+    '<tr><td>' + esc(call.username) + '</td><td class="mono">' + esc(call.peer) + '</td>' +
+    '<td><span class="tag ' + (call.group ? 'warnc' : 'good') + '">' + (call.group ? 'group' : '1:1') + '</span></td>' +
+    '<td>' + fmtTime(call.since) + '</td></tr>'
+  ).join('') || '<tr><td colspan="4" class="empty">' + t('empty') + '</td></tr>';
+  $('rpTransitList').innerHTML = (data.transitActive || []).map((row) =>
+    '<span class="tag warnc" style="margin:2px">' + esc(row.clientId) + ' · ' + row.minutesAgo + 'm</span>').join(' ') || '';
+  /* hourly deltas, newest on the right */
+  const hourly = data.hourly || [];
+  const deltas = hourly.map((row, i) => (i === 0 ? 0 : Math.max(0, row.msgsIn - hourly[i - 1].msgsIn + row.msgsOut - hourly[i - 1].msgsOut))).slice(1);
+  drawBars($('chHourly'), deltas);
+  $('rpEvents').querySelector('tbody').innerHTML = (data.events || []).map((event) =>
+    '<tr><td class="hint">' + fmtTime(event.at) + '</td><td><span class="tag mut">' + esc(event.kind) + '</span></td><td>' + esc(event.text) + '</td></tr>'
+  ).join('') || '<tr><td class="empty">' + t('empty') + '</td></tr>';
+}
+function drawBars(canvas, data) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+  const h = canvas.height = 180 * devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  if (!data.length) return;
+  const max = Math.max(...data, 1);
+  const bw = w / data.length;
+  data.forEach((v, i) => {
+    const bh = (v / max) * (h - 20);
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#38bdf8';
+    ctx.globalAlpha = 0.35 + 0.65 * (v / max);
+    ctx.beginPath();
+    ctx.roundRect(i * bw + bw * 0.15, h - bh - 8, bw * 0.7, bh, 3 * devicePixelRatio);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+/* CSV exports — the browser builds them from the same JSON the tables draw,
+   so the file can never disagree with the screen. */
+function csvDownload(name, rows) {
+  const csv = rows.map((row) => row.map((cell) => '"' + String(cell ?? '').replace(/"/g, '""') + '"').join(',')).join('\\n');
+  const blob = new Blob(['\\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+$('expTraffic').addEventListener('click', async () => {
+  const data = await api('/Monitor_Server/traffic');
+  csvDownload('traffic.csv', [['relayId', 'carried', 'bytes', 'lastAt'], ...(data.relays || []).map((r) => [r.relayId, r.carried, r.bytes, r.lastAt]),
+    ['clientId', 'label', 'msgsIn', 'msgsOut', 'bytesIn', 'bytesOut'], ...(data.clients || []).map((c) => [c.clientId, c.label, c.msgsIn, c.msgsOut, c.bytesIn, c.bytesOut, c.lastAt])]);
+});
+$('expQueues').addEventListener('click', async () => {
+  const data = await api('/Monitor_Server/queues');
+  csvDownload('queues.csv', [['fingerprint', 'count', 'bytes', 'oldestAt', 'newestAt'], ...(data.mailboxes || []).map((m) => [m.fingerprint, m.count, m.bytes, m.oldestAt, m.newestAt])]);
+});
+$('expUsers').addEventListener('click', async () => {
+  const data = await api('/healthz', null, 'GET');
+  csvDownload('users.csv', [['username', 'fingerprint', 'ip', 'connectedAt', 'lastSeenAt', 'crossRelayMinutes'], ...(data.peersList || []).map((p) => [p.username, p.fingerprint, p.ip, p.connectedAt, p.lastSeenAt, p.crossRelayMinutes])]);
+});
+$('expSnapshot').addEventListener('click', async () => {
+  const [health, traffic, queues, transit] = await Promise.all([
+    api('/healthz', null, 'GET'), api('/Monitor_Server/traffic'),
+    api('/Monitor_Server/queues'), api('/Monitor_Server/transit'),
+  ]);
+  const blob = new Blob([JSON.stringify({ at: new Date().toISOString(), health: { ...health, logs: undefined }, traffic, queues, transit }, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'monitor-snapshot.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+
+/* expiry log, under the queues tab */
+async function loadExpiry() {
+  const data = await api('/Monitor_Server/expiry-log');
+  $('expiryTable').querySelector('tbody').innerHTML = (data.entries || []).map((entry) => {
+    const row = Array.isArray(entry) ? entry : [entry.at || entry.time || '', entry.reason || entry.kind || '', entry.fingerprint || entry.to || '', entry.bytes || 0];
+    return '<tr><td class="hint">' + fmtTime(row[0]) + '</td><td><span class="tag mut">' + esc(String(row[1])) + '</span></td><td class="mono">' + esc(String(row[2]).slice(0, 16)) + '</td><td>' + Math.round(Number(row[3]) / 1024) + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="empty">' + t('empty') + '</td></tr>';
+}
+$('uSearch').addEventListener('input', () => { if (lastHealth) loadHealth(); });
+
+/* ---------- system: memory tools ---------- */
+$('optRam').addEventListener('click', async () => {
+  const result = await api('/admin/optimize-ram');
+  $('optResult').textContent = result.ok ? (LANG === 'fa' ? 'آزاد شد: ' : 'freed: ') + (result.freedMB ?? result.saved ?? '?') + ' MB' : t('fail');
+});
+$('clrMem').addEventListener('click', async () => {
+  const result = await api('/admin/clear-memory');
+  $('optResult').textContent = result.ok ? t('ok') : t('fail');
+});
+
+/* ---------- theme, refresh, shortcuts ---------- */
+const savedTheme = localStorage.getItem('monitor_theme') || '';
+if (savedTheme) document.body.classList.add(savedTheme);
+$('themeSel').value = savedTheme;
+$('themeSel').addEventListener('change', (event) => {
+  document.body.classList.remove('theme-light', 'theme-ocean', 'theme-midnight');
+  if (event.target.value) document.body.classList.add(event.target.value);
+  localStorage.setItem('monitor_theme', event.target.value);
+});
+const savedRefresh = localStorage.getItem('monitor_refresh');
+if (savedRefresh !== null) $('refreshSel').value = savedRefresh;
+let refreshTimer = null;
+function applyRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const ms = Number($('refreshSel').value || 0);
+  localStorage.setItem('monitor_refresh', String(ms));
+  if (!ms) return;
+  refreshTimer = setInterval(() => {
+    const current = document.querySelector('#nav button.on').dataset.tab;
+    if (current === 'over' || current === 'users' || current === 'system') loadHealth();
+    if (current === 'queues') loadQueues();
+    if (current === 'traffic') loadTraffic();
+    if (current === 'relays') loadTransit();
+    if (current === 'reports') loadReports();
+  }, ms);
+}
+$('refreshSel').addEventListener('change', applyRefresh);
+applyRefresh();
+/* 1-8 walk the tabs, r refreshes — the dashboard answers to the keyboard
+   the way the server it runs answers to it. */
+document.addEventListener('keydown', (event) => {
+  if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return;
+  if (event.key >= '1' && event.key <= '8') {
+    const buttons = document.querySelectorAll('#nav button');
+    const target = buttons[Number(event.key) - 1];
+    if (target) target.click();
+  }
+  if (event.key === 'r' || event.key === 'R') refreshTab(document.querySelector('#nav button.on').dataset.tab);
+});
+
 $('refreshNow').addEventListener('click', () => refreshTab(document.querySelector('#nav button.on').dataset.tab));
 
 /* ---------- loop ---------- */

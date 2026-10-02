@@ -1222,7 +1222,10 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     connectedAt: p.connectedAt,
     lastSeenAt: p.lastSeenAt,
     peerId: p.peerId,
-    fingerprint: p.fingerprint
+    fingerprint: p.fingerprint,
+    /* Minutes since this sender last crossed a relay link, for the users
+       table's cross-relay badge; null means it never did this session. */
+    crossRelayMinutes: transitActivityMinutesAgo(p.clientId),
   }));
 
   // Check storage (fallback for older node versions)
@@ -1242,6 +1245,14 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     service: 'poorija-chat-signal',
     peers: livePeers.length,
     peersList: peersDetails,
+    /* What the system tab draws: the relay's own name, the machine's, the
+       processor, and the TURN endpoints actually configured. */
+    relayId: relayIdentity.id,
+    hostname: os.hostname(),
+    cpus: os.cpus().length,
+    cpuModel: String(os.cpus()[0]?.model || '').trim().slice(0, 60),
+    turnUrls: TURN_URLS.slice(0, 4),
+    activeCalls: activeCalls.size,
     queuedMessages: Array.from(offlineBoxes.values()).reduce((sum, box) => sum + box.length, 0),
     pushSubscribers: Array.from(pushSubscriptions.values()).reduce((sum, items) => sum + items.length, 0),
     turnEnabled: TURN_URLS.length > 0,
@@ -1287,8 +1298,13 @@ app.post('/admin/login', (req, res) => {
     return res.status(423).json({ ok: false, reason: 'locked', remainingMs: lock.remainingMs });
   }
 
-  const { password } = req.body || {};
-  if (secretsMatch(password, MONITOR_PASSWORD)) {
+  const { password, username } = req.body || {};
+  /* A username gate in front of the password one: the monitor answers to a
+     named operator, not just to whoever holds the secret. Default 'admin'
+     keeps every existing bookmark working. */
+  const MONITOR_USER = process.env.MONITOR_USER || 'admin';
+  const usernameOk = !username || String(username).trim() === MONITOR_USER;
+  if (usernameOk && secretsMatch(password, MONITOR_PASSWORD)) {
     monitorLoginFailures.delete(monitorLoginKey(req));
     const token = issueMonitorSession(req);
     res.setHeader('Set-Cookie', `monitor_token_v2=${token}; ${monitorCookieFlags(req)}`);
@@ -1614,6 +1630,15 @@ app.get('/Monitor_Server', (req, res) => {
 
         <div class="space-y-6">
             <div>
+                <label class="block text-xs font-black text-slate-400 mb-3 mr-1 uppercase tracking-widest" data-login-i18n="username">نام کاربری</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 right-0 flex items-center pr-5 text-slate-500">
+                        <i class="fas fa-user-shield"></i>
+                    </span>
+                    <input type="text" id="userInput" value="admin" autocomplete="username" class="w-full bg-slate-900/80 border border-slate-700/50 rounded-2xl py-4 pr-12 pl-12 focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none transition-all placeholder-slate-600 text-center ltr font-black text-lg" placeholder="admin">
+                </div>
+            </div>
+            <div>
                 <label class="block text-xs font-black text-slate-400 mb-3 mr-1 uppercase tracking-widest" data-login-i18n="password">گذرواژه مدیریت</label>
                 <div class="relative">
                     <span class="absolute inset-y-0 right-0 flex items-center pr-5 text-slate-500">
@@ -1733,12 +1758,13 @@ app.get('/Monitor_Server', (req, res) => {
         }
         function doLogin() {
             const pass = document.getElementById('passInput').value;
+            const user = document.getElementById('userInput') ? document.getElementById('userInput').value.trim() : '';
             if (!pass) return;
             fetch('/admin/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 cache: 'no-store',
-                body: JSON.stringify({ password: pass })
+                body: JSON.stringify({ password: pass, username: user })
             }).then(async r => {
                 const data = await r.json().catch(() => ({}));
                 if (r.ok && data.ok) {
@@ -4353,10 +4379,10 @@ app.post('/Monitor_Server/queue-drop', authMiddleware, async (req, res) => {
     if (index < 0 || index >= items.length) return res.status(400).json({ ok: false, reason: 'bad-index' });
     const [dropped] = items.splice(index, 1);
     if (!items.length) offlineBoxes.delete(fingerprint);
-    console.log(`[Monitor] Dropped one mail item for ${fingerprint.slice(0, 12)} (id ${String(dropped?.relayId || '').slice(0, 8)})`);
+    monitorLog(`Dropped one mail item for ${fingerprint.slice(0, 12)}`);
   } else {
     offlineBoxes.delete(fingerprint);
-    console.log(`[Monitor] Dropped the whole mailbox of ${fingerprint.slice(0, 12)} (${items.length} items)`);
+    monitorLog(`Dropped the whole mailbox of ${fingerprint.slice(0, 12)} (${items.length} items)`);
   }
   await saveOfflineBoxes();
   res.json({ ok: true, remaining: offlineBoxes.get(fingerprint)?.length || 0 });
@@ -4426,7 +4452,7 @@ app.post('/Monitor_Server/transit-add', authMiddleware, (req, res) => {
   const added = relayPeers.allowPeer(id, origin);
   if (!added) return res.status(400).json({ ok: false, reason: 'peer-refused' });
   saveRuntimeTransitPeers();
-  console.log(`[Monitor] Transit peer added: ${id.slice(0, 12)}${origin ? ` @ ${origin}` : ' (answer-only)'}`);
+  monitorLog(`Transit peer added: ${id.slice(0, 12)}${origin ? ` @ ${origin}` : ' (answer-only)'}`);
   res.json({ ok: true, status: relayPeers.status() });
 });
 
@@ -4436,7 +4462,7 @@ app.post('/Monitor_Server/transit-remove', authMiddleware, (req, res) => {
   const removed = relayPeers.disallowPeer(id);
   if (!removed) return res.status(404).json({ ok: false, reason: 'no-such-peer' });
   saveRuntimeTransitPeers();
-  console.log(`[Monitor] Transit peer removed: ${id.slice(0, 12)}`);
+  monitorLog(`Transit peer removed: ${id.slice(0, 12)}`);
   res.json({ ok: true, status: relayPeers.status() });
 });
 
@@ -4464,6 +4490,109 @@ app.post('/Monitor_Server/traffic', authMiddleware, (req, res) => {
     },
     clients, relays,
   });
+});
+
+/* ---- events, hourly rollups, cross-relay activity, live calls ---------- */
+
+/* The dashboard's report feed. Not a log file — a short memory of what the
+   operator would want to see in order, kept in-process and lost with the
+   relay, which is exactly the honest lifetime for it. */
+const monitorEvents = [];
+const MONITOR_EVENTS_MAX = 200;
+function noteEvent(kind, text) {
+  monitorEvents.push({ at: new Date().toISOString(), kind: String(kind).slice(0, 24), text: String(text).slice(0, 200) });
+  if (monitorEvents.length > MONITOR_EVENTS_MAX) monitorEvents.shift();
+}
+function monitorLog(text) {
+  console.log(`[Monitor] ${text}`);
+  noteEvent('monitor', text);
+}
+
+/* One row per hour: the counters at the top of the hour, so the reports tab
+   can draw yesterday without anybody having configured anything. */
+const hourlyTraffic = [];
+const HOURLY_MAX = 48;
+setInterval(() => {
+  hourlyTraffic.push({
+    at: new Date().toISOString(),
+    msgsIn: totalMessagesReceived, msgsOut: totalMessagesSent,
+    bytesIn: totalBytesReceived, bytesOut: totalBytesSent,
+    peers: presence.size,
+  });
+  if (hourlyTraffic.length > HOURLY_MAX) hourlyTraffic.shift();
+}, 60 * 60 * 1000).unref();
+
+/* Who has been talking THROUGH another relay lately. The envelope is sealed
+   and stays sealed — this records only that the sender crossed the link, and
+   the dashboard shows it as a badge that ages out. */
+const transitActivity = new Map(); // clientId -> lastAt
+function noteTransitActivity(clientId) {
+  if (!clientId) return;
+  transitActivity.set(clientId, Date.now());
+  if (transitActivity.size > 1000) transitActivity.delete(transitActivity.keys().next().value);
+}
+function transitActivityMinutesAgo(clientId) {
+  const at = transitActivity.get(clientId);
+  if (!at) return null;
+  return Math.round((Date.now() - at) / 60000);
+}
+
+/* Live calls on THIS relay, from the signaling it already sees: an invite
+   opens a row, a cancel or a miss closes it, and ten quiet minutes close it
+   for sure — a monitor that shows a dead call as live is worse than none. */
+const activeCalls = new Map(); // clientId -> { since, peer, group }
+const CALL_TTL_MS = 10 * 60 * 1000;
+function noteCallFrame(fromClientId, payloadType, peerLabel) {
+  if (!fromClientId) return;
+  const isGroup = payloadType.startsWith('gcall');
+  if (payloadType === 'call-invite' || payloadType === 'gcall-invite') {
+    activeCalls.set(fromClientId, { since: Date.now(), peer: String(peerLabel || '').slice(0, 40), group: isGroup });
+  } else if (payloadType === 'call-cancel' || payloadType === 'call-missed' || payloadType === 'gcall-leave') {
+    activeCalls.delete(fromClientId);
+  }
+  if (activeCalls.size > 200) activeCalls.delete(activeCalls.keys().next().value);
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [clientId, call] of activeCalls) {
+    if (now - call.since > CALL_TTL_MS) activeCalls.delete(clientId);
+  }
+}, 60 * 1000).unref();
+
+/* The reports tab: everything above in one answer. */
+app.post('/Monitor_Server/reports', authMiddleware, (req, res) => {
+  const calls = [];
+  for (const [clientId, call] of activeCalls) {
+    const record = Array.from(presence.values()).find((peer) => peer.clientId === clientId);
+    calls.push({
+      username: record?.username || clientId.slice(0, 8),
+      peer: call.peer,
+      group: call.group,
+      since: new Date(call.since).toISOString(),
+    });
+  }
+  res.json({
+    ok: true,
+    events: monitorEvents.slice(-80).reverse(),
+    hourly: hourlyTraffic.slice(),
+    activeCalls: calls,
+    transitActive: Array.from(transitActivity.entries())
+      .map(([clientId, at]) => ({ clientId: clientId.slice(0, 8), minutesAgo: Math.round((Date.now() - at) / 60000) }))
+      .sort((a, b) => a.minutesAgo - b.minutesAgo)
+      .slice(0, 20),
+  });
+});
+
+/* The purge's own log — what the retention decided and when, straight from
+   the file it already keeps, newest first, never more than a screen. */
+app.post('/Monitor_Server/expiry-log', authMiddleware, (req, res) => {
+  try {
+    const raw = JSON.parse(fs.readFileSync(EXPIRY_LOG_PATH, 'utf8'));
+    const entries = Array.isArray(raw) ? raw : (Array.isArray(raw.entries) ? raw.entries : []);
+    res.json({ ok: true, entries: entries.slice(-100).reverse() });
+  } catch (_error) {
+    res.json({ ok: true, entries: [] });
+  }
 });
 
 /* ---- machine half: docker, archives, backups --------------------------------
@@ -4647,6 +4776,7 @@ app.post('/Monitor_Server/ops-stack-restart', authMiddleware, async (req, res) =
     const result = await dockerEngineJson('POST', `/v1.44/containers/${container.Id}/restart?t=15`, null);
     restarted.push({ name: (container.Names || [])[0], ok: result.ok });
   }
+  monitorLog(`Stack restart: ${restarted.map((entry) => entry.name + (entry.ok ? "+" : "x")).join(", ") || "none"}`);
   res.json({ ok: restarted.length > 0 && restarted.every((entry) => entry.ok), restarted });
 });
 
@@ -4686,6 +4816,7 @@ app.post('/Monitor_Server/ops-backup-create', authMiddleware, async (req, res) =
   const snapshot = await opsSnapshot();
   if (!snapshot.ok) return res.json({ ok: false, reason: 'archive-failed' });
   await runOpsJob(['sh', '-c', 'mkdir -p /backups && ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm -f'], { timeoutMs: 120000 });
+  monitorLog(`Backup created: ${snapshot.name}`);
   res.json({ ok: true, name: snapshot.name });
 });
 
@@ -4747,6 +4878,7 @@ app.post('/Monitor_Server/ops-backup-restore', authMiddleware, async (req, res) 
   if (!/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
   const safety = await opsSnapshot();
   const job = await runOpsJob(['tar', 'xzf', `/backups/${name}`, '-C', '/job'], { timeoutMs: 900000 });
+  monitorLog(`Restore overlaid: ${name}`);
   res.json({
     ok: job.ok,
     restored: name,
@@ -4846,6 +4978,7 @@ app.post('/Monitor_Server/ops-github-apply', authMiddleware, async (req, res) =>
     return { ok: exitCode === 0, logs: logs.body.slice(-2000) };
   })();
   if (!download.ok) return res.json({ ok: false, reason: download.reason || 'download-failed', output: String(download.logs || '').slice(-500) });
+  monitorLog(`GitHub ${tag} applied; safety: ${safety.ok ? safety.name : 'none'}`);
   res.json({ ok: true, tag, safetyBackup: safety.ok ? safety.name : '', note: 'tree updated; restart the stack from the dashboard to run it' });
 });
 
@@ -4862,6 +4995,7 @@ app.post('/Monitor_Server/ops-github-rollback', authMiddleware, async (req, res)
   if (!chosen) return res.json({ ok: false, reason: 'no-backup' });
   const safety = await opsSnapshot();
   const job = await runOpsJob(['tar', 'xzf', `/backups/${chosen}`, '-C', '/job'], { timeoutMs: 900000 });
+  monitorLog(`Rollback overlaid: ${chosen}`);
   res.json({
     ok: job.ok,
     restored: chosen,
@@ -5279,6 +5413,9 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     return;
   }
   noteTransitTraffic(facts.toRelay, Buffer.byteLength(envelope));
+  /* The badge in the users table: this sender's traffic just crossed a relay
+     link. What crossed stays sealed; that it crossed is the monitor's fact. */
+  noteTransitActivity(clientId);
   /* The carrier's own correlation id, not the client's tag. The tag belongs
      to the client and there is no reason for another relay to see it. */
   const ref = crypto.randomUUID();
@@ -5424,6 +5561,10 @@ totalRelays++;
   const target = openPresenceRecord(message.toClientId) || findOpenPresenceByFingerprint(toFingerprint);
   
   const payloadType = String(message.payload?.type || 'unknown');
+  /* Call signaling the relay already sees; the live-calls report keys on it. */
+  if (payloadType.startsWith('call') || payloadType.startsWith('gcall')) {
+    noteCallFrame(clientId || message.fromClientId, payloadType, message.toClientId || toFingerprint);
+  }
 
   const targetRestriction = target
     ? getRestrictionForIdentity(target)
