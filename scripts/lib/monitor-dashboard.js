@@ -20,7 +20,7 @@
 
 'use strict';
 
-function monitorDashboardHtml({ version, buildTag, monitorVersion, port, presencePort }) {
+function monitorDashboardHtml({ version, buildTag, monitorVersion, port, presencePort, bootstrapPort }) {
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -369,8 +369,16 @@ const t = (k) => (T[LANG] && T[LANG][k]) || T.fa[k] || k;
 
 /* ---------- helpers ---------- */
 const $ = (id) => document.getElementById(id);
-async function api(path, body) {
-  const response = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify(body || {}) });
+async function api(path, body, method) {
+  /* Most monitor actions are POSTs; /healthz and the allowlist listing are
+     GETs on the relay, so the verb follows the call site. */
+  const verb = method || 'POST';
+  const response = await fetch(path, {
+    method: verb,
+    headers: verb === 'POST' ? { 'Content-Type': 'application/json' } : undefined,
+    credentials: 'same-origin',
+    body: verb === 'POST' ? JSON.stringify(body || {}) : undefined,
+  });
   if (response.status === 401) { location.reload(); throw new Error('unauthorized'); }
   const type = response.headers.get('content-type') || '';
   if (!type.includes('application/json')) return response;
@@ -453,7 +461,7 @@ $('langSel').addEventListener('change', (e) => { LANG = e.target.value; localSto
 let lastHealth = null;
 async function loadHealth() {
   try {
-    const data = await api('/healthz');
+    const data = await api('/healthz', null, 'GET');
     lastHealth = data;
     $('statusPill').classList.add('live');
     $('statusText').textContent = t('online') + ' · ' + fmtTime(new Date().toISOString());
@@ -463,15 +471,19 @@ async function loadHealth() {
     drawLine($('chCpu'), series.cpu, '#a78bfa');
     drawLine($('chQueue'), series.queue, '#34d399');
 
-    const memPct = data.memory ? Math.round((data.memory.usedHeap / Math.max(1, data.memory.heap)) * 100) : 0;
-    const diskPct = data.storage ? Math.round((data.storage.used / Math.max(1, data.storage.total)) * 100) : 0;
+    /* /healthz speaks its own dialect: cpuLoad is the percent, memory is
+       MB-valued {rss, heapUsed, heapTotal}, storage is MB {total, free}. */
+    const cpuPct = Math.round(data.cpuLoad || 0);
+    const heapPct = data.memory?.heapTotal ? Math.round((data.memory.heapUsed / data.memory.heapTotal) * 100) : 0;
+    const diskUsed = data.storage ? Math.max(0, (data.storage.total || 0) - (data.storage.free || 0)) : 0;
+    const diskPct = data.storage?.total ? Math.round((diskUsed / data.storage.total) * 100) : 0;
     $('statCards').innerHTML = [
       card('fa-users', t('peers'), data.peers ?? 0, (data.capacity?.sockets?.inUse ?? '—') + ' / ' + (data.capacity?.sockets?.max ?? '—') + ' sockets'),
-      card('fa-microchip', t('cpu'), Math.round(data.cpu?.percent || 0) + '%', bar(Math.round(data.cpu?.percent || 0), data.cpu?.percent > 80)),
-      card('fa-memory', t('ram'), fmtBytes(data.memory?.usedHeap), t('cpu') + ' ' + memPct + '%' + bar(memPct, memPct > 85), true),
-      card('fa-hard-drive', t('disk'), diskPct + '%', fmtBytes(data.storage?.used) + ' / ' + fmtBytes(data.storage?.total) + bar(diskPct, diskPct > 85), true),
+      card('fa-microchip', t('cpu'), cpuPct + '%', bar(cpuPct, cpuPct > 80), true),
+      card('fa-memory', t('ram'), heapPct + '%', fmtBytes((data.memory?.heapUsed || 0) * 1024 * 1024) + ' / ' + fmtBytes((data.memory?.heapTotal || 0) * 1024 * 1024) + bar(heapPct, heapPct > 85), true),
+      card('fa-hard-drive', t('disk'), diskPct + '%', fmtBytes(diskUsed * 1024 * 1024) + ' / ' + fmtBytes((data.storage?.total || 0) * 1024 * 1024) + bar(diskPct, diskPct > 85), true),
       card('fa-envelopes', t('queue'), data.queuedMessages ?? 0, (data.relay?.mailboxes?.count ?? 0) + ' ' + (LANG === 'fa' ? 'میل‌باکس' : 'mailboxes')),
-      card('fa-tower-broadcast', 'Transit', (data.relay?.transitText || ((lastHealth.relay?.limits ? '' : '') + ((data.traffic?.relays) || 0))), t('linked') + ': ' + esc(String(JSON.stringify(data.relay?.transit || {})).slice(0,40))),
+      card('fa-tower-broadcast', 'Transit', (data.transit?.up ?? 0) + ' / ' + (data.transit?.allowed ?? 0), t('linked')),
     ].join('');
 
     /* users table */
@@ -502,7 +514,7 @@ async function loadHealth() {
 
     /* system cards + logs */
     $('sysCards').innerHTML = [
-      card('fa-server', 'Node', esc(data.node || ''), esc(data.platform || '')),
+      card('fa-server', 'Node', esc(data.nodeVersion || ''), esc(data.platform || '')),
       card('fa-clock', LANG === 'fa' ? 'به‌روز بودن' : 'Uptime', Math.round((data.uptime || 0) / 60) + ' min', ''),
       card('fa-tower-cell', 'TURN', data.turnEnabled ? '<span class="tag good">on</span>' : '<span class="tag bad">off</span>', ''),
       card('fa-fingerprint', 'Relay ID', '<span class="mono">' + esc(String(data.relayId || '').slice(0, 16)) + '</span>', ''),
@@ -609,7 +621,7 @@ $('kickTable').addEventListener('click', async (event) => {
 
 /* allowlist */
 async function loadAllowlist() {
-  const data = await api('/admin/allowlist');
+  const data = await api('/admin/allowlist', null, 'GET');
   $('alToggle').querySelector('span').textContent = (data.allowlistEnabled ? 'ON' : 'OFF');
   $('alTable').querySelector('tbody').innerHTML = (data.allowedUsers || []).map((entry) => {
     const fp = entry.fingerprint || entry;
@@ -732,7 +744,11 @@ async function loadImages() {
   const data = await api('/Monitor_Server/ops-images');
   if (!data.ok) { $('imTable').querySelector('tbody').innerHTML = '<tr><td colspan="6" class="empty">' + esc(data.reason || '') + '</td></tr>'; return; }
   const rows = (data.images || []).slice(0, 30).map((image) => {
-    const watched = /^(node|docker|coturn\/coturn|nginx|certbot\/certbot)/.test(image.repository);
+    /* The doubled backslashes are on purpose: this script lives inside a
+       template literal, where \\/ reaches the browser as \/ — a single one
+       would flatten to a bare slash and close the regex early, which is
+       exactly how 3.33 shipped blank on its first day. */
+    const watched = /^(node|docker|coturn\\/coturn|nginx|certbot\\/certbot)/.test(image.repository);
     return '<tr><td class="mono">' + esc(image.repository) + (watched ? ' <span class="tag good">stack</span>' : '') + '</td>' +
       '<td>' + esc(image.tag) + '</td><td class="mono">' + esc(image.id) + '</td><td>' + fmtBytes(image.size) + '</td><td>' + fmtTime(image.created) + '</td>' +
       '<td>' + (watched ? '<button class="btn" data-im-update="' + esc(image.repository + ':' + image.tag) + '"><i class="fas fa-arrows-rotate"></i> ' + (LANG === 'fa' ? 'بررسی/آپدیت' : 'check') + '</button>' : '') + '</td></tr>';
@@ -788,7 +804,10 @@ $('bsShow').addEventListener('click', async () => {
   if (!data.ok) { toast(t('fail'), 'err'); return; }
   const origin = location.origin;
   $('bsCommand').style.display = '';
-  $('bsCommand').textContent = 'curl -sSL ' + origin.replace(':8585', ':${port}') + '/install | bash -s -- ' + origin.replace(':8585', ':${port}') + ' ' + data.token + ' ~/poorija-cryptography';
+  /* The command must point at the bootstrap port, not the app port the
+     dashboard itself is served from; the server bakes the number in. */
+  const bsOrigin = origin.replace(':8585', ':' + '${bootstrapPort}');
+  $('bsCommand').textContent = 'curl -sSL ' + bsOrigin + '/install | bash -s -- ' + bsOrigin + ' ' + data.token + ' ~/poorija-cryptography';
 });
 
 /* ---------- system ---------- */

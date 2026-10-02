@@ -1273,6 +1273,9 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     suspendedUsers: listSuspensions(),
     kickedUsers: listActiveKickBans(),
     relay: relayInsight(),
+    /* The same transit honesty /chat-health reports, for the dashboard's
+       overview card without a second request. */
+    transit: relayPeers.status(),
     cert: certSummary()
   });
 });
@@ -1799,6 +1802,7 @@ app.get('/Monitor_Server', (req, res) => {
       monitorVersion: MONITOR_VERSION,
       port: PORT,
       presencePort: PRESENCE_PORT,
+      bootstrapPort: BOOTSTRAP_PORT,
     }));
   }
 
@@ -4273,7 +4277,9 @@ app.post('/Monitor_Server/queues', authMiddleware, (req, res) => {
     let oldest = Infinity;
     let newest = 0;
     for (const item of items) {
-      bytes += item?.payload?.length || 0;
+      /* The payload is a parsed object, so its wire size is the JSON length —
+         .length on an object is undefined and every mailbox would read 0 B. */
+      bytes += Buffer.byteLength(JSON.stringify(item?.payload ?? null));
       const at = Number(item?.queuedAt) || 0;
       if (at < oldest) oldest = at;
       if (at > newest) newest = at;
@@ -4322,7 +4328,7 @@ app.post('/Monitor_Server/queue-mailbox', authMiddleware, (req, res) => {
       id: String(item?.relayId || '').slice(0, 8),
       from: String(item?.fromFingerprint || '').slice(0, 12),
       type: item?.payload?.type ? String(item.payload.type).slice(0, 24) : 'relay',
-      size: item?.payload?.length || 0,
+      size: Buffer.byteLength(JSON.stringify(item?.payload ?? null)),
       queuedAt: item?.queuedAt ? new Date(item.queuedAt).toISOString() : '',
     })),
   });
@@ -4509,7 +4515,9 @@ async function dockerEngineJson(method, urlPath, payload) {
 
 /* One short-lived container, fixed argument list, two mounts it may see: the
    install tree and the backups directory. The host paths come from this
-   file's settings; the names inside are fixed text. */
+   file's settings; the names inside are fixed text. If the job image is not
+   on the machine yet — a first run, or a server that never pulled it — it is
+   fetched once from the registry and the create is retried. */
 async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
   if (!dockerAvailable() || !INSTALL_HOST_DIR) {
     return { ok: false, reason: 'docker-socket-not-mounted' };
@@ -4517,12 +4525,24 @@ async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
   const name = `poorija-ops-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
   const binds = [`${INSTALL_HOST_DIR}:/job`];
   if (OPS_BACKUP_HOST_DIR) binds.push(`${OPS_BACKUP_HOST_DIR}:/backups`);
-  const created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
+  let created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
     Image: OPS_JOB_IMAGE,
     Cmd: command,
     WorkingDir: '/job',
     HostConfig: { AutoRemove: false, Binds: binds, NetworkMode: 'none' },
   });
+  if (!created.ok && /no such image/i.test(String(created.data?.message || ''))) {
+    const [imageName, imageTag] = OPS_JOB_IMAGE.split(':');
+    await dockerEngineRequest('POST',
+      `/v1.44/images/create?fromImage=${encodeURIComponent(imageName)}&tag=${encodeURIComponent(imageTag || 'latest')}`,
+      null, { timeoutMs: 600000 });
+    created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
+      Image: OPS_JOB_IMAGE,
+      Cmd: command,
+      WorkingDir: '/job',
+      HostConfig: { AutoRemove: false, Binds: binds, NetworkMode: 'none' },
+    });
+  }
   if (!created.ok) return { ok: false, reason: `create-${created.status}`, detail: String(created.data?.message || '').slice(0, 300) };
   const containerId = created.data?.Id;
   const started = await dockerEngineJson('POST', `/v1.44/containers/${containerId}/start`, null);
@@ -4673,7 +4693,7 @@ app.post('/Monitor_Server/ops-backup-create', authMiddleware, async (req, res) =
    of a row this listing produced, matched exactly. */
 app.post('/Monitor_Server/ops-backup-list', authMiddleware, async (req, res) => {
   if (!OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
-  const job = await runOpsJob(['sh', '-c', 'ls -lh1 /backups 2>/dev/null | grep server-backup_'], { timeoutMs: 60000 });
+  const job = await runOpsJob(['sh', '-c', 'ls -lh1 /backups 2>/dev/null | grep server-backup_ || true'], { timeoutMs: 60000 });
   if (!job.ok) return res.json({ ok: false, reason: 'list-failed' });
   const rows = String(job.logs || '').replace(/\u0000/g, '').split('\n').map((line) => line.trim())
     .filter((line) => line.includes('server-backup_'))
