@@ -252,17 +252,18 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
           <span data-t>پیام برای هر هویتی که این رله می‌شناسد صف می‌شود، به متصل‌ها زنده می‌رسد و به همهٔ دستگاه‌هایی که پوش دارند نوتیف می‌فرستد — گیرندهٔ آفلاین موقع برگشت، پیام را در گفتگو می‌بیند. پیوست (تصویر/استیکر/فایل/صدا تا ۲MB) همراه پیام در چت می‌نشیند.</span>
         </div>
         <div class="row" style="margin-bottom:8px">
-          <input type="text" id="anTitle" data-p="عنوان نوتیفیکیشن" style="min-width:180px">
+          <input type="text" id="anTitle" data-p="عنوان نوتیفیکیشن" style="min-width:150px">
+          <input type="text" id="anTarget" data-p="fingerprint — خالی = همه" style="direction:ltr;min-width:170px">
           <select id="anKind">
             <option value="">— بدون پیوست —</option>
             <option value="image">تصویر</option><option value="sticker">استیکر</option>
             <option value="audio">صدا</option><option value="file">فایل</option>
           </select>
-          <input type="file" id="anFile" style="max-width:220px">
+          <input type="file" id="anFile" style="max-width:200px">
         </div>
         <div class="row">
           <input type="text" id="anMsg" data-p="متن پیام" style="flex:1;min-width:200px">
-          <button class="btn acc" id="anSend"><i class="fas fa-paper-plane"></i><span data-t>ارسال به همه</span></button>
+          <button class="btn acc" id="anSend"><i class="fas fa-paper-plane"></i><span data-t>ارسال</span></button>
           <span class="hint" id="anResult"></span>
         </div>
         <div class="row" style="margin-top:8px">
@@ -321,13 +322,23 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div class="card">
-        <h3><i class="fas fa-memory"></i><span data-t>رم سرور و کانتینرها</span></h3>
+        <h3><i class="fas fa-memory"></i><span data-t>رم و CPU سرور و کانتینرها</span></h3>
         <div class="hint" id="ramHost" style="margin-bottom:8px">…</div>
         <div style="overflow:auto;margin-bottom:10px"><table id="ramTable"><thead><tr>
-          <th data-t>کانتینر</th><th data-t>سقف فعلی</th><th data-t>مصرف الان</th><th data-t>سقف جدید (MB)</th><th></th>
+          <th data-t>کانتینر</th><th data-t>رم: سقف / مصرف</th><th>CPU%</th><th data-t>رم جدید (MB)</th><th>CPU% <span data-t>جدید</span></th><th></th>
         </tr></thead><tbody></tbody></table></div>
         <div class="row">
           <span class="hint" id="ramAdvice"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3><i class="fas fa-hard-drive"></i><span data-t>دیسک و پاکسازی</span></h3>
+        <div class="hint" id="diskInfo" style="margin-bottom:10px">…</div>
+        <div class="row">
+          <button class="btn warn" id="clStale"><i class="fas fa-images"></i><span data-t>حذف تگ‌های قدیمی برنامه</span> <span class="tag mut" id="clStaleSize"></span></button>
+          <button class="btn warn" id="clDangling"><i class="fas fa-layer-group"></i><span data-t>حذف لایه‌های بی‌صاحب</span> <span class="tag mut" id="clDanglingSize"></span></button>
+          <button class="btn" id="clTemps"><i class="fas fa-broom"></i><span data-t>پاک‌کردن فایل‌های موقت</span></button>
+          <span class="hint" id="clResult"></span>
         </div>
       </div>
       <div class="card">
@@ -539,7 +550,7 @@ function refreshTab(name) {
   if (name === 'users') loadHealth();
   if (name === 'relays') loadTransit();
   if (name === 'traffic') loadTraffic();
-  if (name === 'machine') { loadBackups(); loadImages(); ghCheck(); loadRam(); }
+  if (name === 'machine') { loadBackups(); loadImages(); ghCheck(); loadRam(); loadDisk(); }
   if (name === 'reports') loadReports();
   if (name === 'system') loadHealth();
 }
@@ -805,6 +816,8 @@ $('anSend').addEventListener('click', async () => {
   button.disabled = true;
   try {
     const body = { message: $('anMsg').value.trim(), title: $('anTitle').value.trim() };
+    const target = $('anTarget').value.trim().toLowerCase();
+    if (target) body.targets = target.split(/[\\s,]+/).filter(Boolean);
     const kind = $('anKind').value;
     const file = ($('anFile').files || [])[0];
     if (kind && file) {
@@ -830,45 +843,64 @@ $('anSend').addEventListener('click', async () => {
   } finally { button.disabled = false; }
 });
 
-/* ---------- container memory ---------- */
+/* ---------- container memory + cpu ---------- */
+let lastRamData = null;
 async function loadRam() {
+  $('ramHost').textContent = '…';
   const data = await api('/Monitor_Server/ops-memory');
+  lastRamData = data;
   if (!data.ok) { $('ramHost').textContent = data.reason || t('fail'); $('ramTable').querySelector('tbody').innerHTML = ''; return; }
   const host = data.host || {};
-  const stackUse = (data.containers || []).reduce((sum, row) => sum + (row.limitMb || 0), 0);
   $('ramHost').innerHTML = (LANG === 'fa'
-    ? 'رم فیزیکی سرور: <b>' + (host.totalMb || '—') + ' MB</b> · ' + (host.cpus || '—') + ' هسته · داکر ' + esc(host.engine || '')
-    : 'physical RAM: <b>' + (host.totalMb || '—') + ' MB</b> · ' + (host.cpus || '—') + ' cores · docker ' + esc(host.engine || ''))
-    + (stackUse ? ' — ' + (LANG === 'fa' ? 'سهم کل استک: ' + stackUse + ' MB (' + Math.round(stackUse / host.totalMb * 100) + '%)' : 'stack share: ' + stackUse + ' MB') : '');
+    ? 'رم فیزیکی سرور: <b>' + (host.totalMb || '—') + ' MB</b> (این عدد واقعی سخت‌افزار است — مقدار که در free -m می‌بینید همین است) · ' + (host.cpus || '—') + ' هسته · داکر ' + esc(host.engine || '')
+    : 'physical RAM: <b>' + (host.totalMb || '—') + ' MB</b> (the hardware number free -m shows) · ' + (host.cpus || '—') + ' cores · docker ' + esc(host.engine || ''));
   const rows = (data.containers || []).map((row) => {
-    const suggested = row.limitMb ? Math.max(128, Math.ceil(row.usageMb * 2 / 64) * 64) : Math.max(128, Math.ceil(row.usageMb * 2 / 64) * 64);
+    const suggested = Math.max(128, Math.ceil((row.usageMb * 2) / 64) * 64);
     return '<tr><td class="mono">' + esc(row.name.replace('Poorija-Cryptography_', '')) + '</td>' +
-      '<td>' + (row.limitMb ? row.limitMb + ' MB' : '<span class="tag warnc">نامحدود</span>') + '</td>' +
-      '<td>' + row.usageMb + ' MB</td>' +
-      '<td><input type="number" min="64" max="16384" step="64" value="' + suggested + '" data-ram-for="' + esc(row.name) + '" style="width:90px"></td>' +
-      '<td><div class="row"><button class="btn acc" data-ram-apply="' + esc(row.name) + '"><i class="fas fa-check"></i></button>' +
-      '<button class="btn" data-ram-restart="' + esc(row.name) + '"><i class="fas fa-arrows-rotate"></i></button></div></td></tr>';
+      '<td>' + (row.limitMb ? row.limitMb + ' / ' + row.usageMb + ' MB' : '<span class="tag warnc">نامحدود</span> / ' + row.usageMb + ' MB') + '</td>' +
+      '<td>' + (row.cpuPct != null ? row.cpuPct + '%' : '—') + '</td>' +
+      '<td><input type="number" min="0" max="16384" step="64" value="' + suggested + '" data-ram-for="' + esc(row.name) + '" style="width:84px" title="0 = نامحدود"></td>' +
+      '<td><input type="number" min="0" max="800" step="25" value="100" data-cpu-for="' + esc(row.name) + '" style="width:74px" title="100 = یک هسته کامل"></td>' +
+      '<td><button class="btn acc" data-ram-apply="' + esc(row.name) + '"><i class="fas fa-check"></i></button></td></tr>';
   });
-  $('ramTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="5" class="empty">' + t('empty') + '</td></tr>';
+  $('ramTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">' + t('empty') + '</td></tr>';
   $('ramAdvice').textContent = LANG === 'fa'
-    ? 'پیشنهاد هوشمند: مقدار پیش‌فرض هر خانه = ۲ برابر مصرف فعلی (گرد به ۶۴). «✓» سقف را زنده اعمال می‌کند؛ «↻» کانتینر را ری‌استارت می‌کند.'
-    : 'suggested default per row = 2× current usage (rounded to 64). checkmark applies the ceiling live; arrows restart the container.';
+    ? 'رم: ۰ = نامحدود. CPU: ۱۰۰ = یک هستهٔ کامل، ۵۰ = نیم هسته، ۲۰۰ = دو هسته؛ ۰ در رم یعنی برگرد به نامحدود. اعمال زنده است؛ ری‌استارت فقط برای شروع تمیز.'
+    : 'RAM: 0 = unlimited. CPU: 100 = one full core, 50 = half, 200 = two. Applied live; restart only for a clean start.';
 }
 $('ramTable').addEventListener('click', async (event) => {
   const apply = event.target.closest('[data-ram-apply]');
-  const restart = event.target.closest('[data-ram-restart]');
-  if (apply) {
-    const input = document.querySelector('[data-ram-for="' + apply.getAttribute('data-ram-apply') + '"]');
-    const result = await api('/Monitor_Server/ops-memory-set', { container: apply.getAttribute('data-ram-apply'), mb: Number(input.value) });
-    toast(result.ok ? t('ok') : (result.reason || t('fail')), result.ok ? 'ok' : 'err');
-    if (result.ok) loadRam();
-  }
-  if (restart) {
-    const name = restart.getAttribute('data-ram-restart');
-    const result = await api('/Monitor_Server/ops-stack-restart');
-    toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err');
-  }
+  if (!apply) return;
+  const name = apply.getAttribute('data-ram-apply');
+  const mb = Number(document.querySelector('[data-ram-for="' + name + '"]').value || 0);
+  const cpu = Number((document.querySelector('[data-cpu-for="' + name + '"]') || {}).value || 0);
+  const result = await api('/Monitor_Server/ops-memory-set', { container: name, mb, cpu });
+  toast(result.ok ? t('ok') + ' — ' + (result.unlimited ? 'unlimited' : result.mb + 'MB') + (result.cpu ? ', cpu ' + result.cpu + '%' : '') : (result.reason || t('fail')), result.ok ? 'ok' : 'err');
+  if (result.ok) loadRam();
 });
+
+/* ---------- disk and cleanup ---------- */
+async function loadDisk() {
+  const data = await api('/Monitor_Server/ops-disk');
+  if (!data.ok) { $('diskInfo').textContent = data.reason || t('fail'); return; }
+  const cleanup = data.cleanup || {};
+  $('diskInfo').innerHTML =
+    (LANG === 'fa' ? 'دیسک: ' + fmtBytes((data.disk?.total || 0) - (data.disk?.free || 0)) + ' از ' + fmtBytes(data.disk?.total || 0) + ' مصرف (' + fmtBytes(data.disk?.free || 0) + ' آزاد)' : 'disk: ' + fmtBytes((data.disk?.total || 0) - (data.disk?.free || 0)) + ' of ' + fmtBytes(data.disk?.total || 0)) +
+    ' · ' + (LANG === 'fa' ? 'ایمیج‌ها ' : 'images ') + fmtBytes(data.docker?.imagesBytes) +
+    ' · ' + (LANG === 'fa' ? 'حجم‌ها ' : 'volumes ') + fmtBytes(data.docker?.volumesBytes);
+  $('clStaleSize').textContent = cleanup.staleSelfImages?.length ? cleanup.staleSelfImages.length + ' (' + fmtBytes(cleanup.staleSelfBytes) + ')' : '0';
+  $('clDanglingSize').textContent = cleanup.danglingCount ? cleanup.danglingCount + ' (' + fmtBytes(cleanup.danglingBytes) + ')' : '0';
+}
+async function cleanup(what) {
+  const result = await api('/Monitor_Server/ops-cleanup', { what });
+  const freed = fmtBytes(result.freedBytes || 0);
+  $('clResult').textContent = result.ok ? (LANG === 'fa' ? 'آزاد شد: ' : 'freed: ') + freed : t('fail');
+  toast($('clResult').textContent, result.ok ? 'ok' : 'err');
+  loadDisk();
+}
+$('clStale').addEventListener('click', () => confirm(t('confirmDelete')) && cleanup('stale-images'));
+$('clDangling').addEventListener('click', () => confirm(t('confirmDelete')) && cleanup('dangling'));
+$('clTemps').addEventListener('click', () => cleanup('temps'));
 
 /* ---------- relays ---------- */
 async function loadTransit() {
@@ -971,13 +1003,32 @@ async function loadImages() {
     const watched = /^(node|docker|coturn\\/coturn|nginx|certbot\\/certbot)/.test(image.repository);
     return '<tr><td class="mono">' + esc(image.repository) + (watched ? ' <span class="tag good">stack</span>' : '') + '</td>' +
       '<td>' + esc(image.tag) + '</td><td class="mono">' + esc(image.id) + '</td><td>' + fmtBytes(image.size) + '</td><td>' + fmtTime(image.created) + '</td>' +
-      '<td>' + (watched ? '<button class="btn" data-im-update="' + esc(image.repository + ':' + image.tag) + '"><i class="fas fa-arrows-rotate"></i> ' + (LANG === 'fa' ? 'بررسی/آپدیت' : 'check') + '</button>' : '') + '</td></tr>';
+      '<td>' + (watched ? '<button class="btn" data-im-hub="' + esc(image.repository + ':' + image.tag) + '"><i class="fas fa-cloud-arrow-up"></i> ' + (LANG === 'fa' ? 'داکر هاب' : 'hub') + '</button> <button class="btn" data-im-update="' + esc(image.repository + ':' + image.tag) + '"><i class="fas fa-arrows-rotate"></i></button>' : '') + '</td></tr>';
   });
   $('imTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">' + t('empty') + '</td></tr>';
 }
 $('imRefresh').addEventListener('click', loadImages);
 $('imTable').addEventListener('click', async (event) => {
   const update = event.target.closest('[data-im-update]');
+  const hub = event.target.closest('[data-im-hub]');
+  if (hub) {
+    hub.disabled = true;
+    const reference = hub.getAttribute('data-im-hub');
+    const result = await api('/Monitor_Server/ops-image-check', { reference });
+    hub.disabled = false;
+    if (!result.ok) { toast(result.reason || t('fail'), 'err'); return; }
+    if (result.hubError) { toast(LANG === 'fa' ? 'داکر هاب در دسترس نیست (' + result.hubError + ')' : 'hub unreachable (' + result.hubError + ')', 'err'); return; }
+    const same = !result.updateAvailable;
+    const say = (LANG === 'fa'
+      ? 'نسخهٔ شما: ' + result.local.digest + ' (ساخته ' + fmtTime(result.local.created) + ')\\nآخرین نسخهٔ داکر هاب: ' + result.hub.digest + ' (انتشار ' + fmtTime(result.hub.lastPushed) + ')\\n' + (same ? '→ شما روی آخرین نسخه هستید.' : '→ نسخهٔ جدیدتر موجود است.')
+      : 'yours: ' + result.local.digest + ' (built ' + fmtTime(result.local.created) + ')\\nhub latest: ' + result.hub.digest + ' (pushed ' + fmtTime(result.hub.lastPushed) + ')\\n' + (same ? '→ you are current.' : '→ newer exists.'));
+    if (same) { toast(say.replace(/\\n/g, ' '), 'ok'); return; }
+    if (confirm(say + '\\n\\n' + (LANG === 'fa' ? 'همین حالا آپدیت شود؟' : 'Update now?'))) {
+      const pulled = await api('/Monitor_Server/ops-image-update', { reference });
+      toast(pulled.changed ? (LANG === 'fa' ? 'آپدیت شد؛ استک را ری‌استارت کنید' : 'updated; restart the stack') : (pulled.note || t('fail')), pulled.ok ? 'ok' : 'err');
+    }
+    return;
+  }
   if (!update) return;
   update.disabled = true;
   const result = await api('/Monitor_Server/ops-image-update', { reference: update.getAttribute('data-im-update') });

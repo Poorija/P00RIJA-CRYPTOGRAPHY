@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const os = require('os');
 const dns = require('dns').promises;
 const fs = require('fs');
+const fsp = require('node:fs/promises');
 const path = require('path');
 const express = require('express');
 const { ExpressPeerServer } = require('peer');
@@ -4255,6 +4256,7 @@ app.post('/admin/allowlist-mode', authMiddleware, (req, res) => {
 app.post('/admin/allowlist-add', authMiddleware, (req, res) => {
   const fingerprint = sanitizeFingerprint(String(req.body?.fingerprint || '').trim());
   if (!fingerprint) return res.status(400).json({ ok: false, reason: 'A fingerprint is required.' });
+  noteKnownIdentity(fingerprint);
   allowedUsers.set(fingerprint, {
     label: String(req.body?.label || '').slice(0, 80),
     addedAt: Date.now(),
@@ -4608,6 +4610,51 @@ app.post('/Monitor_Server/expiry-log', authMiddleware, (req, res) => {
  * them from the system note it already knows how to draw. */
 
 const ANNOUNCE_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+/* ---- the identity registry ---------------------------------------------------
+ *
+ * The first announce answered "reached 0 identities" on a quiet relay, and
+ * The first announce answered "reached 0 identities" on a quiet relay, and
+ * it was honest: it counted mailboxes (empty) plus sockets (none). A relay
+ * that can only name who is HERE right now cannot send to everyone, which
+ * is the whole point of the announce centre. So every fingerprint the relay
+ * ever meets — connected, mailed-to, allowlisted, announced-at — is kept in
+ * a small persistent file and reloaded at boot. */
+const KNOWN_IDENTITIES_PATH = path.join(defaultDataDir, 'known-identities.json');
+const knownIdentities = new Set();
+function loadKnownIdentities() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(KNOWN_IDENTITIES_PATH, 'utf8'));
+    for (const fp of Array.isArray(raw?.fingerprints) ? raw.fingerprints : []) {
+      if (/^[a-f0-9]{64}$/.test(String(fp))) knownIdentities.add(fp);
+    }
+    console.log(`[Monitor] ${knownIdentities.size} known identit${knownIdentities.size === 1 ? 'y' : 'ies'} loaded`);
+  } catch (_error) { /* first run */ }
+}
+function saveKnownIdentities() {
+  try {
+    fs.writeFileSync(KNOWN_IDENTITIES_PATH, JSON.stringify({ fingerprints: Array.from(knownIdentities) }, null, 1), { mode: 0o600 });
+  } catch (error) { console.warn('[Monitor] identity registry not saved:', error.message); }
+}
+function noteKnownIdentity(fingerprint) {
+  const fp = sanitizeFingerprint(String(fingerprint || ''));
+  if (!fp || fp.length < 32) return;
+  if (knownIdentities.has(fp)) return;
+  knownIdentities.add(fp);
+  /* Cap the registry so it cannot grow without bound on a hostile relay. */
+  if (knownIdentities.size > 20000) knownIdentities.delete(knownIdentities.keys().next().value);
+  saveKnownIdentities();
+}
+loadKnownIdentities();
+
+app.post('/Monitor_Server/identities', authMiddleware, (req, res) => {
+  const rows = Array.from(knownIdentities).map((fp) => ({
+    fingerprint: fp.slice(0, 16),
+    connected: Array.from(presence.values()).some((record) => sanitizeFingerprint(identitySnapshot(record)?.fingerprint || '') === fp),
+    mailbox: (offlineBoxes.get(fp) || []).length,
+  }));
+  res.json({ ok: true, total: rows.length, identities: rows.sort((a, b) => b.mailbox - a.mailbox).slice(0, 100) });
+});
+
 app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
   const message = String(req.body?.message || '').trim().slice(0, 2000);
   const title = String(req.body?.title || '').trim().slice(0, 120) || 'پیام از سرور';
@@ -4625,14 +4672,25 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
       dataUrl,
     };
   }
-  /* Everyone this relay has ever served: connected now, or holding a mailbox.
-     That is the honest definition of "all users" a relay can stand behind. */
+  /* Everyone this relay has ever served: the persistent registry first (the
+     whole point of it), plus connected now and mailbox holders — and every
+     one of them is remembered from this moment on. A personal message names
+     its targets and goes to exactly those. */
   const fingerprints = new Set();
-  for (const key of offlineBoxes.keys()) fingerprints.add(key);
-  for (const record of presence.values()) {
-    const fp = sanitizeFingerprint(identitySnapshot(record)?.fingerprint || '');
-    if (fp) fingerprints.add(fp);
+  const targets = Array.isArray(req.body?.targets)
+    ? req.body.targets.map((fp) => sanitizeFingerprint(String(fp || ''))).filter(Boolean)
+    : [];
+  if (targets.length) {
+    for (const fp of targets) fingerprints.add(fp);
+  } else {
+    for (const fp of knownIdentities) fingerprints.add(fp);
+    for (const key of offlineBoxes.keys()) fingerprints.add(key);
+    for (const record of presence.values()) {
+      const fp = sanitizeFingerprint(identitySnapshot(record)?.fingerprint || '');
+      if (fp) fingerprints.add(fp);
+    }
   }
+  for (const fp of fingerprints) noteKnownIdentity(fp);
   let queued = 0;
   let live = 0;
   const payload = { type: 'system-note', message: message || attachment.name, title, attachment };
@@ -4681,11 +4739,17 @@ app.post('/Monitor_Server/ops-memory', authMiddleware, async (req, res) => {
     const statData = opsParseJson(stats.body);
     const limitBytes = Number(detail.data?.HostConfig?.Memory || 0);
     const usageBytes = Number(statData?.memory_stats?.usage || 0);
+    const cpuDelta = Number(statData?.cpu_stats?.cpu_usage?.total_usage || 0) - Number(statData?.precpu_stats?.cpu_usage?.total_usage || 0);
+    const sysDelta = Number(statData?.cpu_stats?.system_cpu_usage || 0) - Number(statData?.precpu_stats?.system_cpu_usage || 0);
+    const onlineCpus = Number(statData?.cpu_stats?.online_cpus || 1) || 1;
+    const cpuPct = sysDelta > 0 ? Math.round((cpuDelta / sysDelta) * onlineCpus * 100) : 0;
     rows.push({
       id: container.Id.slice(0, 12),
       name,
       limitMb: Math.round(limitBytes / 1024 / 1024) || null,
       usageMb: Math.round(usageBytes / 1024 / 1024) || 0,
+      cpuPct: Math.min(999, cpuPct),
+      cpuCapped: Number(detail.data?.HostConfig?.CpuQuota || 0) > 0,
       unlimited: !limitBytes,
     });
   }
@@ -4703,19 +4767,183 @@ app.post('/Monitor_Server/ops-memory', authMiddleware, async (req, res) => {
 app.post('/Monitor_Server/ops-memory-set', authMiddleware, async (req, res) => {
   if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
   const name = String(req.body?.container || '').trim();
-  const megabytes = Math.max(64, Math.min(16384, Math.round(Number(req.body?.mb || 0))));
-  if (!/^Poorija-Cryptography_[\w-]+$/.test(name) || !megabytes) return res.status(400).json({ ok: false, reason: 'bad-request' });
+  /* mb = 0 is a deliberate "back to unlimited": the engine's zero means no
+     ceiling, which is how the stack started life and how every container
+     except the ones an operator has touched still runs. cpu = a percentage
+     of ONE core (50 = half a core, 200 = two cores), 0 = uncapped. */
+  const rawMb = Math.round(Number(req.body?.mb ?? -1));
+  const unlimited = rawMb === 0;
+  const megabytes = unlimited ? 0 : Math.max(64, Math.min(16384, rawMb));
+  const cpuPercent = Math.max(0, Math.min(800, Math.round(Number(req.body?.cpu ?? 0) || 0)));
+  if (!/^Poorija-Cryptography_[\w-]+$/.test(name) || rawMb < 0 || (!unlimited && !megabytes)) {
+    return res.status(400).json({ ok: false, reason: 'bad-request' });
+  }
   const containers = await dockerEngineJson('GET', '/v1.44/containers/json?all=1');
   const target = (containers.data || []).find((container) => ((container.Names || [])[0] || '').replace(/^\//, '') === name);
   if (!target) return res.status(404).json({ ok: false, reason: 'no-such-container' });
   /* MemorySwap at twice the ceiling is the standard pairing: the heap may
-     breathe past RSS a little, but never past a wall anyone can point at. */
+     breathe past RSS a little, but never past a wall anyone can point at.
+     CpuQuota is µs of CPU per 100ms period — 100000 = one whole core. */
   const update = await dockerEngineJson('POST', `/v1.44/containers/${target.Id}/update`, {
     Memory: megabytes * 1024 * 1024,
-    MemorySwap: megabytes * 2 * 1024 * 1024,
+    MemorySwap: unlimited ? 0 : megabytes * 2 * 1024 * 1024,
+    CpuPeriod: cpuPercent ? 100000 : undefined,
+    CpuQuota: cpuPercent ? cpuPercent * 1000 : -1,
   });
-  monitorLog(`Memory of ${name} set to ${megabytes} MB (${update.ok ? 'applied live' : 'failed'})`);
-  res.json({ ok: update.ok, container: name, mb: megabytes, note: update.ok ? 'applied to the running container; restart it if you want a clean start on the new number' : String(update.data?.message || '').slice(0, 200) });
+  monitorLog(`Resources of ${name}: mem ${unlimited ? 'unlimited' : megabytes + ' MB'}, cpu ${cpuPercent ? cpuPercent + '%' : 'uncapped'} (${update.ok ? 'applied live' : 'failed'})`);
+  res.json({
+    ok: update.ok,
+    container: name,
+    mb: megabytes,
+    unlimited,
+    cpu: cpuPercent,
+    note: update.ok ? 'applied to the running container; restart it if you want a clean start on the new number' : String(update.data?.message || '').slice(0, 200),
+  });
+});
+
+/* ---- disk and cleanup ---------------------------------------------------------
+ *
+ * What the machine's disks hold because of this stack, and one button for
+ * each thing that is safe to drop: old tagged images of ourselves, dangling
+ * layers, the dashboard's temp transfers, and backups past the retention. */
+
+app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  /* system/df walks every layer on disk and can outlast an nginx proxy
+     window; images/json answers the same question about images in one fast
+     call, which is what this card actually shows. */
+  const imagesRaw = await dockerEngineJson('GET', '/v1.44/images/json');
+  const images = (imagesRaw.data || []).map((image) => ({
+    tags: (image.RepoTags || []).filter(Boolean),
+    size: image.Size,
+    inUse: Number(image.Containers || 0) > 0,
+  }));
+  /* Our own old tags — every poorija-crypto tag that is not this round's —
+     plus anything the engine calls dangling. These are the bytes nobody will
+     ever miss. */
+  const APP_IMAGE_TAG = process.env.APP_VERSION || '';
+  const staleSelf = images.filter((image) => image.tags.some((tag) => tag.startsWith('poorija-crypto:') && (!APP_IMAGE_TAG || !tag.endsWith(APP_IMAGE_TAG))) && !image.inUse);
+  const dangling = images.filter((image) => !image.tags.length && !image.inUse);
+  const stat = await fsp.statfs(defaultDataDir).catch(() => null);
+  res.json({
+    ok: true,
+    disk: stat ? { free: Number(stat.bavail) * 4096, total: Number(stat.blocks) * 4096 } : null,
+    docker: {
+      imagesBytes: images.reduce((sum, image) => sum + (image.size || 0), 0),
+    },
+    cleanup: {
+      staleSelfImages: staleSelf.map((image) => ({ tags: image.tags.join(', '), size: image.size })),
+      staleSelfBytes: staleSelf.reduce((sum, image) => sum + image.size, 0),
+      danglingCount: dangling.length,
+      danglingBytes: dangling.reduce((sum, image) => sum + image.size, 0),
+    },
+  });
+});
+
+app.post('/Monitor_Server/ops-cleanup', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const what = String(req.body?.what || '');
+  const APP_IMAGE_TAG = process.env.APP_VERSION || '';
+  const dfRaw = await dockerEngineJson('GET', '/v1.44/images/json');
+  const df = { data: { Images: dfRaw.data || [] } };
+  let freed = 0;
+  if (what === 'stale-images') {
+    for (const image of df.data.Images) {
+      const tags = (image.RepoTags || []).filter(Boolean);
+      if (!tags.length || Number(image.Containers || 0) > 0) continue;
+      if (!tags.some((tag) => tag.startsWith('poorija-crypto:') && (!APP_IMAGE_TAG || !tag.endsWith(APP_IMAGE_TAG)))) continue;
+      for (const tag of tags) await dockerEngineJson('DELETE', `/v1.44/images/${encodeURIComponent(tag)}`);
+      freed += image.Size || 0;
+    }
+  }
+  if (what === 'dangling') {
+    const prune = await dockerEngineRequest('POST', '/v1.44/images/prune?filters=' + encodeURIComponent(JSON.stringify({ dangling: { false: false } })), null, { timeoutMs: 300000 });
+    freed += Number(opsParseJson(prune.body)?.SizeReclaimed || 0);
+  }
+  if (what === 'temps') {
+    const job = await runOpsJob(['sh', '-c', 'rm -f /job/data/.monitor-* 2>/dev/null; true']);
+    if (job.ok) freed += 0;
+  }
+  monitorLog(`Cleanup (${what}) freed ${Math.round(freed / 1024 / 1024)} MB`);
+  res.json({ ok: true, what, freedBytes: freed });
+});
+
+/* ---- Docker Hub version check --------------------------------------------------
+ *
+ * "Check and update" before this said only whether the pull succeeded; the
+ * operator asked for the sentence a person actually needs: my digest is X,
+ * Hub says Y, newer — update now? The Hub's tag API carries the remote
+ * digest and its push time, so the comparison is exact, not a guess. For a
+ * server that cannot reach the Hub directly, OPS_HUB_MIRROR points the one
+ * wget at a mirror that can. */
+
+const OPS_HUB_MIRROR = process.env.OPS_HUB_MIRROR || 'https://hub.docker.com';
+async function hubTagInfo(repository, tag) {
+  const path = repository.includes('/') ? repository : `library/${repository}`;
+  const job = await (async () => {
+    const name = `poorija-hub-${Date.now()}`;
+    const created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
+      Image: OPS_JOB_IMAGE,
+      Cmd: ['wget', '-q', '-O', '-', `${OPS_HUB_MIRROR}/v2/repositories/${path}/tags/${tag}`],
+      HostConfig: { AutoRemove: false, NetworkMode: 'default' },
+    });
+    if (!created.ok) return { ok: false, reason: `create-${created.status}` };
+    const containerId = created.data.Id;
+    await dockerEngineJson('POST', `/v1.44/containers/${containerId}/start`, null);
+    const deadline = Date.now() + 30000;
+    let exit = null;
+    while (Date.now() < deadline) {
+      const state = await dockerEngineJson('GET', `/v1.44/containers/${containerId}/json`);
+      if (state.ok && state.data?.State?.Status !== 'running') { exit = Number(state.data?.State?.ExitCode ?? -1); break; }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const logs = await dockerEngineRequest('GET', `/v1.44/containers/${containerId}/logs?stdout=1&stderr=1&tail=10`);
+    await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
+    if (exit !== 0) return { ok: false, reason: 'hub-unreachable' };
+    /* The logs API streams framed: 8 header bytes, then that many payload
+       bytes, repeat. Strip the frames instead of the NULs, or the JSON the
+       Hub answered arrives with binary length bytes woven through it. */
+    let stripped = '';
+    const raw = logs.raw || Buffer.from(String(logs.body || ''), 'utf8');
+    let offset = 0;
+    while (offset + 8 <= raw.length) {
+      const size = raw.readUInt32BE(offset + 4);
+      if (offset + 8 + size > raw.length) break;
+      stripped += raw.subarray(offset + 8, offset + 8 + size).toString('utf8');
+      offset += 8 + size;
+    }
+    if (!stripped) stripped = String(logs.body || '');
+    return { ok: true, body: stripped };
+  })();
+  if (!job.ok) return { ok: false, reason: job.reason };
+  const parsed = opsParseJson(job.body);
+  if (!parsed) return { ok: false, reason: 'hub-bad-answer' };
+  return {
+    ok: true,
+    digest: String(parsed.digest || ''),
+    lastPushed: parsed.last_updated ? new Date(parsed.last_updated).toISOString() : '',
+    fullSize: Number(parsed.full_size || 0),
+  };
+}
+
+app.post('/Monitor_Server/ops-image-check', authMiddleware, async (req, res) => {
+  const reference = String(req.body?.reference || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.\/:-]*:[A-Za-z0-9_.-]+$/.test(reference)) {
+    return res.status(400).json({ ok: false, reason: 'bad-reference' });
+  }
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const [name, tag] = reference.split(':');
+  const local = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(reference)}/json`);
+  const localDigest = String(local.data?.RepoDigests?.[0] || '').split('@')[1] || String(local.data?.Id || '');
+  const hub = await hubTagInfo(name, tag);
+  res.json({
+    ok: true,
+    reference,
+    local: { id: String(local.data?.Id || '').slice(7, 19), digest: localDigest.slice(7, 30), created: Number.isFinite(Number(local.data?.Created)) && Number(local.data.Created) > 0 ? new Date(Number(local.data.Created) * 1000).toISOString() : '' },
+    hub: hub.ok ? { digest: String(hub.digest || '').slice(7, 30), lastPushed: hub.lastPushed, size: hub.fullSize } : null,
+    hubError: hub.ok ? '' : (hub.reason || ''),
+    updateAvailable: Boolean(hub.ok && hub.digest && localDigest && !hub.digest.includes(localDigest.slice(7, 30)) && !localDigest.includes(hub.digest.slice(7, 30))),
+  });
 });
 
 /* ---- machine half: docker, archives, backups --------------------------------
@@ -4748,7 +4976,12 @@ function dockerEngineRequest(method, urlPath, body, { timeoutMs = 120000 } = {})
     }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), stream: response }));
+      response.on('end', () => {
+        const raw = Buffer.concat(chunks);
+        /* raw stays bytes: stream-framed answers (container logs) must be
+           de-framed before they are ever read as text. */
+        resolve({ status: response.statusCode, body: raw.toString('utf8'), raw, stream: response });
+      });
     });
     request.on('timeout', () => request.destroy(new Error('docker api timeout')));
     request.on('error', () => resolve({ status: 0, body: '', unreachable: true }));
@@ -4818,7 +5051,20 @@ async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
   const logs = await dockerEngineRequest('GET', `/v1.44/containers/${containerId}/logs?stdout=1&stderr=1&tail=40`);
   await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
   if (exitCode === null) return { ok: false, reason: 'job-timeout' };
-  return { ok: exitCode === 0, logs: logs.body.slice(-2000) };
+  let jobLogs = String(logs.body || '').replace(/\u0000/g, '');
+  if (logs.raw) {
+    let strippedLogs = '';
+    const rawLogs = logs.raw;
+    let cursor = 0;
+    while (cursor + 8 <= rawLogs.length) {
+      const size = rawLogs.readUInt32BE(cursor + 4);
+      if (cursor + 8 + size > rawLogs.length) break;
+      strippedLogs += rawLogs.subarray(cursor + 8, cursor + 8 + size).toString('utf8');
+      cursor += 8 + size;
+    }
+    if (strippedLogs) jobLogs = strippedLogs;
+  }
+  return { ok: exitCode === 0, logs: jobLogs.slice(-2000) };
 }
 
 /* What a backup refuses to carry, and what the clean bundle refuses to
@@ -5734,6 +5980,7 @@ totalRelays++;
       offlineBoxes.set(toFingerprint, queued);
       /* The sweep can touch anybody's queue, so it says what it changed and
          those get written; this delivery only changed one mailbox. */
+      noteKnownIdentity(toFingerprint);
       saveOfflineBox(toFingerprint);
       /* The sweep writes whatever it changes, including this box if the
          quota just pushed something out of it. Scoped to the recipient:
@@ -7516,6 +7763,7 @@ wsServer.on('connection', (ws, req) => {
          change — one of the few fields with no ceiling of its own. */
       record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
+      noteKnownIdentity(record.fingerprint);
       record.avatarData = String(message.avatarData || '').slice(0, 2000000);
       record.mood = String(message.mood || '').slice(0, 40);
       /* The prekey is a public value and the relay only forwards it. It is
