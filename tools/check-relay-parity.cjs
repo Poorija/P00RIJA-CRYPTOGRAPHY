@@ -43,9 +43,15 @@ const DEPLOYED = 'scripts/server.js';
 const DISTRIBUTED = 'standalone-relay/server.js';
 
 /* Routes the deployed relay has and the distribution deliberately does not.
-   Each is infrastructure the distribution has no equivalent for rather than a
-   gap: nginx probes and the certificate renewer's status endpoint. */
+   Each is infrastructure the distribution has no equivalent for rather than
+   a gap: nginx probes and the certificate renewer's status endpoint, and —
+   from monitor 3.33 — the whole /Monitor_Server/ management surface, which
+   drives the deployment's docker engine, its backups and its GitHub
+   updates. The distribution runs on a stranger's machine with none of that
+   around it; a client never calls any of these, so the surface a client
+   talks to has not moved. */
 const DEPLOYED_ONLY = new Set(['/live', '/ready', '/cert-status']);
+const DEPLOYED_ONLY_PREFIXES = ['/Monitor_Server/'];
 
 function routesOf(file) {
   const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -121,6 +127,7 @@ const missingFromDeployed = [...distributed].filter((route) => !deployed.has(rou
 const missingFromDistributed = [...deployed]
   .filter((route) => !distributed.has(route))
   .filter((route) => !DEPLOYED_ONLY.has(route.split(' ')[1]))
+  .filter((route) => !DEPLOYED_ONLY_PREFIXES.some((prefix) => route.split(' ')[1].startsWith(prefix)))
   .sort();
 
 console.log(`\n  ${DEPLOYED}: ${deployed.size} routes`);

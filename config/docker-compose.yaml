@@ -86,10 +86,26 @@ services:
       CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       CHAT_TLS_CERT_PATH: /etc/certs/cert.pem
+      # ---- the monitor's machine half (3.33) ----
+      # The install tree and backups directory as the DOCKER HOST sees them.
+      # Passed through from the environment sync-to-server.sh sets when it
+      # runs compose, so .env never has to repeat them.
+      OPS_INSTALL_DIR: ${OPS_INSTALL_DIR:-}
+      OPS_BACKUP_DIR: ${OPS_BACKUP_DIR:-}
+      # The bootstrap installer's own port; 0 disables it.
+      CHAT_BOOTSTRAP_PORT: ${CHAT_BOOTSTRAP_PORT:-9080}
     network_mode: host
     volumes:
       - ../data/chat-signal:/data
       - ${CERTS_DIR:-../certs}:/etc/certs:ro
+      # The monitor's docker access. A mounted docker socket is root on the
+      # host, and that is a real price -- paid here because the dashboard's
+      # machine half (image updates, backups, clean-server installs) is worth
+      # it on a box that exists to run this stack and nothing else. The
+      # socket sits behind the monitor password like everything else the
+      # relay answers; remove the volume on any box where that trade is
+      # wrong, and the dashboard simply reports those actions as unavailable.
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   coturn:

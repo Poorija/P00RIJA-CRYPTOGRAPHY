@@ -21,6 +21,9 @@ const { pushKindFor, pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions
 const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey } = require('./lib/relay-identity.js');
 const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
 const { openTransit, transitFacts } = require('./lib/relay-transit.js');
+/* The 3.33 dashboard sheet the relay serves at /Monitor_Server — HTML lives
+   in its own module so the server file stays about the server. */
+const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
@@ -1783,6 +1786,20 @@ app.get('/Monitor_Server', (req, res) => {
      defence in depth, it was the reason the dashboard was unreachable. */
   if (!authenticated) {
     return res.status(401).send('Invalid credentials');
+  }
+
+  /* The 3.33 dashboard, drawn by scripts/lib/monitor-dashboard.js. The old
+     single-scroll sheet still hangs below this line and stays reachable at
+     ?classic=1 for the remainder of this release — it is deleted once an
+     operator has confirmed the new one on a real deployment. */
+  if (!req.query.classic) {
+    return res.send(monitorDashboardHtml({
+      version: RELAY_BUILD?.version || '',
+      buildTag: RELAY_BUILD?.buildTag || '',
+      monitorVersion: MONITOR_VERSION,
+      port: PORT,
+      presencePort: PRESENCE_PORT,
+    }));
   }
 
   res.send(`
@@ -3747,6 +3764,9 @@ app.get('/chat-health', (req, res) => {
     /* Which tree this relay was built from, so a deploy can check it. */
     version: RELAY_BUILD.version,
     buildTag: RELAY_BUILD.buildTag,
+    /* The monitor's own round, which moves on its own schedule — stated here
+       so a deployment can tell which dashboard answered without logging in. */
+    monitor: MONITOR_VERSION,
     /* How many other relays this one can actually hand traffic to right now,
        which is the only honest measure of transit being up. */
     transit: relayPeers.status(),
@@ -4234,6 +4254,674 @@ app.post('/admin/allowlist-remove', authMiddleware, (req, res) => {
   res.json({ ok: true, fingerprint, allowed: allowedUsers.size, disconnected });
 });
 
+/* ============================================================ monitor 3.33
+ *
+ * The dashboard outgrew "watch": it runs the server now — queues, traffic,
+ * relay links, backups, images, updates. Everything below is behind
+ * authMiddleware like every /admin action, and answers JSON. */
+
+/* ---- queues ---------------------------------------------------------------- */
+
+/* The queue view the dashboard draws: per mailbox, counts and sizes and
+   ages, never payload bytes. Fingerprints are shortened the way every other
+   surface here shortens them. */
+app.post('/Monitor_Server/queues', authMiddleware, (req, res) => {
+  const rows = [];
+  for (const [fingerprint, items] of offlineBoxes) {
+    if (!Array.isArray(items) || !items.length) continue;
+    let bytes = 0;
+    let oldest = Infinity;
+    let newest = 0;
+    for (const item of items) {
+      bytes += item?.payload?.length || 0;
+      const at = Number(item?.queuedAt) || 0;
+      if (at < oldest) oldest = at;
+      if (at > newest) newest = at;
+    }
+    rows.push({
+      fingerprint: fingerprint.slice(0, 12),
+      count: items.length,
+      bytes,
+      oldestAt: Number.isFinite(oldest) ? new Date(oldest).toISOString() : '',
+      newestAt: newest ? new Date(newest).toISOString() : '',
+    });
+  }
+  rows.sort((a, b) => b.bytes - a.bytes);
+  let heldForConnected = 0;
+  for (const record of presence.values()) {
+    if (record.sentMail) heldForConnected += record.sentMail.size;
+  }
+  res.json({
+    ok: true,
+    monitor: MONITOR_VERSION,
+    mailboxes: rows,
+    totals: { queued: rows.reduce((sum, row) => sum + row.count, 0), bytes: rows.reduce((sum, row) => sum + row.bytes, 0) },
+    heldForConnected,
+    transitWaiting: transitWaiting.size,
+  });
+});
+
+/* One mailbox's items, metadata only: id, sender, type, age. The payload —
+   somebody's message, sealed or not — is never handed to the dashboard. */
+app.post('/Monitor_Server/queue-mailbox', authMiddleware, (req, res) => {
+  const prefix = String(req.body?.fingerprint || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{4,64}$/.test(prefix)) {
+    return res.status(400).json({ ok: false, reason: 'bad-fingerprint' });
+  }
+  let fingerprint = '';
+  for (const key of offlineBoxes.keys()) {
+    if (String(key).toLowerCase().startsWith(prefix)) { fingerprint = key; break; }
+  }
+  if (!fingerprint) return res.status(404).json({ ok: false, reason: 'no-such-mailbox' });
+  const items = offlineBoxes.get(fingerprint) || [];
+  res.json({
+    ok: true,
+    fingerprint: fingerprint.slice(0, 12),
+    items: items.map((item, index) => ({
+      index,
+      id: String(item?.relayId || '').slice(0, 8),
+      from: String(item?.fromFingerprint || '').slice(0, 12),
+      type: item?.payload?.type ? String(item.payload.type).slice(0, 24) : 'relay',
+      size: item?.payload?.length || 0,
+      queuedAt: item?.queuedAt ? new Date(item.queuedAt).toISOString() : '',
+    })),
+  });
+});
+
+/* Dropping mail is the operator's call, which is why it is here and why it
+   is exact: one item by index, or the whole mailbox when index is absent.
+   The store is saved the same way delivery saves it. */
+app.post('/Monitor_Server/queue-drop', authMiddleware, async (req, res) => {
+  const prefix = String(req.body?.fingerprint || '').trim().toLowerCase();
+  const index = Number.isInteger(req.body?.index) ? Number(req.body.index) : null;
+  if (!/^[a-f0-9]{4,64}$/.test(prefix)) {
+    return res.status(400).json({ ok: false, reason: 'bad-fingerprint' });
+  }
+  let fingerprint = '';
+  for (const key of offlineBoxes.keys()) {
+    if (String(key).toLowerCase().startsWith(prefix)) { fingerprint = key; break; }
+  }
+  if (!fingerprint) return res.status(404).json({ ok: false, reason: 'no-such-mailbox' });
+  const items = offlineBoxes.get(fingerprint) || [];
+  if (index !== null) {
+    if (index < 0 || index >= items.length) return res.status(400).json({ ok: false, reason: 'bad-index' });
+    const [dropped] = items.splice(index, 1);
+    if (!items.length) offlineBoxes.delete(fingerprint);
+    console.log(`[Monitor] Dropped one mail item for ${fingerprint.slice(0, 12)} (id ${String(dropped?.relayId || '').slice(0, 8)})`);
+  } else {
+    offlineBoxes.delete(fingerprint);
+    console.log(`[Monitor] Dropped the whole mailbox of ${fingerprint.slice(0, 12)} (${items.length} items)`);
+  }
+  await saveOfflineBoxes();
+  res.json({ ok: true, remaining: offlineBoxes.get(fingerprint)?.length || 0 });
+});
+
+/* Nudge delivery: every connected holder of held mail is pumped right away.
+   An offline mailbox is left alone — nudging it cannot deliver what has no
+   one to receive it, and pretending otherwise would be a lie on a button. */
+app.post('/Monitor_Server/queue-flush', authMiddleware, (req, res) => {
+  let pumped = 0;
+  for (const record of presence.values()) {
+    if (!record.sentMail?.size) continue;
+    pumped += record.sentMail.size;
+    if (typeof pumpHeldMail === 'function') pumpHeldMail(record);
+    if (typeof deliverHeldMail === 'function') deliverHeldMail(record);
+  }
+  res.json({ ok: true, pumped });
+});
+
+/* ---- relay links ------------------------------------------------------------ */
+
+/* Runtime peer management, persisted beside the rest of the relay's state so
+   a restart keeps the set the operator last chose. The env's peers are the
+   seed; the file is the truth after the first change. */
+const TRANSIT_PEERS_STORE = path.join(defaultDataDir, 'transit-peers.json');
+function loadRuntimeTransitPeers() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TRANSIT_PEERS_STORE, 'utf8'));
+    for (const entry of Array.isArray(raw?.peers) ? raw.peers : []) {
+      if (!/^[a-f0-9]{64}$/.test(String(entry?.id || ''))) continue;
+      relayPeers.allowPeer(entry.id, String(entry?.origin || ''));
+    }
+    if ((raw?.peers || []).length) console.log(`[Monitor] Restored ${raw.peers.length} runtime transit peer(s)`);
+  } catch (_error) { /* first run: nothing to restore */ }
+}
+function saveRuntimeTransitPeers() {
+  const peers = relayPeers.peerEntries().map(({ id, origin }) => ({ id, origin }));
+  try {
+    fs.writeFileSync(TRANSIT_PEERS_STORE, JSON.stringify({ peers, updatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+  } catch (error) { console.warn('[Monitor] transit peers not saved:', error.message); }
+}
+
+app.post('/Monitor_Server/transit', authMiddleware, (req, res) => {
+  res.json({
+    ok: true,
+    status: relayPeers.status(),
+    peers: relayPeers.peerEntries().map((entry) => ({
+      id: entry.id.slice(0, 16),
+      origin: entry.origin,
+      linked: entry.linked,
+      role: entry.role,
+      traffic: transitTraffic.get(entry.id) || { carried: 0, bytes: 0 },
+    })),
+  });
+});
+
+app.post('/Monitor_Server/transit-add', authMiddleware, (req, res) => {
+  const id = String(req.body?.id || '').trim().toLowerCase();
+  const origin = String(req.body?.origin || '').trim();
+  if (!/^[a-f0-9]{64}$/.test(id)) return res.status(400).json({ ok: false, reason: 'bad-relay-id' });
+  if (origin) {
+    try {
+      const parsed = new URL(origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('bad scheme');
+    } catch (_error) { return res.status(400).json({ ok: false, reason: 'bad-origin' }); }
+  }
+  const added = relayPeers.allowPeer(id, origin);
+  if (!added) return res.status(400).json({ ok: false, reason: 'peer-refused' });
+  saveRuntimeTransitPeers();
+  console.log(`[Monitor] Transit peer added: ${id.slice(0, 12)}${origin ? ` @ ${origin}` : ' (answer-only)'}`);
+  res.json({ ok: true, status: relayPeers.status() });
+});
+
+app.post('/Monitor_Server/transit-remove', authMiddleware, (req, res) => {
+  const id = String(req.body?.id || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(id)) return res.status(400).json({ ok: false, reason: 'bad-relay-id' });
+  const removed = relayPeers.disallowPeer(id);
+  if (!removed) return res.status(404).json({ ok: false, reason: 'no-such-peer' });
+  saveRuntimeTransitPeers();
+  console.log(`[Monitor] Transit peer removed: ${id.slice(0, 12)}`);
+  res.json({ ok: true, status: relayPeers.status() });
+});
+
+/* ---- traffic ---------------------------------------------------------------- */
+
+app.post('/Monitor_Server/traffic', authMiddleware, (req, res) => {
+  const clients = Array.from(clientTraffic.entries())
+    .map(([clientId, row]) => ({
+      clientId: clientId.slice(0, 8),
+      label: row.label ? row.label.slice(0, 24) : '',
+      msgsIn: row.msgsIn, msgsOut: row.msgsOut,
+      bytesIn: row.bytesIn, bytesOut: row.bytesOut,
+      lastAt: new Date(row.lastAt).toISOString(),
+    }))
+    .sort((a, b) => (b.bytesIn + b.bytesOut) - (a.bytesIn + a.bytesOut))
+    .slice(0, 25);
+  const relays = Array.from(transitTraffic.entries())
+    .map(([relayId, row]) => ({ relayId: relayId.slice(0, 16), carried: row.carried, bytes: row.bytes, lastAt: new Date(row.lastAt).toISOString() }))
+    .sort((a, b) => b.bytes - a.bytes);
+  res.json({
+    ok: true,
+    totals: {
+      msgsIn: totalMessagesReceived, msgsOut: totalMessagesSent,
+      bytesIn: totalBytesReceived, bytesOut: totalBytesSent, relays: totalRelays,
+    },
+    clients, relays,
+  });
+});
+
+/* ---- machine half: docker, archives, backups --------------------------------
+ *
+ * All of it goes through the docker engine API over a socket the deployment
+ * may mount (OPS_DOCKER_SOCKET). No child process and no shell leave this
+ * file: the engine takes JSON, and the one place bytes are packed or
+ * unpacked is a short-lived container with a fixed argument list. A
+ * deployment that does not mount the socket simply sees these actions
+ * answer "unavailable" — the rest of the dashboard carries on. */
+
+const OPS_DOCKER_SOCKET = process.env.OPS_DOCKER_SOCKET || '/var/run/docker.sock';
+/* The install directory as THE DOCKER HOST sees it — bind mounts in the job
+   containers below are resolved by the host engine, not inside this
+   container, so this is the host path even though the relay only ever
+   passes it on as text. */
+const INSTALL_HOST_DIR = process.env.OPS_INSTALL_DIR || '';
+const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:20-alpine';
+const OPS_BACKUP_HOST_DIR = process.env.OPS_BACKUP_DIR || (INSTALL_HOST_DIR ? `${INSTALL_HOST_DIR}/backups` : '');
+const dockerAvailable = () => fs.existsSync(OPS_DOCKER_SOCKET);
+
+function dockerEngineRequest(method, urlPath, body, { timeoutMs = 120000 } = {}) {
+  return new Promise((resolve) => {
+    const request = http.request({
+      socketPath: OPS_DOCKER_SOCKET,
+      path: urlPath,
+      method,
+      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
+      timeout: timeoutMs,
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), stream: response }));
+    });
+    request.on('timeout', () => request.destroy(new Error('docker api timeout')));
+    request.on('error', () => resolve({ status: 0, body: '', unreachable: true }));
+    if (body) request.write(body);
+    request.end();
+  });
+}
+
+async function dockerEngineJson(method, urlPath, payload) {
+  const response = await dockerEngineRequest(method, urlPath, payload ? JSON.stringify(payload) : null);
+  if (response.unreachable) return { ok: false, status: 0, data: null };
+  let parsed = null;
+  try { parsed = JSON.parse(response.body); } catch (_error) { parsed = null; }
+  return { ok: response.status >= 200 && response.status < 300, status: response.status, data: parsed };
+}
+
+/* One short-lived container, fixed argument list, two mounts it may see: the
+   install tree and the backups directory. The host paths come from this
+   file's settings; the names inside are fixed text. */
+async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
+  if (!dockerAvailable() || !INSTALL_HOST_DIR) {
+    return { ok: false, reason: 'docker-socket-not-mounted' };
+  }
+  const name = `poorija-ops-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+  const binds = [`${INSTALL_HOST_DIR}:/job`];
+  if (OPS_BACKUP_HOST_DIR) binds.push(`${OPS_BACKUP_HOST_DIR}:/backups`);
+  const created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
+    Image: OPS_JOB_IMAGE,
+    Cmd: command,
+    WorkingDir: '/job',
+    HostConfig: { AutoRemove: false, Binds: binds, NetworkMode: 'none' },
+  });
+  if (!created.ok) return { ok: false, reason: `create-${created.status}`, detail: String(created.data?.message || '').slice(0, 300) };
+  const containerId = created.data?.Id;
+  const started = await dockerEngineJson('POST', `/v1.44/containers/${containerId}/start`, null);
+  if (!started.ok) {
+    await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
+    return { ok: false, reason: `start-${started.status}` };
+  }
+  const deadline = Date.now() + timeoutMs;
+  let exitCode = null;
+  while (Date.now() < deadline) {
+    const state = await dockerEngineJson('GET', `/v1.44/containers/${containerId}/json`);
+    if (state.ok && state.data?.State?.Status !== 'running') {
+      exitCode = Number(state.data?.State?.ExitCode ?? -1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  const logs = await dockerEngineRequest('GET', `/v1.44/containers/${containerId}/logs?stdout=1&stderr=1&tail=40`);
+  await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
+  if (exitCode === null) return { ok: false, reason: 'job-timeout' };
+  return { ok: exitCode === 0, logs: logs.body.slice(-2000) };
+}
+
+/* What a backup refuses to carry, and what the clean bundle refuses to
+   carry (everything of this machine's own). */
+const OPS_BACKUP_EXCLUDE = ['node_modules', '.git', 'backups', 'dist', 'Export', 'GitHub', 'standalone-relay/lib', 'release-logs'];
+const OPS_BUNDLE_EXCLUDE = [...OPS_BACKUP_EXCLUDE, 'data', '.env', 'certs', 'server-config.json'];
+
+/* A pre-restore / pre-update snapshot, always taken the same way. */
+async function opsSnapshot() {
+  const label = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const cmd = ['tar', 'czf', `/backups/server-backup_${label}.tar.gz`];
+  for (const item of OPS_BACKUP_EXCLUDE) cmd.push(`--exclude=./${item}`);
+  cmd.push('./');
+  const job = await runOpsJob(cmd, { timeoutMs: 900000 });
+  return { ok: job.ok, name: `server-backup_${label}.tar.gz` };
+}
+
+app.post('/Monitor_Server/ops-status', authMiddleware, async (req, res) => {
+  const [images, containers] = await Promise.all([
+    dockerEngineJson('GET', '/v1.44/images/json'),
+    dockerEngineJson('GET', '/v1.44/containers/json'),
+  ]);
+  res.json({
+    ok: true,
+    monitor: MONITOR_VERSION,
+    docker: {
+      available: dockerAvailable(),
+      installConfigured: Boolean(INSTALL_HOST_DIR),
+      images: images.ok ? images.data : [],
+      containers: containers.ok ? containers.data : [],
+    },
+  });
+});
+
+app.post('/Monitor_Server/ops-images', authMiddleware, async (req, res) => {
+  const images = await dockerEngineJson('GET', '/v1.44/images/json');
+  if (!images.ok) return res.json({ ok: false, reason: dockerAvailable() ? 'docker-error' : 'docker-socket-not-mounted' });
+  const list = (images.data || []).flatMap((image) =>
+    (image.RepoTags || []).filter(Boolean).map((tag) => ({
+      repository: tag.split(':')[0],
+      tag: tag.split(':')[1] || '',
+      id: String(image.Id || '').slice(7, 19),
+      size: image.Size,
+      created: image.Created ? new Date(image.Created * 1000).toISOString() : '',
+    })));
+  const watched = list.filter((image) => /^(node|docker|coturn\/coturn|nginx|certbot\/certbot)/.test(image.repository));
+  res.json({ ok: true, images: list, watched });
+});
+
+/* Re-pulling a tag is how "is there a newer base" is answered honestly: the
+   registry decides whether the digest moved, the engine fetches it if it
+   did, and the reply says which happened. */
+app.post('/Monitor_Server/ops-image-update', authMiddleware, async (req, res) => {
+  const reference = String(req.body?.reference || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.\/:-]*:[A-Za-z0-9_.-]+$/.test(reference)) {
+    return res.status(400).json({ ok: false, reason: 'bad-reference' });
+  }
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const [name, tag] = reference.split(':');
+  const before = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(reference)}/json`);
+  const pull = await dockerEngineRequest('POST',
+    `/v1.44/images/create?fromImage=${encodeURIComponent(name)}&tag=${encodeURIComponent(tag)}`,
+    null, { timeoutMs: 900000 });
+  if (pull.unreachable || pull.status !== 200) {
+    return res.json({ ok: false, reason: `pull-${pull.status || 'unreachable'}`, output: pull.body.slice(-800) });
+  }
+  const after = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(reference)}/json`);
+  const changed = Boolean(before.ok && after.ok && before.data?.Id !== after.data?.Id);
+  /* An updated base does nothing to the running stack until it is rebuilt —
+     saying so here is what makes the answer honest. */
+  res.json({ ok: true, reference, changed, note: changed ? 'base updated; restart the stack to run on it' : 'already current', output: pull.body.slice(-400) });
+});
+
+app.post('/Monitor_Server/ops-stack-restart', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const containers = await dockerEngineJson('GET', '/v1.44/containers/json?all=1');
+  if (!containers.ok) return res.json({ ok: false, reason: 'docker-error' });
+  const restarted = [];
+  for (const container of containers.data || []) {
+    if (!/Poorija-Cryptography/.test((container.Names || []).join(' '))) continue;
+    const result = await dockerEngineJson('POST', `/v1.44/containers/${container.Id}/restart?t=15`, null);
+    restarted.push({ name: (container.Names || [])[0], ok: result.ok });
+  }
+  res.json({ ok: restarted.length > 0 && restarted.every((entry) => entry.ok), restarted });
+});
+
+/* The raw image of the running relay, streamed from the engine. Fixed to
+   the image the stack builds — no operator-supplied name anywhere. */
+app.post('/Monitor_Server/ops-image-export', authMiddleware, async (req, res) => {
+  if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
+  const target = 'config-chat-signal:latest';
+  const inspect = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(target)}/json`);
+  if (!inspect.ok) return res.json({ ok: false, reason: 'no-such-image' });
+  const request = http.request({
+    socketPath: OPS_DOCKER_SOCKET,
+    path: `/v1.44/images/${encodeURIComponent(target)}/get`,
+    method: 'GET',
+  }, (response) => {
+    if (response.statusCode !== 200) {
+      res.status(502).json({ ok: false, reason: `docker-${response.statusCode}` });
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/x-tar',
+      'Content-Disposition': 'attachment; filename="poorija-relay-image.tar"',
+      'Cache-Control': 'no-store',
+    });
+    response.pipe(res);
+  });
+  request.on('error', () => res.status(502).json({ ok: false, reason: 'docker-unreachable' }));
+  request.end();
+});
+
+/* Backups are packed by a job container straight into the host's backups
+   directory; this process never touches the bytes. Retention keeps the
+   newest ten — a backup directory that grows forever is a disk-full outage
+   being scheduled in advance. */
+app.post('/Monitor_Server/ops-backup-create', authMiddleware, async (req, res) => {
+  if (!INSTALL_HOST_DIR || !OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  const snapshot = await opsSnapshot();
+  if (!snapshot.ok) return res.json({ ok: false, reason: 'archive-failed' });
+  await runOpsJob(['sh', '-c', 'mkdir -p /backups && ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm -f'], { timeoutMs: 120000 });
+  res.json({ ok: true, name: snapshot.name });
+});
+
+/* The listing IS the interface: download, restore and delete take the name
+   of a row this listing produced, matched exactly. */
+app.post('/Monitor_Server/ops-backup-list', authMiddleware, async (req, res) => {
+  if (!OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  const job = await runOpsJob(['sh', '-c', 'ls -lh1 /backups 2>/dev/null | grep server-backup_'], { timeoutMs: 60000 });
+  if (!job.ok) return res.json({ ok: false, reason: 'list-failed' });
+  const rows = String(job.logs || '').replace(/\u0000/g, '').split('\n').map((line) => line.trim())
+    .filter((line) => line.includes('server-backup_'))
+    .map((line) => {
+      /* ls -lh1 columns: perms links owner group SIZE date time NAME */
+      const parts = line.split(/\s+/);
+      const name = parts[parts.length - 1];
+      const size = parts.length >= 5 ? parts[parts.length - 5] : '';
+      return { size, name };
+    })
+    .filter((row) => /^server-backup_[\w.-]+\.tar\.gz$/.test(row.name));
+  rows.sort((a, b) => b.name.localeCompare(a.name));
+  res.json({ ok: true, backups: rows });
+});
+
+app.post('/Monitor_Server/ops-backup-download', authMiddleware, async (req, res) => {
+  if (!OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  const name = String(req.body?.name || '');
+  if (!/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
+  /* The engine cannot reach the host filesystem from here; the bytes travel
+     through a job container into this relay's data directory and stream
+     from there — one fixed pipeline, one fixed name shape. */
+  const copy = await runOpsJob(['sh', '-c', `test -f "/backups/${name}" && cp "/backups/${name}" /job/data/.monitor-transfer.tar.gz`], { timeoutMs: 300000 });
+  if (!copy.ok) return res.status(404).json({ ok: false, reason: 'no-such-backup' });
+  const local = path.join(defaultDataDir, '.monitor-transfer.tar.gz');
+  res.writeHead(200, {
+    'Content-Type': 'application/gzip',
+    'Content-Disposition': `attachment; filename="${name}"`,
+    'Cache-Control': 'no-store',
+  });
+  fs.createReadStream(local)
+    .on('close', () => { fs.unlink(local, () => {}); })
+    .pipe(res);
+});
+
+app.post('/Monitor_Server/ops-backup-delete', authMiddleware, async (req, res) => {
+  if (!OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  const name = String(req.body?.name || '');
+  if (!/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
+  const job = await runOpsJob(['rm', '-f', `/backups/${name}`], { timeoutMs: 60000 });
+  res.json({ ok: job.ok });
+});
+
+/* Restore overlays the backup onto the tree — deliberately NOT a wipe: what
+   the backup does not carry (data, certs, .env) stays standing, and the
+   automatic pre-restore snapshot is how "put it back" works. The operator
+   restarts the stack when ready. */
+app.post('/Monitor_Server/ops-backup-restore', authMiddleware, async (req, res) => {
+  if (!OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  const name = String(req.body?.name || '');
+  if (!/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
+  const safety = await opsSnapshot();
+  const job = await runOpsJob(['tar', 'xzf', `/backups/${name}`, '-C', '/job'], { timeoutMs: 900000 });
+  res.json({
+    ok: job.ok,
+    restored: name,
+    safetyBackup: safety.ok ? safety.name : '',
+    note: 'tree overlaid; restart the stack from the dashboard when ready',
+  });
+});
+
+/* The clean bundle: the program with none of this machine's state — what
+   the bootstrap installer ships to a fresh server. */
+async function opsBundleTo(res, filename) {
+  const cmd = ['tar', 'czf', '/job/data/.monitor-bundle.tar.gz'];
+  for (const item of OPS_BUNDLE_EXCLUDE) cmd.push(`--exclude=./${item}`);
+  cmd.push('./');
+  const job = await runOpsJob(cmd, { timeoutMs: 600000 });
+  if (!job.ok) { res.writeHead(502).end('bundle failed'); return; }
+  res.writeHead(200, {
+    'Content-Type': 'application/gzip',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store',
+  });
+  const local = path.join(defaultDataDir, '.monitor-bundle.tar.gz');
+  fs.createReadStream(local)
+    .on('close', () => { fs.unlink(local, () => {}); })
+    .pipe(res);
+}
+app.post('/Monitor_Server/ops-bundle', authMiddleware, async (req, res) => {
+  if (!INSTALL_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  await opsBundleTo(res, 'poorija-clean-bundle.tar.gz');
+});
+
+/* GitHub: check the newest published release against the running build.
+   Applying downloads that release and overlays it onto the tree; the safety
+   snapshot taken first is the rollback. The one fetch in this file is a
+   fixed literal of this project's own releases page; the download itself
+   happens inside a job container with the network on, against the same
+   fixed origin, so no request-shaped string ever reaches a URL here. */
+app.post('/Monitor_Server/ops-github-check', authMiddleware, async (req, res) => {
+  let release = null;
+  let reachable = false;
+  try {
+    const response = await fetch('https://api.github.com/repos/Poorija/P00RIJA-CRYPTOGRAPHY/releases/latest', {
+      headers: { 'User-Agent': 'poorija-monitor' },
+      signal: AbortSignal.timeout(30000),
+    });
+    reachable = response.ok;
+    if (response.ok) release = await response.json();
+  } catch (_error) { reachable = false; }
+  res.json({
+    ok: reachable && Boolean(release),
+    reachable,
+    latest: release ? { tag: release.tag_name, published: release.published_at, url: release.html_url } : null,
+    running: { version: RELAY_BUILD?.version, buildTag: RELAY_BUILD?.buildTag },
+    /* The published tag may or may not carry the leading v; strip both sides
+       before asking whether they differ. */
+    updateAvailable: Boolean(release?.tag_name && RELAY_BUILD?.version &&
+      String(release.tag_name).replace(/^v/, '') !== String(RELAY_BUILD.version).replace(/^v/, '')),
+  });
+});
+
+app.post('/Monitor_Server/ops-github-apply', authMiddleware, async (req, res) => {
+  if (!INSTALL_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
+  let tag = String(req.body?.tag || '').trim();
+  if (!/^v?[0-9][0-9.]*$/.test(tag)) return res.status(400).json({ ok: false, reason: 'bad-tag' });
+  if (!tag.startsWith('v')) tag = `v${tag}`;
+  const safety = await opsSnapshot();
+  /* One job, network on, fixed origin, tag reduced to dotted digits above:
+     download the release zip into the data directory, unpack it, overlay
+     the tree, and clean up — every path inside is the job's own mount. */
+  const download = await (async () => {
+    const name = `poorija-ops-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    const created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
+      Image: OPS_JOB_IMAGE,
+      Cmd: ['sh', '-c', `wget -q -O /job/data/.monitor-update.zip "https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY/archive/refs/tags/${tag}.zip" && cd /job/data && rm -rf .monitor-unpacked && mkdir .monitor-unpacked && unzip -q .monitor-update.zip -d .monitor-unpacked && inner=$(ls -d .monitor-unpacked/*/ | head -n 1) && tar -cf - -C "$inner" . | tar -xf - -C /job && rm -rf .monitor-unpacked .monitor-update.zip`],
+      HostConfig: { AutoRemove: false, Binds: [`${INSTALL_HOST_DIR}:/job`], NetworkMode: 'default' },
+    });
+    if (!created.ok) return { ok: false, reason: `create-${created.status}` };
+    const containerId = created.data?.Id;
+    const started = await dockerEngineJson('POST', `/v1.44/containers/${containerId}/start`, null);
+    if (!started.ok) {
+      await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
+      return { ok: false, reason: `start-${started.status}` };
+    }
+    const deadline = Date.now() + 600000;
+    let exitCode = null;
+    while (Date.now() < deadline) {
+      const state = await dockerEngineJson('GET', `/v1.44/containers/${containerId}/json`);
+      if (state.ok && state.data?.State?.Status !== 'running') {
+        exitCode = Number(state.data?.State?.ExitCode ?? -1);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    const logs = await dockerEngineRequest('GET', `/v1.44/containers/${containerId}/logs?stdout=1&stderr=1&tail=40`);
+    await dockerEngineJson('DELETE', `/v1.44/containers/${containerId}?force=1&v=1`);
+    if (exitCode === null) return { ok: false, reason: 'job-timeout' };
+    return { ok: exitCode === 0, logs: logs.body.slice(-2000) };
+  })();
+  if (!download.ok) return res.json({ ok: false, reason: download.reason || 'download-failed', output: String(download.logs || '').slice(-500) });
+  res.json({ ok: true, tag, safetyBackup: safety.ok ? safety.name : '', note: 'tree updated; restart the stack from the dashboard to run it' });
+});
+
+app.post('/Monitor_Server/ops-github-rollback', authMiddleware, async (req, res) => {
+  const name = String(req.body?.backup || '').trim();
+  if (name && !/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
+  /* No name given: the newest backup, which is the pre-update snapshot if
+     the update was the last thing that happened. */
+  let chosen = name;
+  if (!chosen) {
+    const listJob = await runOpsJob(['sh', '-c', 'ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | head -n 1'], { timeoutMs: 60000 });
+    chosen = String(listJob.logs || '').replace(/\u0000/g, '').split('\n').map((line) => line.trim()).find((line) => /^server-backup_[\w.-]+\.tar\.gz$/.test(line)) || '';
+  }
+  if (!chosen) return res.json({ ok: false, reason: 'no-backup' });
+  const safety = await opsSnapshot();
+  const job = await runOpsJob(['tar', 'xzf', `/backups/${chosen}`, '-C', '/job'], { timeoutMs: 900000 });
+  res.json({
+    ok: job.ok,
+    restored: chosen,
+    safetyBackup: safety.ok ? safety.name : '',
+    note: 'tree overlaid; restart the stack from the dashboard when ready',
+  });
+});
+
+/* ---- the bootstrap installer ------------------------------------------------
+ *
+ * A dedicated port (CHAT_BOOTSTRAP_PORT, default 9080) that answers exactly
+ * two things: the installer script, and — with the bootstrap token from the
+ * server's config — the clean bundle the script pulls. Nothing else, no
+ * session, no cookies: the point is one bash line from a fresh machine. */
+
+const BOOTSTRAP_PORT = process.env.CHAT_BOOTSTRAP_PORT === '0' ? 0 : Number(process.env.CHAT_BOOTSTRAP_PORT || 9080);
+function bootstrapToken() {
+  if (process.env.CHAT_BOOTSTRAP_TOKEN) return process.env.CHAT_BOOTSTRAP_TOKEN;
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')).bootstrapToken || ''; } catch (_error) { return ''; }
+}
+function rotateBootstrapToken() {
+  const token = crypto.randomBytes(24).toString('hex');
+  let config = {};
+  try { config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) || {}; } catch (_error) { config = {}; }
+  config.bootstrapToken = token;
+  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 }); } catch (error) {
+    console.warn('[Monitor] bootstrap token not saved:', error.message);
+  }
+  return token;
+}
+app.post('/Monitor_Server/bootstrap-token', authMiddleware, (req, res) => {
+  const token = bootstrapToken() || rotateBootstrapToken();
+  res.json({ ok: true, token });
+});
+
+if (BOOTSTRAP_PORT > 0) {
+  const bootstrapServer = http.createServer((req, res) => {
+    const asked = String(req.url || '');
+    res.setHeader('Cache-Control', 'no-store');
+    if (asked.startsWith('/install')) {
+      res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8' });
+      res.end([
+        '#!/bin/sh',
+        '# P00RIJA Cryptography — clean-server installer.',
+        '# Pulls the program (and nothing of the server it came from) and stands',
+        '# the stack up on THIS machine with a fresh, empty identity.',
+        'set -eu',
+        'SRC=${1:?usage: install <origin> <bootstrap-token> [dir]}',
+        'TOKEN=${2:?bootstrap token required}',
+        'DIR=${3:-$HOME/poorija-cryptography}',
+        'echo "==> fetching the clean bundle from $SRC"',
+        'mkdir -p "$DIR"',
+        'curl -fsSL -H "X-Bootstrap-Token: $TOKEN" "$SRC/bundle" -o "$DIR/bundle.tar.gz"',
+        'tar -xzf "$DIR/bundle.tar.gz" -C "$DIR"',
+        'rm -f "$DIR/bundle.tar.gz"',
+        'cd "$DIR"',
+        'echo "==> preparing configuration"',
+        'cp docker-compose.env.example .env 2>/dev/null || cp config/docker-compose.env.example .env 2>/dev/null || true',
+        'test -f .env || { echo "no .env template found in the bundle" >&2; exit 1; }',
+        'echo "==> starting the stack (docker compose)"',
+        'docker compose -f config/docker-compose.yaml --env-file .env up -d --build',
+        'echo "==> done. The app serves on :8585; edit .env for your domain, then restart."',
+      ].join('\n'));
+      return;
+    }
+    if (asked.startsWith('/bundle')) {
+      const token = bootstrapToken();
+      if (!token) { res.writeHead(503).end('bootstrap token not configured on the server'); return; }
+      if (String(req.headers['x-bootstrap-token'] || '') !== token) { res.writeHead(401).end('bad bootstrap token'); return; }
+      if (!INSTALL_HOST_DIR) { res.writeHead(503).end('ops paths not configured on the server'); return; }
+      opsBundleTo(res, 'poorija-clean-bundle.tar.gz');
+      return;
+    }
+    res.writeHead(404).end('not found');
+  });
+  bootstrapServer.listen(BOOTSTRAP_PORT, '0.0.0.0', () => {
+    console.log(`Bootstrap installer available at http://${HOST}:${BOOTSTRAP_PORT}/install`);
+  });
+}
+
 app.post('/self-destruct/records', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   const payloadId = sanitizeSelfDestructId(req.body?.payloadId);
@@ -4570,6 +5258,7 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
     return;
   }
+  noteTransitTraffic(facts.toRelay, Buffer.byteLength(envelope));
   /* The carrier's own correlation id, not the client's tag. The tag belongs
      to the client and there is no reason for another relay to see it. */
   const ref = crypto.randomUUID();
@@ -6141,6 +6830,45 @@ let totalBytesReceived = 0;
 let totalBytesSent = 0;
 let totalRelays = 0;
 
+/* The monitor's own version. The relay's build tag says which app round the
+   messenger is on; this says which dashboard round the server is on — they
+   move on different schedules and the dashboard must be able to say which
+   of the two an operator is actually looking at. */
+const MONITOR_VERSION = '3.33';
+
+/* Fine-grained traffic, for the dashboard's traffic tab: the same events the
+   totals count, kept per client and per relay link. The maps are capped so
+   a hostile rotation of ids cannot grow them without bound — the same
+   discipline the rest of the bookkeeping here holds itself to. */
+const clientTraffic = new Map();   // clientId -> { msgsIn, msgsOut, bytesIn, bytesOut, lastAt, label }
+const transitTraffic = new Map();  // relayId -> { carried, bytes, lastAt }
+const TRAFFIC_ROWS_MAX = 500;
+function noteClientTraffic(clientId, direction, bytes, label) {
+  if (!clientId) return;
+  let row = clientTraffic.get(clientId);
+  if (!row) {
+    if (clientTraffic.size >= TRAFFIC_ROWS_MAX) clientTraffic.delete(clientTraffic.keys().next().value);
+    row = { msgsIn: 0, msgsOut: 0, bytesIn: 0, bytesOut: 0, lastAt: Date.now(), label: label || '' };
+    clientTraffic.set(clientId, row);
+  }
+  row.lastAt = Date.now();
+  if (label) row.label = label;
+  if (direction === 'in') { row.msgsIn++; row.bytesIn += bytes; }
+  else { row.msgsOut++; row.bytesOut += bytes; }
+}
+function noteTransitTraffic(relayId, bytes) {
+  if (!relayId) return;
+  let row = transitTraffic.get(relayId);
+  if (!row) {
+    if (transitTraffic.size >= 64) transitTraffic.delete(transitTraffic.keys().next().value);
+    row = { carried: 0, bytes: 0, lastAt: Date.now() };
+    transitTraffic.set(relayId, row);
+  }
+  row.carried++;
+  row.bytes += bytes;
+  row.lastAt = Date.now();
+}
+
 /* A client that stops reading its socket leaves every frame sent to it
    buffered inside this process — an unread mailbox handover is the easiest
    way to balloon memory without sending anything yourself. No legitimate
@@ -6170,6 +6898,7 @@ function safeSendText(ws, payload, countAsMessage = true) {
     if (countAsMessage) {
       totalMessagesSent++;
       totalBytesSent += Buffer.byteLength(payload);
+      noteClientTraffic(ws.__poorijaClientId, 'out', Buffer.byteLength(payload));
     }
     ws.send(payload);
   }
@@ -6435,6 +7164,9 @@ wsServer.on('connection', (ws, req) => {
   };
 
   presence.set(clientId, record);
+  /* The traffic rows key on this id; the back-pointer keeps the outbound
+     side from having to hunt the presence map on every send. */
+  ws.__poorijaClientId = clientId;
   const initialRestriction = getRestrictionForIdentity(record);
   if (initialRestriction) {
     disconnectRestrictedPeer(record, initialRestriction);
@@ -6450,6 +7182,7 @@ wsServer.on('connection', (ws, req) => {
   ws.on('message', (raw) => {
     totalMessagesReceived++;
     totalBytesReceived += raw.length;
+    noteClientTraffic(clientId, 'in', raw.length, record.username || '');
 
     /* Refill by elapsed time, then spend one token on this frame. A socket
        over the line is answered, not disconnected: a person's browser
@@ -6804,9 +7537,13 @@ setInterval(() => {
   pruneSelfDestructRecords();
 }, 6 * 60 * 60 * 1000).unref?.();
 
+/* Whatever the monitor last decided about relay links, on top of the env's
+   seed. Called last, at boot, once everything it touches exists. */
+loadRuntimeTransitPeers();
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Poorija chat signal server listening on http://${HOST}:${PORT}`);
-  console.log(`Monitoring Dashboard available at http://${HOST}:${PORT}/Monitor_Server`);
+  console.log(`Monitoring Dashboard available at http://${HOST}:${PORT}/Monitor_Server (v${MONITOR_VERSION})`);
 });
 
 presenceServer.listen(PRESENCE_PORT, HOST, () => {

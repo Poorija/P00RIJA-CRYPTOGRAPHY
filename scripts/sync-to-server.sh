@@ -226,6 +226,11 @@ log "Building images (no cache)"
 }
 
 log "Restarting the stack"
+# The monitor's machine half needs the install and backups directories as
+# the docker HOST sees them, for the bind mounts its job containers use.
+# Handed in on the command line rather than written into .env: they are this
+# machine's facts, not settings a person should be able to get wrong.
+OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" \
 "${COMPOSE_CMD[@]}" up -d poorija-cryptography chat-signal || {
     fail "Bringing the stack up failed."
     exit 1

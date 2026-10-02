@@ -146,6 +146,7 @@ function createRelayPeers({
   onFrame = () => {},
   onLinkUp = () => {},
   onLinkDown = () => {},
+  onChange = null,
   now = () => Date.now(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -428,12 +429,70 @@ function createRelayPeers({
     }
   }
 
+  /* ---- the allowlist, at runtime -----------------------------------------
+   *
+   * The allowlist used to be fixed at construction, which meant the only way
+   * to link a new relay or retire one was to edit the environment and restart
+   * — a restart that also drops every connected client. The monitor drives
+   * these; the caller owns persistence (an onChange callback fires on every
+   * mutation) so a restart keeps the same set the operator last saw. */
+  function allowPeer(id, origin = '') {
+    const key = String(id || '').toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(key)) return false;
+    let cleanOrigin = '';
+    if (origin) {
+      try {
+        const parsed = new URL(origin);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') cleanOrigin = parsed.origin;
+      } catch (_error) { return false; }
+    }
+    const existed = allowed.has(key);
+    allowed.add(key);
+    /* An address given now replaces one remembered from an earlier dial, so
+       correcting a relay's origin does not need a restart either. */
+    if (cleanOrigin) {
+      dialOrigins.set(key, cleanOrigin);
+      if (!outbound.get(key)?.isOpen()) scheduleDial(key, cleanOrigin, 0);
+    }
+    if (!existed) onChange?.('add', key, cleanOrigin);
+    return true;
+  }
+
+  function disallowPeer(id) {
+    const key = String(id || '').toLowerCase();
+    if (!allowed.has(key)) return false;
+    allowed.delete(key);
+    dialOrigins.delete(key);
+    const pending = dialling.get(key);
+    if (pending?.timer) clearTimer(pending.timer);
+    dialling.delete(key);
+    outbound.get(key)?.close('removed from the allowlist');
+    for (const link of inbound.get(key) || []) link.close('removed from the allowlist');
+    onChange?.('remove', key, '');
+    return true;
+  }
+
+  /* The whole set with addresses, which is what an operator needs and the
+     plain id list never said: which relays may link, where each is dialled,
+     and whether a link is actually standing. */
+  function peerEntries() {
+    return Array.from(allowed, (id) => ({
+      id,
+      origin: dialOrigins.get(id) || '',
+      linked: Boolean(linkFor(id)),
+      role: outbound.get(id)?.isOpen() ? 'dialer' : (inbound.get(id)?.size ? 'answerer' : 'none'),
+    }));
+  }
+
   return {
     enabled,
     mayLinkWith,
     accept,
     dial,
     linkFor,
+    allowPeer,
+    disallowPeer,
+    peerEntries,
     allowedPeers: () => Array.from(allowed),
     /* What /chat-health reports: how many relays this one is actually able to
        hand traffic to right now, which is the only honest measure of it. */
