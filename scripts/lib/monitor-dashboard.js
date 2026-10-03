@@ -668,6 +668,7 @@ async function loadHealth() {
         '<td class="mono">' + esc(peer.ip || '') + '</td><td>' + since + '</td><td>' + fmtTime(peer.lastSeenAt ? new Date(peer.lastSeenAt).toISOString() : '') + '</td>' +
         '<td>' + badge + '</td>' +
         '<td><div class="row">' +
+        '<button class="btn" data-copy-fp="' + esc(peer.fingerprint || '') + '" title="' + (LANG === 'fa' ? 'کپی شناسه' : 'copy fingerprint') + '"><i class="fas fa-fingerprint"></i></button>' +
         '<button class="btn warn" data-suspend="' + esc(peer.clientId) + '"><i class="fas fa-pause"></i>' + t('suspend') + '</button>' +
         '<button class="btn bad" data-kick="' + esc(peer.clientId) + '"><i class="fas fa-ban"></i>' + t('kick') + '</button>' +
         '</div></td></tr>';
@@ -781,6 +782,13 @@ $('qClearAll').addEventListener('click', async () => {
 /* ---------- users actions ---------- */
 let policyTarget = null;
 $('uTable').addEventListener('click', (event) => {
+  const copyFp = event.target.closest('[data-copy-fp]');
+  if (copyFp) {
+    navigator.clipboard.writeText(copyFp.getAttribute('data-copy-fp'))
+      .then(() => toast(LANG === 'fa' ? 'شناسه کپی شد' : 'fingerprint copied', 'ok'))
+      .catch(() => toast(t('fail'), 'err'));
+    return;
+  }
   const kick = event.target.closest('[data-kick]');
   const suspend = event.target.closest('[data-suspend]');
   if (!kick && !suspend) return;

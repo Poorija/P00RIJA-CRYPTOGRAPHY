@@ -890,16 +890,23 @@ if (payload.type === 'system-note') {
    is the point: it is the server's own voice, shown in the system
    conversation the old broadcast already used. An attachment, when there
    is one, rides along as a small data URL and renders inside the note. */
+/* A real chat message from the server — a bubble with a sender, not a grey
+   pill mid-thread: an announcement from the operator reads as
+   correspondence, not furniture. Attachment rides as a data URL the file
+   bubble already knows how to open. */
+const serverAttachment = payload.attachment || null;
 appendHistory('system', {
 id: generateId('sys'),
-type: 'system-note',
-/* Subject first, body under it — the same shape the live broadcast
-frame shows, so both roads arrive looking like one feature. */
+type: serverAttachment ? 'file' : 'text',
+kind: serverAttachment?.kind === 'audio' ? 'voice' : (serverAttachment?.kind || 'text'),
+/* Subject first, body under it — the operator typed both, both arrive. */
 text: (payload.title ? payload.title + '\n' : '') + (payload.message || payload.text || ''),
-title: payload.title || '',
-attachment: payload.attachment || null,
+name: serverAttachment?.name || '',
+downloadUrl: serverAttachment?.dataUrl || '',
+senderName: t('سرور', 'Server'),
 direction: 'in',
 status: 'delivered',
+timestamp: payload.queuedAt ? Date.parse(payload.queuedAt) : Date.now(),
 createdAt: payload.queuedAt || new Date().toISOString(),
 system: true,
 });

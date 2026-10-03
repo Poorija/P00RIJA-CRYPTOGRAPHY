@@ -4751,6 +4751,9 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
     if (!awake) {
       sendAdminPushNotification(fingerprint, (title ? title + ': ' : '') + String(message || attachment.name || '').slice(0, 160), 'admin-announce').catch(() => {});
     }
+    /* Diagnostics the operator can check when a device rings twice: what
+       was sent, to whom, and whether they were awake at the time. */
+    monitorLog(`Announce → ${fingerprint.slice(0, 12)} (${awake ? 'awake, no push' : 'push sent'})`);
   }
   await saveOfflineBoxes();
   monitorLog(`Announcement to ${queued} identit${queued === 1 ? 'y' : 'ies'} (${live} live, push attempted)`);
