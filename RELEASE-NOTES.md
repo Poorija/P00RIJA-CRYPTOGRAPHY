@@ -1,198 +1,118 @@
-# P00RIJA Cryptography 2.91.22
+# P00RIJA Cryptography 2.91.28
 
-Version 2.91.22 · build chat-v97
+Version 2.91.28 · build chat-v103
 
 این نسخه همهٔ فاصلهٔ از 2.77.0 تا امروز را پوشش می‌دهد: یک ممیزی کامل که از
-ریله تا نصاب را گشت، باگ‌هایی که پیدا شد و همه‌شان فیکس شدند، رفتارهایی که
-درست شدند، و چند قابلیتی که همان جاها را پر کردند. متن هر بخش اول فارسی
-است و بعد انگلیسی.
+ریله تا نصاب را گشت، باگ‌هایی که پیدا شد و همه‌شان فیکس شدند، یک داشبورد
+مدیریت سرور که از «تماشاگر» به «اپراتور» تبدیل شد، و ثباتی که هر خطِ آن با
+یک کرش واقعی روی سرور واقعی به دست آمد. متن هر بخش اول فارسی است و بعد
+انگلیسی.
 
 This release covers the whole distance from 2.77.0 to today: a full audit
-that walked from the relay to the installer, the bugs it found and fixed to
-the last one, behaviours put right, and a few features that filled the same
-places. Each section is Persian first, English after.
+that walked from the relay to the installer, every bug it found fixed, a
+server dashboard that grew from a watcher into an operator, and a stability
+that was earned line by line against real crashes on a real server. Each
+section is Persian first, English after.
 
 ---
 
 ## امنیت و پایداری رله · Relay security and stability
 
-از ممیزی بیرون آمد که رله در شش جا ساده‌تر از آن فکر می‌کرد که دنیا مهربان
-است. هر شش بسته شد:
+- **فریمی که پیام نیست، رله را نمی‌اندازد** — هر بایت‌نامهٔ ناشناخته رد
+  می‌شود و پروسه سرِ پا می‌ماند.
+- **کلید میل‌باکس فقط فینگرپرینت می‌تواند باشد** — شکل قدیمی می‌توانست به
+  فایل‌های بیرون از صندوق برسد.
+- **لینک مردهٔ بین رله‌ها دیده می‌شود، نه فرض** — مرگِ آن‌طرف معلوم می‌شود
+  و مسیر عوض می‌شود.
+- **سوکت اثبات‌نشده هزینهٔ محاسباتی رله را خرج نمی‌کند.**
+- **رلهٔ توزیع، همان امنیتی را دارد که رلهٔ مستقر** — ۹ فیکس در بستهٔ
+  standalone-relay نشست.
+- **پاکت می‌گوید کی نوشته‌اش، و نام را رله انتخاب نمی‌کند.**
+- **کرش‌لوپ بین‌رله‌ای ریشه‌کن شد** — یک پیام بین‌رله‌ای کل رله را می‌کشت و
+  ۳۷ ری‌استارت می‌آورد؛ حالا حساب‌وکتاب مسیر WS خطاناپذیر است.
 
-The audit found six places where the relay assumed a kinder world than the
-one it listens to. All six are closed:
+## پیام و مخاطب · Messages and contacts
 
-- **فریمی که پیام نیست، رله را نمی‌اندازد.** هر بایت‌نامه‌ای که به سوکت
-  برسد قبل از اینکه بدانیم چیست تجزیه می‌شود؛ یکی از آن‌ها می‌توانست
-  کل سرویس را بیندازد. حالا هر چیز ناشناخته، رد می‌شود و رله سرِ پا
-  می‌ماند. **A frame that is not a message no longer takes the relay
-  down.** Anything unrecognised is refused and the process stays up.
+- **مخاطب بین‌رله‌ای مثل یک مخاطب رفتار می‌کند** — حضور، تماس و فهرست.
+- **فایل بزرگ‌تر از سقف رد می‌شود، نه بی‌صدا بریده.**
+- **فایل قدیمی روی تنظیمات جدید باز می‌شود.**
+- **پیام فینگرپرینتی یک lookup است، نه sort.**
+- **مسیر پیام آیکون کنارش است، نه بنر بالای گفتگو** — فلش + توضیح.
 
-- **کلید میل‌باکس فقط فینگرپرینت می‌تواند باشد.** نشانی صندوق از کلیدی
-  ساخته می‌شد که سمت کاربر می‌آمد؛ شکلی از آن می‌توانست به نام فایل‌های
-  بیرون از صندوق برسد. حالا هر کلیدی که فینگرپرینت نیست، پیش از رسیدن
-  به هر نام فایلی رد می‌شود. **A mailbox key that is not a fingerprint
-  never reaches a filename** — the old form could address files outside
-  the mailbox.
+## مرکز پیام سرور · The server's message centre
 
-- **لینک مردهٔ بین رله‌ها دیده می‌شود، نه فرض.** رلهٔ دوم اگر می‌مرد،
-  لینک transit سالم به‌نظر می‌رسید و پیام‌ها را به سکوت می‌فرستاد. حالا
-  مرگِ آن‌طرف معلوم می‌شود و مسیر عوض می‌شود. **A link between relays
-  that has died is noticed, not assumed** — a dead far side used to look
-  like a healthy link eating messages.
-
-- **سوکت اثبات‌نشده هزینهٔ محاسباتی رله را خرج نمی‌کند.** اتصالی که هنوز
-  خودش را معرفی نکرده بود می‌توانست از رله کارِ سنگین بگیرد. **An
-  unproven socket can no longer spend the relay's arithmetic.**
-
-- **رلهٔ توزیع، همان امنیتی را دارد که رلهٔ مستقر.** نُه فیکس امنیتی‌ای
-  که در سرورِ اصلی نشسته بودند، در بستهٔ توزیع (standalone-relay) جای
-  خودشان را پیدا کردند؛ نسخه‌ای که دیگران نصب می‌کنند از نسخه‌ای که شما
-  نصب کرده‌اید امن‌تر نیست. **The distribution relay answers to the same
-  security the deployed one already had** — nine fixes that had landed
-  only on the main server now ship in the package everyone installs.
-
-- **پاکت می‌گوید کی نوشته‌اش، و نام را رله انتخاب نمی‌کند.** نام فرستنده
-  روی پاکت می‌آید و مهر می‌خورد، نه این‌که رلهٔ مسیر هر نامی که بخواهد
-  جایش بگذارد. **An envelope says who wrote it, and the name is not the
-  relay's to choose** — the sender's name rides sealed, not renamed in
-  transit.
-
-## پیام و مخاطب، درست‌تر · Messages and contacts, behaving
-
-- **مخاطبی که روی رلهٔ دیگر است، مثل یک مخاطب رفتار می‌کند.** قبلاً
-  آنلاین‌بودنش دیده نمی‌شد، تماسش همیشه missed می‌شد و از список گفتگو
-  چیز دیگری می‌گفت تا از هدرش. حالا همان مخاطب است، همه‌جا. **A contact
-  on another relay behaves like the contact it is** — presence, calls and
-  the conversation list all agree about them now.
-
-- **فایلی که از سقف بزرگ‌تر است رد می‌شود، نه این‌که بی‌صدا بریده شود.**
-  قبلاً فایلِ بزرگ‌تر از حد، ساکت تا حد مجوز بریده می‌شد و طرف مقابل
-  فایلِ نصفه را سالم می‌پنداشت — بدترین نوع خرابی. **A file larger than
-  the clamp is refused, not quietly cut short.**
-
-- **فایل قدیمی، روی تنظیمات جدید باز می‌شود.** تغییر سهمیهٔ دانلود یا
-  کلیدها دیگر آرشیوِ موجود را نمی‌شکند. **An old file opens on new
-  settings** — a quota or key change no longer breaks the archive you
-  already have.
-
-- **پیامی که با فینگرپرینت نشانی‌گرفته شده، یک جست‌وجوست نه یک مرتب‌سازی.**
-  در گفتگوهای بزرگ، هزینهٔ پیدا کردن گیرنده از مرتب‌کردنِ همه‌چیز به یک
-  دروازهٔ جست‌وجو افتاد. **A message addressed by fingerprint costs a
-  lookup, not a sort.**
-
-- **مسیر پیام، آیکون کنارش است — نه پاراگرافی که بالای گفتگو می‌آید.**
-  وقتی پیامی برای مخاطبِ روی رلهٔ دیگر ناچار از رلهٔ خودتان می‌گذرد، دیگر
-  اعلینِ تکراریِ [transit fallback] نمی‌گیرید؛ فلش کوچکی کنار پیام
-  نشانش می‌دهد و با زدنش توضیح، موقع خودش، می‌آید. **The route a message
-  took is an icon beside it, not a paragraph above it** — the repeated
-  [transit fallback] banner is gone; an arrow marks the message and tapping
-  it explains, exactly when wanted.
+- **برادکست به همه**: هر هویتی که رله می‌شناسد — آنلاین، آفلاین، با پوش
+  نوتیفیکیشن — یک پیام، یک زنگ (شناسهٔ یکتا + دی‌دیوپ ماندگار در
+  localStorage).
+- **پیام شخصی از سیستم**: فیلد fingerprint → فقط همان گیرنده(ها).
+- **پیوست**: تصویر/استیکر/صدا/فایل تا ۲MB داخل حباب چت.
+- **عنوان + متن**: هر دو کامل نمایش داده می‌شوند، به شکل چت واقعی از
+  «سرور».
+- **پخش زنده** (فقط متصل‌ها) با گارد متن‌خالی و گزارش شمار گیرنده.
 
 ## کلید «ارتباط بین رله‌ها» · The cross-relay switch
 
-در چت امن ← تنظیمات ← اتصال و TURN، کنار خودِ اتصال: روشن (پیش‌فرض) یعنی
-پیام، فایل و تماس — شخصی و گروهی — از مسیر رمزنگاری‌شدهٔ بین دو رله
-می‌رود و رلهٔ شما نمی‌بیند با چه کسی حرف می‌زنید. خاموش یعنی همه‌چیز از
-رلهٔ خودتان می‌رود؛ محتوا همیشه رمزنگاری‌شده می‌ماند، ولی رله می‌بیند.
-انتخاب شما بخشی از پروفایل است و همراهش سفر می‌کند. نام و توضیح کلید در
-هر دو زبان برنامه هست.
-
-In Secure Chat ← Settings ← Connection & TURN, next to the connection
-itself: on (the default) sends messages, files and calls — private and
-group — over the encrypted link between the relays, so your relay cannot
-see who you talk to. Off sends everything through your own relay; content
-stays encrypted either way, but the relay sees. The choice travels with
-your profile, and the switch is named and explained in both languages.
+روشن (پیش‌فرض): پیام/فایل/تماس از مسیر رمزنگاری‌شدهٔ بین دو رله.
+خاموش: از رلهٔ خودتان؛ محتوا همیشه رمزنگاری‌شده، ولی رله می‌بیند.
+انتخاب همراه پروفایل سفر می‌کند. رله‌ها از داشبورد در لحظه
+اضافه/حذف می‌شوند و بعد از ری‌استارت می‌مانند.
 
 ## iOS · iOS
 
-- **ردیف‌های اموجی زیر کیبورد گم نمی‌شوند.** اندروید با باز شدن کیبورد
-  خودش صفحه را کوچک می‌کند؛ iOS این کار را نمی‌کند و کیبورد روی ردیف‌های
-  آخرِ پنل استیکر و اموجی می‌نشیند. حالا سقفِ ارتفاع پنل، ارتفاع کیبورد
-  را که سرووی خود برنامه می‌سنجد کم می‌کند — iOS هم مثل اندروید پنل را
-  جمع می‌کند — و یک کف هم دارد که در هیچ حالتی پنل بی‌استفاده نشود.
-  **Emoji rows no longer vanish under the iOS keyboard.** Android resizes
-  the viewport itself; iOS does not, so the keyboard sat on the last rows.
-  The panel's height cap now subtracts the keyboard height the app's own
-  viewport servo measures — iOS shrinks the panel the way Android's `dvh`
-  would have — with a floor that keeps it usable in any state.
-
-- **سوییچ‌ها روی هر iOS یک شکل.** حالت روشنِ ردیف (پس‌زمینهٔ روشن) برای
-  دو کلید «چت امن» و «ارتباط بین رله‌ها» هرگز روشن نمی‌شد — از فهرستی
-  جا مانده بودند؛ حالت خاموشِ رنگ کلیدها هم به `color-mix()` وابسته بود
-  که iOS فقط از ۱۶.۲ می‌شناسد. هر دو درست شد: ردیف‌ها مثل بقیه روشن
-  می‌شوند و رنگ خاموش روی هر نسخهٔ iOS همان رنگِ همه‌جاست. **Switches
-  draw one shape on every iOS.** The on-row state never lit for the
-  secure-chat and cross-relay switches (they were missing from the list
-  that draws it), and the off colour depended on `color-mix()`, which iOS
-  only knows from 16.2. Both fixed: rows light up like every other switch,
-  and the off colour is the same on any iOS version.
+- **ردیف‌های اموجی زیر کیبورد گم نمی‌شوند** — سقف ارتفاع منهای inset
+  کیبورد (که سرووی خود برنامه می‌سنجد) + کف rem.
+- **سوییچ‌ها روی هر iOS یک شکل** — ردیف is-active + رنگ خاموش با fallback
+  ثابت (بدون color-mimix روی iOS قدیمی).
 
 ## اشتراک‌گذاری پک استیکر · Sharing sticker packs
 
-هر دو جایی که پک‌ها را مدیریت می‌کند — پنجرهٔ «مدیریت پک‌های استیکر» و
-نمای مدیریتی خود پنل استیکر — حالا دو راه ارسال دارد: دکمهٔ ارسالِ هر
-ردیف همان پک را برای گفتگوی باز می‌فرستد، و اگر چند پک را تیک بزنید،
-دکمهٔ «ارسال انتخاب‌شده‌ها» همه را به ترتیبی که می‌بینید می‌فرستد — هر پک
-همچنان یک پیام جدا، چون دکمهٔ «افزودن» در آن‌طرف به ازای هر پک کار می‌کند.
-پک خالی یا بیش از حد بزرگ رد می‌شود ولی مانع بقیه نمی‌شود، و آخرش یک جمله
-می‌گوید چند پک رفت و چند تا نرفت.
+هر دو نمای مدیریت: دکمهٔ ارسال هر ردیف (تکی) + تیک چندتایی + «ارسال
+انتخاب‌شده‌ها» (گروهی). هر پک یک پیام جدا؛ خالی/بزرگ رد می‌شود ولی مانع
+بقیه نمی‌شود.
 
-Both places that manage packs — the pack-manager window and the sticker
-panel's own manage view — now share two ways: the send button on each row
-shares that one pack into the open chat, and ticking several packs sends
-them all, in the order shown, each still its own message because the
-receiver's Add button works per pack. An empty or oversized pack is
-skipped without stopping the rest, and one sentence at the end says how
-many went and how many did not.
+## عکس بزرگ پروفایل · The other person's photo, one tap away
 
-## تصویر بزرگ پروفایل، با یک لمس · The other person's photo, one tap away
+آواتار هدر گفتگو و آواتار اعضای گروه: کارتی با عکس بزرگ + نام + وضعیت.
+Esc یا پس‌زمینه می‌بندد.
 
-آواتارِ بالای گفتگو یک عکس کوچک است و تا حالا لمسش هیچ کاری نمی‌کرد. حالا
-با زدنش، همان عکس در اندازه‌ای که ارزش دیدن دارد باز می‌شود — همراه نام و
-وضعیتی که خودِ طرف مقابل برای خودش نوشته، اگر نوشته باشد. چیزی جز این در
-کارت نیست و Esc یا ضربه به پس‌زمینه می‌بنددش. آواتار اعضای گروه، در صفحهٔ
-اطلاعات گروه، همین کار را می‌کند.
+## داشبورد مدیریت سرور ۳.۳۳ · Monitor Server 3.33
 
-The avatar at the top of a conversation is a thumbnail, and until now
-tapping it did nothing. It now opens that photo at a size worth looking
-at, with the name and the status the person wrote for themselves, if they
-wrote one; Escape or the backdrop closes it. The member avatars in a
-group's info sheet do the same.
+از تماشاگر تا اپراتور — ۹ تب، همه پشت همان سشن:
+
+- **صف‌ها**: میل‌باکس‌ها + آیتم‌ها + حذف تک/کل + flush + دفتر انقضا
+- **کاربران**: جستجو + کپی fingerprint + بج بین‌رله (≥۱KB) + مرکز پیام
+- **رله‌ها**: add/remove زنده + ترافیک per-relay
+- **ترافیک**: مجموع‌ها + پرمصرف‌ترین کاربران
+- **سرور و بکاپ**: بکاپ کامل/ری‌استور/رول‌بک + **رم و CPU کانتینرها با
+  اعمال زنده و نامحدود** + **دیسک و پاکسازی انتخابی** (تگ‌ها/لایه‌ها با
+  چک‌باکس) + **چک داکر هاب صریح** (digest شما vs Hub + confirm) + خروجی
+  خام ایمیج + آپدیت گیت‌هاب با رول‌بک
+- **گزارش‌ها**: تماس‌های زنده + فعالیت بین‌رله + ترافیک ساعتی + رخدادها +
+  CSV/JSON
+- **نصب خام**: یک خط bash روی هر سرور → برنامهٔ خام با هویت تازه
+- **سیستم**: TURN/RelayID + بهینه‌سازی حافظه + لاگ زنده
+
+معماری: صفر subprocess، صفر shell؛ Docker Engine API روی socket؛ آرشیوها با
+کانتینرهای کوتاه‌عمر؛ تنها fetch خروجی = literal خود پروژه. ۴ تم، ۶ زبان
+نه — ۲ زبان، ۶ نرخ رفرش (۱ث تا دستی)، شورتکات ۱-۸ + R.
 
 ## نصب و انتشار · Installing and publishing
 
-- **اپ نصب‌شده، نصبش را کامل می‌کند.** نصاب وسطِ کار رها می‌شد و PWA بعد
-  از به‌روزرسانی، دو نسخه از هر فایل را در کش نگه می‌داشت. **An installed
-  app actually finishes installing, and its cache keeps one copy of each
-  asset.**
-
-- **اسکریپت‌های دیپلوی بلند خطا می‌دهند** — به‌جای این‌که نصفه کپی کنند و
-  موفق گزارش شوند — **رازهای سرور روی سیم نمی‌روند** و لینکِ دو رله با
-  احتیاط ساخته می‌شود؛ و هیچ‌کس با قفلِ بیلد مسابقه نمی‌رود. **The
-  deployment scripts fail loudly, link carefully, and keep the server's
-  secrets off the wire** — and nobody races the build lock.
-
-- **بیلد نیتیو می‌تواند بگوید چه رله‌هایی را می‌شناسد** — نصبِ بسته، از
-  قبل می‌داند به کدام رله‌ها اعتماد کرده باشد. **A native build can be
-  told which relays it ships knowing.**
+- **اپ نصب‌شده نصبش را کامل می‌کند و کش تک‌کپی دارد.**
+- **اسکریپت‌های دیپلوی بلند خطا می‌دهند، رازها روی سیم نمی‌روند.**
+- **تگ ایمیج = نسخهٔ برنامه** (APP_VERSION از package.json؛ نصب تازه و
+  آپدیت یکسان).
+- **نیتیو می‌تواند بگوید چه رله‌هایی را می‌شناسد.**
+- **sync-github-desktop.sh**: export تمیز → کلون GitHub Desktop → کامیت
+  آماده؛ Push با آدم.
 
 ## زیر کاپوت · Under the hood
 
-- تستِ دو سرورِ واقعی، همان چیزی را قفل می‌کند که ادعا می‌کند (تشکیل پین
-  رله، مسیر transit، توافق بیلد دو سرور).
-- پروبِ امنیتی همان را می‌خواند که کد می‌گوید؛ کد هم اکنون بی‌ابهام
-  می‌گوید.
-- `scripts/sync-github-desktop.sh`: export تمیز را در کلونِ GitHub Desktop
-  آینه می‌کند و کامیتش می‌کند؛ پوش‌کردن دست آدم می‌ماند.
-
-- The two-real-server test pins what it claims (relay pin formation, the
-  transit route, both servers agreeing on the build).
-- The security probe reads what the code says, and the code now says it
-  unambiguously.
-- `scripts/sync-github-desktop.sh` mirrors the clean export into the
-  GitHub Desktop clone and commits it; pressing Push stays a human act.
+- تست دو-سرور-واقعی (پین رله، transit، توافق بیلد)
+- رجیستری هویت‌های پایدار (known-identities.json)
+- پروب امنیتی همان را می‌خواند که کد می‌گوید
+- ۲ خطای کشف‌شده و فیکس‌شده در پروسه: `Buffer.byteLength(object)` در مسیر
+  WS (کرش‌لوپ) و فریم‌بندی ۸-بایتی لاگ داکر
 
 ---
 
@@ -213,7 +133,7 @@ sha256sum -c SHA256SUMS.txt
 روی ویندوز (PowerShell) · on Windows:
 
 ```powershell
-Get-FileHash ".\P00RIJA Cryptography_2.91.22_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.91.28_x64-setup.exe" -Algorithm SHA256
 ```
 
 برای یک فایل تکی، چک‌سام را با سطر مربوط به همان فایل در `SHA256SUMS.txt`
