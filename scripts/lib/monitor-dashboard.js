@@ -847,8 +847,10 @@ $('alTable').addEventListener('click', async (event) => {
 
 /* broadcast (live sockets only) */
 $('bcSend').addEventListener('click', async () => {
-  const result = await api('/admin/broadcast', { message: $('anMsg').value || $('bcTarget').value, clientId: $('bcTarget').value.trim() || undefined });
-  toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err');
+  const text = $('anMsg').value.trim();
+  if (!text) { toast(LANG === 'fa' ? 'متن پیام را در کادر بالا بنویسید' : 'type the message above first', 'err'); return; }
+  const result = await api('/admin/broadcast', { message: text, clientId: $('bcTarget').value.trim() || undefined });
+  toast(result.ok ? t('ok') + ' — ' + (result.sentTo ?? '?') : (result.reason || t('fail')), result.ok ? 'ok' : 'err');
 });
 
 /* ---------- the announce centre: everyone, online and offline, with push */

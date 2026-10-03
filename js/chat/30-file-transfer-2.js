@@ -883,7 +883,17 @@ console.error('Failed to process offline relay message in queue:', error);
 }));
 return;
 }
+const seenAnnouncements = new Set();
 if (payload.type === 'system-note') {
+/* Live frame now, mailbox copy on the next reconnect: both carry the same
+   announceId, and the second one is a receipt, not a new message. Without
+   this the phone rang twice for one announcement whenever the ack raced
+   the socket closing. */
+if (payload.announceId) {
+  if (seenAnnouncements.has(payload.announceId)) { ackRelayMessage(message.relayId); return; }
+  seenAnnouncements.add(payload.announceId);
+  if (seenAnnouncements.size > 200) seenAnnouncements.delete(seenAnnouncements.keys().next().value);
+}
 /* The server's announce centre: a note the RELAY itself wrote, carried the
    same way mail is — online as a relay frame, offline out of the mailbox.
    It is not sealed (the server cannot seal what it cannot read), and that

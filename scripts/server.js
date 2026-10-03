@@ -4724,7 +4724,11 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
   for (const fp of fingerprints) noteKnownIdentity(fp);
   let queued = 0;
   let live = 0;
-  const payload = { type: 'system-note', message: message || attachment.name, title, attachment };
+  /* One id per announcement: the frame goes out live AND sits in the
+     mailbox, and whichever arrives second must be recognised as the same
+     announcement, not rendered (and rung) twice. */
+  const announceId = crypto.randomUUID();
+  const payload = { type: 'system-note', announceId, message: message || attachment.name, title, attachment };
   for (const fingerprint of fingerprints) {
     const items = offlineBoxes.get(fingerprint) || [];
     items.push({
