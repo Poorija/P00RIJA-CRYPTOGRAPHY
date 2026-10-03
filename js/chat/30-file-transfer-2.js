@@ -883,16 +883,28 @@ console.error('Failed to process offline relay message in queue:', error);
 }));
 return;
 }
-const seenAnnouncements = new Set();
+/* Seen announcements live in localStorage, not memory: a page refresh or a
+   second tab wipes an in-memory set, and the mailbox copy that arrives
+   after the reset renders (and rings) a second time — exactly what the
+   desktop showed while the phone, which never reloads, stayed quiet. The
+   store is shared by every tab of this origin and survives restarts. */
+function seenAnnouncementIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('poorija-seen-announcements') || '[]')); }
+  catch (_error) { return new Set(); }
+}
+function markAnnouncementSeen(id) {
+  if (!id) return;
+  const ids = seenAnnouncementIds();
+  ids.add(id);
+  const kept = Array.from(ids).slice(-200);
+  try { localStorage.setItem('poorija-seen-announcements', JSON.stringify(kept)); } catch (_error) { /* private mode */ }
+}
 if (payload.type === 'system-note') {
 /* Live frame now, mailbox copy on the next reconnect: both carry the same
-   announceId, and the second one is a receipt, not a new message. Without
-   this the phone rang twice for one announcement whenever the ack raced
-   the socket closing. */
+   announceId, and the second one is a receipt, not a new message. */
 if (payload.announceId) {
-  if (seenAnnouncements.has(payload.announceId)) { ackRelayMessage(message.relayId); return; }
-  seenAnnouncements.add(payload.announceId);
-  if (seenAnnouncements.size > 200) seenAnnouncements.delete(seenAnnouncements.keys().next().value);
+  if (seenAnnouncementIds().has(payload.announceId)) { ackRelayMessage(message.relayId); return; }
+  markAnnouncementSeen(payload.announceId);
 }
 /* The server's announce centre: a note the RELAY itself wrote, carried the
    same way mail is — online as a relay frame, offline out of the mailbox.
