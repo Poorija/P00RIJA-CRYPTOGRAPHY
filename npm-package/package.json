@@ -1,7 +1,7 @@
 {
   "name": "p00rija-cryptography",
-  "version": "2.91.23",
-  "buildTag": "chat-v98",
+  "version": "2.91.24",
+  "buildTag": "chat-v99",
   "description": "P00RIJA Cryptography — offline-first encryption suite and end-to-end encrypted messenger. Quick installer: downloads the native app for your platform or serves the PWA locally.",
   "license": "AGPL-3.0-only",
   "author": "Poorija",

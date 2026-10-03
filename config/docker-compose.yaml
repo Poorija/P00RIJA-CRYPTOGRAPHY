@@ -11,11 +11,11 @@ x-logging: &default-logging
 services:
   poorija-cryptography:
     # The image tag carries the app version, handed in by the deploy so it
-    # can never sit still on a stale number: a build of 2.91.23 is tagged
-    # 2.91.23, on a fresh install and on an update alike. The default is the
+    # can never sit still on a stale number: a build of 2.91.24 is tagged
+    # 2.91.24, on a fresh install and on an update alike. The default is the
     # version this file shipped with, which is what a GitHub-apply overlay
     # lands on when nobody handed one in.
-    image: poorija-crypto:${APP_VERSION:-2.91.23}
+    image: poorija-crypto:${APP_VERSION:-2.91.24}
     build:
       context: ../
       dockerfile: config/Dockerfile

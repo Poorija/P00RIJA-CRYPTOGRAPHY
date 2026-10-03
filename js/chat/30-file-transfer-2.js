@@ -893,7 +893,9 @@ if (payload.type === 'system-note') {
 appendHistory('system', {
 id: generateId('sys'),
 type: 'system-note',
-text: payload.message || payload.text || '',
+/* Subject first, body under it — the same shape the live broadcast
+frame shows, so both roads arrive looking like one feature. */
+text: (payload.title ? payload.title + '\n' : '') + (payload.message || payload.text || ''),
 title: payload.title || '',
 attachment: payload.attachment || null,
 direction: 'in',

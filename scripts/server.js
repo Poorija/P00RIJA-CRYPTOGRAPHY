@@ -4747,7 +4747,10 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
       safeSend(target.ws, {
         type: 'system-broadcast',
         kind: attachment?.kind === 'audio' ? 'voice' : (attachment?.kind === 'file' ? 'file' : 'text'),
-        message: message || attachment.name,
+        /* Title and body both, plainly readable: the subject line then the
+         message under it — an announcement the operator typed twice should
+         not arrive as half of itself. */
+        message: (title ? title + '\n' : '') + (message || attachment.name || ''),
         fileName: attachment?.name || '',
         fileData: attachment?.dataUrl || '',
         timestamp: Date.now(),
@@ -5854,7 +5857,12 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
     return;
   }
-  noteTransitTraffic(facts.toRelay, Buffer.byteLength(envelope));
+  /* The envelope is a parsed object on this side of the socket; its wire
+     size is the JSON. Buffer.byteLength(object) THROWS — and this sits in
+     the WS receive path, so one cross-relay message killed the whole relay,
+     which restarted, which dropped every connection and every monitor
+     session with it. That was the crash loop behind all three reports. */
+  noteTransitTraffic(facts.toRelay, Buffer.byteLength(JSON.stringify(envelope)));
   /* The badge in the users table: this sender's traffic just crossed a relay
      link. What crossed stays sealed; that it crossed is the monitor's fact. */
   noteTransitActivity(clientId);
@@ -7462,6 +7470,9 @@ function noteClientTraffic(clientId, direction, bytes, label) {
 }
 function noteTransitTraffic(relayId, bytes) {
   if (!relayId) return;
+  /* Never a throw from bookkeeping: a non-number here means a caller
+     miscounted, and the right answer is zero, not a dead relay. */
+  bytes = Number.isFinite(Number(bytes)) ? Number(bytes) : 0;
   let row = transitTraffic.get(relayId);
   if (!row) {
     if (transitTraffic.size >= 64) transitTraffic.delete(transitTraffic.keys().next().value);
