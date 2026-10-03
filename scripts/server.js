@@ -779,6 +779,10 @@ function monitorSessionValid(token) {
     monitorSessions.delete(token);
     return false;
   }
+  /* Sliding: an operator mid-work never hits a wall mid-tab-switch. A fixed
+     12h expiry logged people out at arbitrary moments because the clock
+     started at login and never moved; now every valid request re-arms it. */
+  session.expiresAt = Date.now() + MONITOR_SESSION_TTL_MS;
   return true;
 }
 
@@ -4854,6 +4858,9 @@ app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
      call, which is what this card actually shows. */
   const imagesRaw = await dockerEngineJson('GET', '/v1.44/images/json');
   const images = (imagesRaw.data || []).map((image) => ({
+    /* Id survives the remap — the cleanup lists hand it to the engine by
+       exact ref, and a remapped row without it deletes nothing. */
+    id: String(image.Id || ''),
     tags: (image.RepoTags || []).filter(Boolean),
     size: image.Size,
     inUse: Number(image.Containers || 0) > 0,
@@ -4872,9 +4879,12 @@ app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
       imagesBytes: images.reduce((sum, image) => sum + (image.size || 0), 0),
     },
     cleanup: {
-      staleSelfImages: staleSelf.map((image) => ({ ref: image.tags[0] || '', tags: image.tags, size: image.size })),
+      staleSelfImages: staleSelf.map((image) => ({ ref: image.tags[0] || '', tags: image.tags, size: image.Size || image.size || 0 })),
       staleSelfBytes: staleSelf.reduce((sum, image) => sum + image.size, 0),
-      danglingImages: dangling.map((image) => ({ ref: String(image.id || ''), size: image.size })),
+      /* Docker names the field Id (capital) — reading .id here handed the
+         dashboard empty refs, which is exactly why ticked layers "deleted"
+         nothing: the server was asked to remove two blank strings. */
+      danglingImages: dangling.map((image) => ({ ref: String(image.Id || image.id || ''), size: image.Size || image.size || 0 })),
       danglingCount: dangling.length,
       danglingBytes: dangling.reduce((sum, image) => sum + image.size, 0),
     },

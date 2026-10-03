@@ -485,7 +485,7 @@ const t = (k) => (T[LANG] && T[LANG][k]) || T.fa[k] || k;
 
 /* ---------- helpers ---------- */
 const $ = (id) => document.getElementById(id);
-async function api(path, body, method) {
+async function api(path, body, method, isRetry) {
   /* Most monitor actions are POSTs; /healthz and the allowlist listing are
      GETs on the relay, so the verb follows the call site. */
   const verb = method || 'POST';
@@ -495,10 +495,30 @@ async function api(path, body, method) {
     credentials: 'same-origin',
     body: verb === 'POST' ? JSON.stringify(body || {}) : undefined,
   });
-  if (response.status === 401) { location.reload(); throw new Error('unauthorized'); }
+  /* One 401 gets a single quiet retry — a proxy hiccup or a mid-deploy
+     restart must not throw the operator out of the sheet. A second 401 in
+     a row means the session is truly gone, and even then the page is not
+     reloaded from under anybody: a bar appears, the operator clicks it. */
+  if (response.status === 401) {
+    if (!isRetry) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return api(path, body, method, true);
+    }
+    showSessionBar();
+    throw new Error('unauthorized');
+  }
   const type = response.headers.get('content-type') || '';
   if (!type.includes('application/json')) return response;
   return response.json();
+}
+function showSessionBar() {
+  if (document.getElementById('sessionBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'sessionBar';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:200;background:#7f1d1d;color:#fecaca;padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-weight:700;cursor:pointer';
+  bar.innerHTML = (LANG === 'fa' ? 'نشست پایان یافت — برای ورود مجدد کلیک کنید' : 'session ended — click to log in again');
+  bar.addEventListener('click', () => location.reload());
+  document.body.appendChild(bar);
 }
 function toast(text, cls) {
   const el = $('toast');
@@ -1299,6 +1319,17 @@ function applyRefresh() {
   if (!ms) return;
   refreshTimer = setInterval(() => {
     const current = document.querySelector('#nav button.on').dataset.tab;
+    /* The machine tab's loaders ask docker for stats — seconds each. At a
+       1s tick they would stack into a pile of pending sockets and hammered
+       endpoints, which is how a healthy session started looking like a dead
+       one. Machine refreshes on a 30s floor regardless of the tick. */
+    if (current === 'machine') {
+      if (Date.now() - (applyRefresh.__lastMachine || 0) > 30000) {
+        applyRefresh.__lastMachine = Date.now();
+        loadBackups(); loadImages(); loadRam(); loadDisk();
+      }
+      return;
+    }
     if (current === 'over' || current === 'users' || current === 'system') loadHealth();
     if (current === 'queues') loadQueues();
     if (current === 'traffic') loadTraffic();
