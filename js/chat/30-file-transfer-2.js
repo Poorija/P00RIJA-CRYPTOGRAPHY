@@ -903,7 +903,8 @@ status: 'delivered',
 createdAt: payload.queuedAt || new Date().toISOString(),
 system: true,
 });
-notify(payload.title ? `${payload.title}: ${(payload.message || '').slice(0, 80)}` : String(payload.message || '').slice(0, 100), 'info');
+/* No in-app notify here: the server pushes only when the app is NOT awake,
+   so the badge and the buzz belong to exactly one of the two, never both. */
 ackRelayMessage(message.relayId);
 return;
 }

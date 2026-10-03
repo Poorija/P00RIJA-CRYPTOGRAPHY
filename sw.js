@@ -8,7 +8,7 @@
  * version as a network service and its users are entitled to your source.
  */
 
-const CACHE_NAME = 'poorija-cryptography-v2.91.24-chat-v99';
+const CACHE_NAME = 'poorija-cryptography-v2.91.25-chat-v100';
 
 // Live endpoints proxied by nginx: never cached, always straight to the network.
 const NETWORK_ONLY_PREFIXES = [

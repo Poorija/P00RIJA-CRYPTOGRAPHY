@@ -4737,29 +4737,20 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
     });
     offlineBoxes.set(fingerprint, items);
     queued += 1;
+    /* ONE delivery, ONE notification. The relay frame is the message — live
+       now, from the mailbox after a reconnect — and the push wakes only the
+       devices that are not already looking at the app. The first cut sent a
+       broadcast frame AND a relay frame AND pushed to everybody, which is
+       how one announcement learned to ring three times. */
     const target = findOpenPresenceByFingerprint(fingerprint);
+    const awake = target ? isAppAwake(target) : false;
     if (target?.ws && target.ws.readyState === WebSocket.OPEN) {
-      /* Two frames on purpose. The broadcast frame is the one every client
-         already renders into the system conversation, online, right now.
-         The relay frame rides the held-mail path so a client that was busy
-         reconnecting still gets it from the mailbox once — the client keys
-         both on the payload type, and de-duplicates by entry id. */
-      safeSend(target.ws, {
-        type: 'system-broadcast',
-        kind: attachment?.kind === 'audio' ? 'voice' : (attachment?.kind === 'file' ? 'file' : 'text'),
-        /* Title and body both, plainly readable: the subject line then the
-         message under it — an announcement the operator typed twice should
-         not arrive as half of itself. */
-        message: (title ? title + '\n' : '') + (message || attachment.name || ''),
-        fileName: attachment?.name || '',
-        fileData: attachment?.dataUrl || '',
-        timestamp: Date.now(),
-      });
       safeSend(target.ws, { type: 'relay', fromClientId: 'server-announce', fromFingerprint: 'monitor', relayId: crypto.randomUUID(), payload });
       live += 1;
     }
-    /* The wake-up, online or not — a phone that is closed still buzzes. */
-    sendAdminPushNotification(fingerprint, (title + ': ' + (message || attachment.name)).slice(0, 178), 'admin-announce').catch(() => {});
+    if (!awake) {
+      sendAdminPushNotification(fingerprint, (title ? title + ': ' : '') + String(message || attachment.name || '').slice(0, 160), 'admin-announce').catch(() => {});
+    }
   }
   await saveOfflineBoxes();
   monitorLog(`Announcement to ${queued} identit${queued === 1 ? 'y' : 'ies'} (${live} live, push attempted)`);
@@ -5862,10 +5853,14 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
      the WS receive path, so one cross-relay message killed the whole relay,
      which restarted, which dropped every connection and every monitor
      session with it. That was the crash loop behind all three reports. */
-  noteTransitTraffic(facts.toRelay, Buffer.byteLength(JSON.stringify(envelope)));
+  const wireBytes = Buffer.byteLength(JSON.stringify(envelope));
+  noteTransitTraffic(facts.toRelay, wireBytes);
   /* The badge in the users table: this sender's traffic just crossed a relay
-     link. What crossed stays sealed; that it crossed is the monitor's fact. */
-  noteTransitActivity(clientId);
+     link. What crossed stays sealed — but its SIZE is not private, and the
+     presence probes a same-relay user's app fires at cross-relay contacts
+     are a few hundred bytes. Marking those put the badge on people who never
+     sent anything anywhere; a kilobyte is a message, not a probe. */
+  if (wireBytes >= 1024) noteTransitActivity(clientId);
   /* The carrier's own correlation id, not the client's tag. The tag belongs
      to the client and there is no reason for another relay to see it. */
   const ref = crypto.randomUUID();
