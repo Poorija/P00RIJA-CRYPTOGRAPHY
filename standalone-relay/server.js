@@ -4285,6 +4285,9 @@ const EPHEMERAL_PAYLOADS = new Set([
      an offline group member's mailbox filled with. gcall-invite stays out:
      it is the one that rings somebody who was away. */
   'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
+  /* A device-sync bundle is a snapshot one machine offers its siblings
+     while they are here; it is never stored and never rings anybody. */
+  'device-sync',
 ]);
 /* Pushable: something a person would want to be told about. The distribution
    queued a push for EVERY envelope that landed — and a file arrives as one

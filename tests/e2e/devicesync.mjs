@@ -214,5 +214,5 @@ ok(!claimantSawMail,
 try { phone.socket.close(); desktop.socket.close(); strangerSocket.socket.close(); claimant.close(); } catch (_error) { /* already gone */ }
 await wait(300);
 
-console.log(`\n${failures ? 'FAILED' : 'passed'} — ${checks - failures}/${checks} checks`);
+console.log(`\n${checks - failures}/${checks} passed`);
 process.exit(failures ? 1 : 0);

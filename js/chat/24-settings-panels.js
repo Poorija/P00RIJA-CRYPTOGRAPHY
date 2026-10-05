@@ -260,14 +260,25 @@ function renderDevicesCard() {
   card.innerHTML =
     '<div style="font-weight:700;margin-bottom:0.5rem">' + t('دستگاه‌های متصل به این هویت', 'Devices linked to this identity') + '</div>'
     + '<p style="font-size:0.74rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
-    + t('هر دستگاهی که این هویت را دارد پیام‌ها را همزمان دریافت می‌کند. برای افزودن دستگاه جدید، پروفایل همراه را از این دستگاه خروجی بگیرید و روی دستگاه جدید وارد کنید.',
-        'Every device holding this identity receives messages simultaneously. To add a device, export the portable profile from this device and import it on the new one.')
+    + t('هر دستگاهی که این هویت را دارد پیام‌ها را همزمان دریافت می‌کند و تاریخچه و تماس‌ها با آن‌ها سینک می‌شود — بسته‌شده، فقط برای دستگاه‌های خودتان. برای افزودن دستگاه جدید، پروفایل همراه را از این دستگاه خروجی بگیرید و روی دستگاه جدید وارد کنید.',
+        'Every device holding this identity receives messages simultaneously, and the history and call log sync with them — sealed, and readable only by your own devices. To add a device, export the portable profile from this device and import it on the new one.')
     + '</p>'
     + rows
-    + '<div style="display:flex;gap:0.5rem;margin-top:0.8rem">'
+    + '<div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">'
+    + '<button type="button" class="btn" onclick="sendDeviceSyncFromUi()" style="font-size:0.78rem"><i class="fas fa-rotate"></i> '
+    + t('هم‌اکنون سینک کن', 'Sync now')
+    + '</button>'
     + '<button type="button" class="btn" onclick="exportPortableProfileFile()" style="font-size:0.78rem"><i class="fas fa-qrcode"></i> '
     + t('افزودن دستگاه (خروجی پروفایل)', 'Add device (export profile)')
     + '</button>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:0.55rem;margin-top:0.9rem;padding:0.55rem 0.7rem;border:1px solid rgba(148, 163, 184, 0.2);border-radius:0.7rem">'
+    + '<input type="checkbox" id="chatDeviceSyncFilesToggle" style="width:1rem;height:1rem" '
+    + (deviceSyncFilesEnabled() ? 'checked' : '')
+    + ' onchange="setDeviceSyncFilesEnabled(this.checked)">'
+    + '<label for="chatDeviceSyncFilesToggle" style="font-size:0.76rem;color:#e2e8f0;cursor:pointer">'
+    + t('هم‌رسانی فایل‌ها بین دستگاه‌ها (تا ۲ مگابایت برای هر فایل)', 'Share files between devices too (up to 2 MB each)')
+    + '</label>'
     + '</div>';
 }
 

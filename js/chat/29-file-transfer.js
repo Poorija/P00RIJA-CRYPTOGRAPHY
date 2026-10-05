@@ -1214,6 +1214,10 @@ const EPHEMERAL_RELAY_TYPES = new Set([
      gcall-invite stays out for the same reason call-invite does: it is the
      one that rings somebody who was away. */
   'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
+  /* Device sync is a snapshot, not a letter: whatever device was away
+     collects the history from the next sync, so a mailbox copy would only
+     be dead weight a sweep would eventually have to carry away. */
+  'device-sync',
 ]);
 function sendRelayEnvelope(peerRecord, payload) {
 if (hasActiveServerRestriction()) {

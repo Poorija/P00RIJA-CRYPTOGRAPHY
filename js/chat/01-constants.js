@@ -21,6 +21,9 @@ const CHAT_IDENTITY_STORAGE_KEY = 'poorija_chat_identity';
 /* Unique per install, distinct from the identity: two linked devices share
    the fingerprint but never the device id. */
 const CHAT_DEVICE_ID_STORAGE_KEY = 'poorija_chat_device_id';
+/* Whether file attachments travel with a device-sync bundle. Off by default:
+   text and call history are small and always wanted; media is neither. */
+const CHAT_DEVICE_SYNC_FILES_STORAGE_KEY = 'poorija_chat_device_sync_files';
 const CHAT_HISTORY_STORAGE_KEY = 'poorija_chat_history';
 const CHAT_SESSION_KEYS_STORAGE_KEY = 'poorija_chat_session_keys';
 const CHAT_SPACES_STORAGE_KEY = 'poorija_chat_spaces';

@@ -690,6 +690,9 @@ const EPHEMERAL_PAYLOADS = new Set([
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
   'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
   'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
+  /* A device-sync bundle is a snapshot one machine offers its siblings
+     while they are here; it is never stored and never rings anybody. */
+  'device-sync',
 ]);
 const PUSHABLE_PAYLOADS = new Set([
   'text', 'rich', 'file-start', 'reaction', 'group', 'space-message', 'space-note',

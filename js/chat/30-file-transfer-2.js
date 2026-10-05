@@ -448,9 +448,11 @@ peer.status = 'offline';
 	saveContacts();
 	renderPeers();
 	renderActivePeer();
-	/* The live device list just changed: the strip count follows it, and an
-	   open devices pane redraws so the list stays current while watched. */
+	/* The live device list just changed: the strip count follows it, an
+	   open devices pane redraws so the list stays current while watched,
+	   and a sibling appearing is the moment to offer them the history. */
 	renderLinkedDeviceCount();
+	maybeAnnounceDeviceSync(chatState.linkedDevices.length);
 	if (chatState.settingsPane === 'devices' && typeof renderDevicesCard === 'function') renderDevicesCard();
 /* Somebody being rung while they were away may have just walked in. */
 if (chatState.offlineRing) {
@@ -885,6 +887,24 @@ await handleSpaceSyncMessage(message, payload);
 console.error('Failed to process a space record:', error);
 }
 }));
+return;
+}
+if (payload.type === 'device-sync') {
+/* Serialised behind the sibling's queue like mail is, so a large
+   history cannot interleave with an arriving message from the same
+   machine. */
+const syncFrom = payload.fromDeviceId || message.fromFingerprint || 'device-sync';
+if (!chatState.wsMessageQueues.has(syncFrom)) {
+chatState.wsMessageQueues.set(syncFrom, Promise.resolve());
+}
+chatState.wsMessageQueues.set(syncFrom, chatState.wsMessageQueues.get(syncFrom).then(async () => {
+try {
+await handleDeviceSyncEnvelope(message);
+} catch (error) {
+console.error('Failed to process a device-sync envelope:', error);
+}
+}));
+ackRelayMessage(message.relayId);
 return;
 }
 if (payload.type === 'offline-chat') {
@@ -2078,4 +2098,237 @@ setTransferBanner(t('ارسال شد', 'Sent'), 100, { owner });
 }
 clearTransferBanner(700, owner);
 renderMessages();
+}
+
+/* ------------------------------------------------------------------
+ * Device sync — one history, several machines.
+ *
+ * Phase one put every socket of an identity on the relay's delivery
+ * list; this is the other half: the history that already exists on one
+ * machine reaching the others. Batches of history entries are sealed
+ * exactly like offline mail — a fresh AES key per envelope, wrapped to
+ * the identity key every device of this account holds — and addressed
+ * to this account's own fingerprint, so the relay carries them the way
+ * it carries any envelope and can read none of it. The bundle is never
+ * persisted: a device that was away collects the history from the next
+ * sync, not out of a mailbox.
+ *
+ * Only a sibling can produce one. The envelope is signed with the
+ * identity key and the receiver checks that signature against its OWN
+ * public key before opening anything: a stranger can encrypt to a
+ * public key all day, but they cannot sign with its private half.
+ * ------------------------------------------------------------------ */
+
+const DEVICE_SYNC_BATCH_ENTRIES = 200;
+/* Small enough that an envelope stays far under the relay's frame cap
+   even with a full batch behind it, large enough that stickers, voice
+   notes and most photos travel whole. Larger files stay on the device
+   that received them — the row still syncs, the bytes do not. */
+const DEVICE_SYNC_FILE_INLINE_BYTES = 2 * 1024 * 1024;
+/* A sibling coming online triggers a sync, but a flapping connection
+   must not turn that into a broadcast every few seconds. */
+const DEVICE_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;
+let deviceSyncLastSentAt = 0;
+
+function deviceSyncFilesEnabled() {
+try { return localStorage.getItem(CHAT_DEVICE_SYNC_FILES_STORAGE_KEY) === '1'; } catch (_error) { return false; }
+}
+function setDeviceSyncFilesEnabled(enabled) {
+try { localStorage.setItem(CHAT_DEVICE_SYNC_FILES_STORAGE_KEY, enabled ? '1' : '0'); } catch (_error) { /* private mode */ }
+}
+
+/* What one history entry looks like on the wire. An object URL is a
+   handle into THIS page's memory and means nothing on another machine,
+   so it never travels; whether the bytes do is the opt-in, and only
+   for media small enough to ride inline. */
+async function deviceSyncEntryForWire(entry, includeFiles) {
+const copy = { ...entry };
+delete copy.downloadUrl;
+if (includeFiles && isMediaEntry(copy)) {
+try {
+const stored = await readMessageMedia(copy.id);
+if (stored && stored.blob.size <= DEVICE_SYNC_FILE_INLINE_BYTES) {
+copy.mediaData = app().arrayBufferToBase64(await stored.blob.arrayBuffer());
+}
+} catch (_error) { /* the vault declined; the metadata still travels */ }
+}
+return copy;
+}
+
+async function buildDeviceSyncBundles() {
+const includeFiles = deviceSyncFilesEnabled();
+const bundles = [];
+for (const conversationKey in chatState.history) {
+const entries = chatState.history[conversationKey] || [];
+for (let start = 0; start < entries.length; start += DEVICE_SYNC_BATCH_ENTRIES) {
+const slice = entries.slice(start, start + DEVICE_SYNC_BATCH_ENTRIES);
+/* Every entry is awaited separately: each may need a vault read, and
+   they are the cheap kind of await — local IndexedDB, no network. */
+const wireEntries = [];
+for (const entry of slice) wireEntries.push(await deviceSyncEntryForWire(entry, includeFiles));
+bundles.push({ conversation: conversationKey, entries: wireEntries });
+}
+}
+/* The calls list is bounded by CALL_LOG_LIMIT on every device, so it
+   fits one envelope with room to spare. */
+const calls = (chatState.calls || []).slice(0, CALL_LOG_LIMIT).map((call) => ({ ...call }));
+if (calls.length) bundles.push({ calls });
+return bundles;
+}
+
+async function sealDeviceSyncBundle(bundle) {
+const rawKey = app().generateSecureRandomBytes(32);
+const key = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, true, ['encrypt']);
+const iv = app().generateSecureRandomBytes(12);
+const cipher = await crypto.subtle.encrypt(
+{ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(bundle)));
+/* Wrapped to this account's own key: every linked device holds the
+   private half, nobody else does. */
+const publicKey = await importIdentityPublicKey(chatState.identity.publicKeyData);
+const seal = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, rawKey);
+const envelope = {
+type: 'device-sync',
+fromFingerprint: chatState.identity.fingerprint,
+fromDeviceId: getDeviceId(),
+seal: app().arrayBufferToBase64(seal),
+body: { iv: Array.from(iv), cipher: app().arrayBufferToBase64(cipher) },
+createdAt: new Date().toISOString(),
+};
+await signOfflineEnvelope(envelope);
+return envelope;
+}
+
+async function sendDeviceSync() {
+if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return false;
+if (!chatState.identity?.fingerprint) return false;
+	const bundles = await buildDeviceSyncBundles();
+	for (const bundle of bundles) {
+	const envelope = await sealDeviceSyncBundle(bundle);
+	sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
+	/* A breath between envelopes, so a large history does not arrive as
+	   one back-to-back wall of frames. */
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+	return true;
+}
+async function sendDeviceSyncFromUi() {
+const sent = await sendDeviceSync();
+notify(sent
+? t('تاریخچه برای دستگاه‌های متصل ارسال شد', 'History was sent to the linked devices')
+: t('اتصال به سرور برقرار نیست؛ بعد از اتصال دوباره تلاش کنید', 'Not connected to the relay; try again after reconnecting'),
+sent ? 'success' : 'warning');
+}
+
+/* One synced entry into one conversation. The precedence rules are
+   appendHistory's, restated because sync is not delivery: no sound, no
+   notification, and the unread mark belongs to the device that holds
+   it — history arriving is not news arriving. */
+function mergeSyncedEntry(conversationKey, entry) {
+if (!conversationKey || !entry?.id) return;
+const list = chatState.history[conversationKey] || (chatState.history[conversationKey] = []);
+const existing = list.find((item) => item.id === entry.id);
+if (existing) {
+const next = { ...entry };
+if (existing.edited && !next.edited) next.text = existing.text;
+next.status = chatStatusRank(existing.status) >= chatStatusRank(next.status) ? existing.status : next.status;
+next.unread = existing.unread;
+next.reactions = existing.reactions || next.reactions;
+next.downloadUrl = existing.downloadUrl || next.downloadUrl;
+Object.assign(existing, next);
+} else {
+entry.unread = false;
+list.push(entry);
+list.splice(0, Math.max(0, list.length - 2000));
+}
+}
+
+async function mergeDeviceSyncBundle(bundle) {
+let changed = false;
+if (bundle?.conversation && Array.isArray(bundle.entries)) {
+for (const entry of bundle.entries) {
+/* Inline media arrives as bytes; land it in this device's vault the
+   way received media lands, so it survives a reload like any other
+   attachment. */
+if (entry.mediaData) {
+try {
+const blob = new Blob([app().base64ToArrayBuffer(entry.mediaData)], { type: entry.mime || 'application/octet-stream' });
+persistMessageMedia(bundle.conversation, entry, blob);
+entry.downloadUrl = URL.createObjectURL(blob);
+chatState.mediaUrls.set(entry.id, entry.downloadUrl);
+} catch (_error) { /* the bytes failed to land; the row still does */ }
+delete entry.mediaData;
+}
+mergeSyncedEntry(bundle.conversation, entry);
+changed = true;
+}
+if (changed) {
+storeHistory();
+renderPeers();
+renderMessages();
+}
+}
+if (Array.isArray(bundle?.calls)) {
+const known = new Set(chatState.calls.map((call) => call.id));
+let callsChanged = false;
+for (const call of bundle.calls) {
+if (!call?.id || known.has(call.id)) continue;
+chatState.calls.push(call);
+callsChanged = true;
+}
+if (callsChanged) {
+chatState.calls.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+chatState.calls = chatState.calls.slice(0, CALL_LOG_LIMIT);
+saveCalls();
+changed = true;
+}
+}
+return changed;
+}
+
+async function handleDeviceSyncEnvelope(message) {
+const payload = message.payload || {};
+const myFingerprint = chatState.identity?.fingerprint || '';
+/* Not addressed from this account's key: nothing to do here. */
+if (!payload.body || payload.fromFingerprint !== myFingerprint) return;
+/* The relay fans a fingerprint's mail out to every socket holding it,
+   including the one that sent it — this device's own copy is a receipt
+   it has no use for. */
+if (payload.fromDeviceId && payload.fromDeviceId === getDeviceId()) return;
+/* The whole gate: signed by this account's private key, which only a
+   linked device holds. Anything else is a stranger sealing garbage and
+   claiming a deviceId, and it stops here — unopened and unmerged. */
+if (!payload.sig) return;
+const authentic = await verifyIdentitySignature(
+chatState.identity.publicKeyData,
+app().base64ToArrayBuffer(payload.sig),
+offlineEnvelopeSignBytes(payload),
+).catch(() => false);
+if (!authentic) {
+console.warn('[Chat] a device-sync envelope arrived that this identity key did not sign; ignored');
+return;
+}
+	try {
+	const key = await openOfflineSeal(payload.seal);
+const plain = await crypto.subtle.decrypt(
+{ name: 'AES-GCM', iv: new Uint8Array(payload.body.iv || []) },
+key,
+app().base64ToArrayBuffer(payload.body.cipher),
+);
+await mergeDeviceSyncBundle(JSON.parse(new TextDecoder().decode(plain)));
+} catch (_error) {
+console.warn('[Chat] a device-sync envelope could not be opened; ignored');
+}
+}
+
+/* A sibling appearing is the moment one machine's history is wanted on
+   the others — the new device just linked, or one coming back online
+   after being away while messages arrived elsewhere. Rate-limited, and
+   always late by three seconds so the sibling's own connection settles
+   first. */
+function maybeAnnounceDeviceSync(linkedDeviceCount) {
+if (!linkedDeviceCount || linkedDeviceCount < 2) return;
+const now = Date.now();
+if (now - deviceSyncLastSentAt < DEVICE_SYNC_MIN_INTERVAL_MS) return;
+deviceSyncLastSentAt = now;
+setTimeout(() => { sendDeviceSync().catch((error) => console.warn('[Chat] device sync failed:', error)); }, 3000);
 }
