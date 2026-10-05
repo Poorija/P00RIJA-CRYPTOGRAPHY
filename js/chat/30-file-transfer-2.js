@@ -1001,6 +1001,7 @@ try {
 return await buildChatTransport();
 } finally {
 chatState.transportConnectInFlight = false;
+chatState._transportInFlightSince = 0;
 if (chatState.transportConnectQueued) {
 chatState.transportConnectQueued = false;
 setTimeout(() => connectChatTransport().catch(console.error), 250);

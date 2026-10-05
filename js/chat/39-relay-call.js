@@ -347,7 +347,7 @@ async function placeRelayCall(peerRecord, stream, { mode = 'voice', metadata = {
     const sdp = typeof preferCallCodecs === 'function' ? preferCallCodecs(offer.sdp) : offer.sdp;
     await call.peerConnection.setLocalDescription({ type: 'offer', sdp });
     const sent = sendRelayEnvelope(peerRecord, {
-      type: 'call-relay-offer',
+      type: 'call-relay-offer', tag: generateId('relay-call'),
       callId,
       sdp,
       mode,

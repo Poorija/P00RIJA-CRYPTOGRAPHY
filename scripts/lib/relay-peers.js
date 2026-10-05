@@ -47,7 +47,7 @@ const MISSED_PONGS_LIMIT = 2;
    liability: every transit envelope this relay accepted would sit in memory
    awaiting a drain that is never coming, and the 60-second wait would expire
    client-side before the socket ever said no. */
-const LINK_BUFFER_LIMIT_BYTES = 96 * 1024 * 1024;
+const LINK_BUFFER_LIMIT_BYTES = 16 * 1024 * 1024;
 
 /* The peers an operator named, as `<relay id>@<origin>` — or as a bare id,
    which means "accept a link from this relay but never dial it". That is the

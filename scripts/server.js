@@ -4641,6 +4641,10 @@ app.post('/Monitor_Server/expiry-log', authMiddleware, (req, res) => {
  * them from the system note it already knows how to draw. */
 
 const ANNOUNCE_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+/* An announce with an attachment to the full registry is a disk bomb: 20k
+   identities × 2MB each. Text-only announces are cheap; attachments are
+   capped to a targeted list. */
+const ANNOUNCE_ATTACHMENT_MAX_RECIPIENTS = 100;
 /* ---- the identity registry ---------------------------------------------------
  *
  * The first announce answered "reached 0 identities" on a quiet relay, and
@@ -4721,7 +4725,10 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
       if (fp) fingerprints.add(fp);
     }
   }
-  for (const fp of fingerprints) noteKnownIdentity(fp);
+  if (attachment && !targets.length && fingerprints.size > ANNOUNCE_ATTACHMENT_MAX_RECIPIENTS) {
+    return res.status(400).json({ ok: false, reason: `attachment-broadcast-capped-at-${ANNOUNCE_ATTACHMENT_MAX_RECIPIENTS}`, hint: 'send attachments to named targets only' });
+}
+for (const fp of fingerprints) noteKnownIdentity(fp);
   let queued = 0;
   let live = 0;
   /* One id per announcement: the frame goes out live AND sits in the
@@ -4737,7 +4744,7 @@ app.post('/Monitor_Server/announce', authMiddleware, async (req, res) => {
       fromClientId: 'server-announce',
       fromFingerprint: 'monitor',
       payload,
-      queuedAt: Date.now(),
+      queuedAt: new Date().toISOString(),
     });
     offlineBoxes.set(fingerprint, items);
     queued += 1;
@@ -5792,7 +5799,7 @@ function handlePresenceUpgrade(request, socket, head) {
  * socket asked. Not the envelope, not the recipient's relay against the
  * sender, nothing on disk. A relay that stores nothing has nothing to hand
  * over, which is a security property and a legal one at the same time. */
-const TRANSIT_WAIT_MS = 60000;
+const TRANSIT_WAIT_MS = 30000;
 /* How many envelopes one client may have in the air at once. Each carried
    envelope parks a closure holding the asking socket for the full minute,
    and nothing capped them: a single client could park the closure for every
@@ -5894,7 +5901,7 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
    answer to one this relay carried. */
 /* At most this many presence questions from one peer relay in one minute.
    Generous for a person opening conversations, useless for a sweep. */
-const PRESENCE_QUERY_PER_MINUTE = 60;
+const PRESENCE_QUERY_PER_MINUTE = 240;
 const presenceQueryCounts = new WeakMap();
 function presenceQueryAllowed(link) {
   const now = Date.now();
@@ -7853,7 +7860,7 @@ wsServer.on('connection', (ws, req) => {
       record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
       noteKnownIdentity(record.fingerprint);
-      record.avatarData = String(message.avatarData || '').slice(0, 2000000);
+      record.avatarData = String(message.avatarData || '').slice(0, 100000);
       record.mood = String(message.mood || '').slice(0, 40);
       /* The prekey is a public value and the relay only forwards it. It is
          what lets somebody write to this device while it is offline without
@@ -8054,7 +8061,12 @@ wsServer.on('connection', (ws, req) => {
       let removed = 0;
       if (conversationId) {
         const touched = [];
-        for (const [box, queue] of offlineBoxes.entries()) {
+        /* Capped: a hostile mailbox-count flood turns this synchronous walk into
+   a multi-second event-loop stall. The first ten thousand boxes is plenty
+   for any honest relay; the rest can wait for the retention sweep. */
+let purgeWalked = 0;
+for (const [box, queue] of offlineBoxes.entries()) {
+    if (++purgeWalked > 10000) break;
           const kept = (queue || []).filter((item) => item?.payload?.spaceId !== conversationId
             && item?.payload?.space?.conversationId !== conversationId);
           if (kept.length !== queue.length) {
