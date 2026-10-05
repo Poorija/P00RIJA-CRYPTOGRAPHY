@@ -949,6 +949,16 @@ chatState.incomingCallTimer = null;
 }
 if (!call && invite) {
 chatState.pendingIncomingAccept = true;
+    /* A cross-relay invite accepted from the mailbox has no live offer behind
+       it (the offer was ephemeral and was dropped while the recipient was
+       away). Without this timer the app sits on connecting forever. */
+    if (chatState.incomingStaleTimer) clearTimeout(chatState.incomingStaleTimer);
+    chatState.incomingStaleTimer = setTimeout(() => {
+      if (chatState.pendingIncomingAccept) {
+        chatState.pendingIncomingAccept = false;
+        notify(t('اتصال برقرار نشد — دعواست قدیمی بوده است.', 'Connection failed — the invite was stale.'), 'warning');
+      }
+    }, 15000);
 notify(t('در حال برقراری اتصال امن...', 'Establishing secure connection...'), 'info');
 return;
 }

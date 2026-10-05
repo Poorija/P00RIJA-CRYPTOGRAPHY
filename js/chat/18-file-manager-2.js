@@ -102,7 +102,11 @@ return offered.origin === current.origin && offered.id === current.id && offered
 function routableHomeRelay(peer) {
 const home = normalizeHomeRelay(peer?.homeRelay);
 if (!home || !home.id || !home.key) return null;
-return (HOME_RELAY_TRUST[home.source] || 0) >= HOME_RELAY_TRUST.session ? home : null;
+const trust = HOME_RELAY_TRUST[home.source] || 0;
+/* Presence-rank routes too: a contact whose home relay is only known from
+   a presence answer still lives there, and not routing strands the message
+   on this relay. The session-rank path is still preferred when both exist. */
+return trust >= HOME_RELAY_TRUST.presence ? home : null;
 }
 function normalizePeerRecord(peer = {}) {
 return {

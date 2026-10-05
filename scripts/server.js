@@ -4677,7 +4677,14 @@ function noteKnownIdentity(fingerprint) {
   knownIdentities.add(fp);
   /* Cap the registry so it cannot grow without bound on a hostile relay. */
   if (knownIdentities.size > 20000) knownIdentities.delete(knownIdentities.keys().next().value);
-  saveKnownIdentities();
+  /* Debounced, not per-hello: a sync write of the full registry inside
+     the WS receive path froze the event loop per new fingerprint. */
+  if (noteKnownIdentity._timer) clearTimeout(noteKnownIdentity._timer);
+  noteKnownIdentity._timer = setTimeout(() => {
+    noteKnownIdentity._timer = null;
+    saveKnownIdentities();
+  }, 2000);
+  if (noteKnownIdentity._timer && typeof noteKnownIdentity._timer.unref === 'function') noteKnownIdentity._timer.unref();
 }
 loadKnownIdentities();
 
@@ -4746,6 +4753,12 @@ for (const fp of fingerprints) noteKnownIdentity(fp);
       payload,
       queuedAt: new Date().toISOString(),
     });
+/* The mailbox flood gate: without a cap on mailbox count, one hostile
+   socket fabricates a fresh fingerprint per frame and fills the disk. */
+const MAILBOX_MAX_BOXES = 10000;
+function mailboxCountOk() { return offlineBoxes.size < MAILBOX_MAX_BOXES; }
+
+    if (!mailboxCountOk()) { reply({ type: 'error', reason: 'mailbox-full' }); return; }
     offlineBoxes.set(fingerprint, items);
     queued += 1;
     /* ONE delivery, ONE notification. The relay frame is the message — live
@@ -5806,7 +5819,7 @@ const TRANSIT_WAIT_MS = 30000;
    frame it could send, and each park keeps a socket and a reply path alive
    whether the far relay ever answers or not. Well above what a person's
    in-flight messages ever need; far below what a loop needs to hurt. */
-const TRANSIT_WAIT_PER_CLIENT = Number(process.env.CHAT_TRANSIT_WAIT_PER_CLIENT || 128);
+const TRANSIT_WAIT_PER_CLIENT = Number(process.env.CHAT_TRANSIT_WAIT_PER_CLIENT || 256);
 const transitWaiting = new Map();
 const transitWaitingByClient = new Map();
 function rememberTransitWait(ref, entry) {
@@ -6612,6 +6625,7 @@ function writeJsonAtomic(targetPath, value) {
     fs.closeSync(handle);
     handle = null;
     fs.renameSync(temp, targetPath);
+  try { const dirFd = fs.openSync(path.dirname(targetPath), 'r'); fs.fsyncSync(dirFd); fs.closeSync(dirFd); } catch (_dirSyncError) {}
   } catch (error) {
     if (handle !== null) { try { fs.closeSync(handle); } catch (_e) { /* noop */ } }
     try { fs.unlinkSync(temp); } catch (_e) { /* nothing to clean up */ }
@@ -7435,10 +7449,19 @@ function broadcastPeers() {
   if (broadcastTimer) return;
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null;
-    const payload = JSON.stringify({
+    /* Stripped: the periodic presence table says who is here, not what they
+     look like. Avatars travel on profile-card; re-serializing 2MB photos
+     per peer per tick is a GC death spiral at scale. */
+  const lightPeers = Array.from(presence.values()).map((r) => ({
+    ...r, avatarData: undefined, publicKeyData: undefined, prekeyData: undefined,
+  }));
+  const payload = JSON.stringify({
       type: 'peers',
-      peers: snapshotPeers(),
-    });
+      peers: lightPeersPeers(),
+    })
+  /* Stripped: the periodic table says who is here, not what they look like.
+     Avatars travel on profile-card; re-serializing 2MB photos per peer per
+     tick is a GC death spiral. */;
 
     /* The broadcast used the raw send, which is the one path in the file with
        no buffered-amount guard — so a client that opened a socket and read
@@ -7985,7 +8008,7 @@ wsServer.on('connection', (ws, req) => {
         /* A Set, because the app acknowledges one envelope per message and a
            file is thousands of them: an includes() per queued item per ACK is
            the same quadratic the retention sweep used to have. */
-        const acked = new Set(ids);
+        const acked = new Set(ids.slice(0, 200));
         const next = queued.filter(msg => !acked.has(msg.relayId));
         if (next.length !== queued.length) {
           console.log(`[Presence] ACK received for ${queued.length - next.length} messages from ${record.fingerprint}`);

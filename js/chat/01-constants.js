@@ -110,7 +110,7 @@ const SESSION_READY_TIMEOUT_MS = 8000;
    sides, and on group calls: a ring that never stops is worse than a missed
    call, and the caller had no timer at all - their side rang until they
    pressed the button themselves. */
-const CALL_RING_TIMEOUT_MS = 40000;
+const CALL_RING_TIMEOUT_MS = 120000;
 /* After somebody answers, how long the media has to actually arrive. Longer
    than a ring, because a connection that has to go the long way round through
    TURN is slow rather than broken. */
