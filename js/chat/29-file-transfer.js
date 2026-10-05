@@ -1296,23 +1296,34 @@ while (chatState.pendingTransit.size > 200) {
 chatState.pendingTransit.delete(chatState.pendingTransit.keys().next().value);
 }
 }
+/* Three attempts before giving up on the transit link: the link hiccups
+   (a redial window is a second or two), and a single failure used to
+   send the message down the fallback path immediately — which for a
+   far-relay contact meant a scary "link down" warning on a message that
+   would have gone through on the second try. The retries are short and
+   spaced: 0ms, 800ms, 1600ms. */
+const TRANSIT_SEND_ATTEMPTS = 3;
 async function sendViaTransit(frame, home, peerRecord) {
-try {
-const envelope = await sealTransitEnvelope(home.id, home.key, frame);
-if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) throw new Error('the relay went away');
-/* A question is not kept for retry. Only frames that carry something worth
-   delivering are remembered, because the fallback for a remembered frame is to
-   send it down the ordinary path and write a note in the conversation saying
-   the relay can now see who you are talking to. That note is true and worth
-   saying about a message; about a presence question that simply went
-   unanswered it is alarming and wrong. An unanswered question is answered by
-   the next one. */
-const chunkTag = frame.tag || frame.payload?.tag || (frame.type === 'file-chunk' ? `${frame.transferId}:${frame.index}` : '');
-if (!String(frame.type || '').endsWith('-query')) rememberTransit(chunkTag, frame, peerRecord);
-chatState.ws.send(JSON.stringify({ ...envelope, ...(frame.tag ? { tag: frame.tag } : {}) }));
-} catch (error) {
-console.warn('[Transit] could not seal for the far relay:', error?.message || error);
-fallBackToDirect(frame, peerRecord, error?.message || '');
+for (let attempt = 0; attempt < TRANSIT_SEND_ATTEMPTS; attempt += 1) {
+  if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+  try {
+    const envelope = await sealTransitEnvelope(home.id, home.key, frame);
+    if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) {
+      if (attempt < TRANSIT_SEND_ATTEMPTS - 1) continue;
+      throw new Error('the relay went away');
+    }
+    const chunkTag = frame.tag || frame.payload?.tag || (frame.type === 'file-chunk' ? `${frame.transferId}:${frame.index}` : '');
+    if (!String(frame.type || '').endsWith('-query')) rememberTransit(chunkTag, frame, peerRecord);
+    chatState.ws.send(JSON.stringify({ ...envelope, ...(frame.tag ? { tag: frame.tag } : {}) }));
+    return; /* sent */
+  } catch (error) {
+    if (attempt === TRANSIT_SEND_ATTEMPTS - 1) {
+      console.warn(`[Transit] could not reach the far relay after ${TRANSIT_SEND_ATTEMPTS} attempts:`, error?.message || error);
+      fallBackToDirect(frame, peerRecord, error?.message || '');
+      return;
+    }
+    /* transient — the next attempt is already scheduled */
+  }
 }
 }
 /* Going direct when transit was meant to be used is a real change in who can
@@ -1346,7 +1357,10 @@ storeHistory();
 if (chatState.activeConversationId === conversationId) renderMessages();
 }
 if (typeof notify === 'function') {
-notify(t('لینک بین‌رله‌ها قطع است؛ پیام نرسید و بعداً دوباره بفرستید.', 'The cross-relay link is down; the message was not delivered — please retry.'), 'warning');
+/* Three transit retries already failed — the link is genuinely down for
+   this moment. Softer than the first cut: say what happened, offer the
+   retry, don't shout. */
+notify(t('پیام به مخاطب بین‌رله‌ای نرسید (لینک موقتاً قطع است) — دوباره بفرستید.', 'Message not delivered (cross-relay link temporarily down) — please retry.'), 'warning');
 }
 }
 return;

@@ -1,6 +1,7 @@
 /*
  * P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
  * Copyright (C) 2026 Poorija <p00rija@tutamail.com>
+let ensureChatTransportRetried = 0;
  * https://github.com/Poorija/P00RIJA-Cryptography
  *
  * Licensed under the GNU Affero General Public License, version 3 only.
@@ -2451,6 +2452,19 @@ if (applyRelayDiscoveryResult(result)) return true;
 const discoveryResult = await discoverLocalRelayServer({ fullScan: false, silent: true });
 if (discoveryResult) return true;
 
+/* Auto-retry: the configured relay is valid (the user's settings say so) —
+   a momentary network hiccup or a relay restart must not surface as
+   "enter a valid address" when nothing is wrong with the address. The
+   entire probe-and-discover cycle runs three times before the message. */
+if (!ensureChatTransportRetried) {
+  ensureChatTransportRetried = (ensureChatTransportRetried || 0) + 1;
+  if (ensureChatTransportRetried <= 3) {
+    console.log(`[Transport] relay probe failed (attempt ${ensureChatTransportRetried}/3) — retrying in 2s`);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return await arguments.callee(...arguments);
+  }
+}
+ensureChatTransportRetried = 0;
 chatState.shouldReconnect = false;
 setConnectionState(false, t('سرور رله تنظیم نشده', 'Relay server is not configured'));
 notify(
