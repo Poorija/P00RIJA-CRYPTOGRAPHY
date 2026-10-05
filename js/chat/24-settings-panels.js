@@ -277,7 +277,7 @@ function renderDevicesCard() {
     + (deviceSyncFilesEnabled() ? 'checked' : '')
     + ' onchange="setDeviceSyncFilesEnabled(this.checked)">'
     + '<label for="chatDeviceSyncFilesToggle" style="font-size:0.76rem;color:#e2e8f0;cursor:pointer">'
-    + t('هم‌رسانی فایل‌ها بین دستگاه‌ها (تا ۲ مگابایت برای هر فایل)', 'Share files between devices too (up to 2 MB each)')
+    + t('جابه‌جایی فایل بین دستگاه‌ها (فایل‌های ریز خودکار؛ بقیه با دکمهٔ «دریافت از دستگاه دیگر»)', 'Move files between devices (tiny ones ride along; the rest via the "Fetch from my other device" button)')
     + '</label>'
     + '</div>';
 }

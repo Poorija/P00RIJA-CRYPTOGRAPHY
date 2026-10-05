@@ -485,7 +485,18 @@ ${replyPreview}
 <div class="font-bold text-sm truncate mb-0.5">${app().escapeHTML(entry.name || 'file.bin')}</div>
 <div class="text-[11px] opacity-60">${app().formatBytes?.(entry.size) || entry.size + ' B'}</div>
 ${(() => {
-if (!entry.downloadUrl) return missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'));
+if (!entry.downloadUrl) {
+/* A sibling online means the bytes are one request away — see
+   requestDeviceFile. Without one, the row can only say what it is. */
+if ((chatState.linkedDevices || []).length >= 2) {
+return `<div class="chat-media-missing">
+<i class="fas fa-cloud-arrow-down"></i>
+<span>${app().escapeHTML(t('این فایل روی این دستگاه نیست.', 'This file is not on this device.'))}</span>
+<button type="button" class="btn" data-chat-device-file="${eid(entry.id)}" style="font-size:0.74rem;margin-top:0.4rem">${app().escapeHTML(t('دریافت از دستگاه دیگر', 'Fetch from my other device'))}</button>
+</div>`;
+}
+return missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'));
+}
 // A self-destruct file is meant to disappear; handing over a Download link
 // would let the recipient keep it forever and make the timer meaningless.
 // Show a preview that cannot be saved, dragged, long-pressed or selected.

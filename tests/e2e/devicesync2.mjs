@@ -146,6 +146,72 @@ check('the sending device\'s own history is unchanged', unchangedOnA === 3, `${u
 const fingerprints = await Promise.all([A, B].map((page) => page.evaluate(() => chatState.identity?.fingerprint || '')));
 check('both pages hold one identity', fingerprints[0] === fingerprints[1]);
 
+/* ---- phase three: the address book is an event ------------------------ */
+
+console.log('\n===== a contact made on one machine reaches the other =====');
+await A.evaluate(() => {
+  chatState.peers.push(normalizePeerRecord({
+    peerId: 'peer-zed', username: 'Zed', name: 'Zed',
+    fingerprint: 'd'.repeat(64), publicKeyData: '', manual: true,
+  }));
+  saveContacts();
+});
+const contactOnB = await B.waitForFunction(() => {
+  const hit = (typeof chatState !== 'undefined' && chatState.peers || []).find((peer) => peer.peerId === 'peer-zed');
+  return hit ? hit.username : false;
+}, undefined, { timeout: 20000 }).then((handle) => handle.jsonValue()).catch(() => null);
+check('the sibling learned the contact', contactOnB === 'Zed', String(contactOnB));
+const contactStoredOnB = await B.evaluate(() => {
+  saveContacts();
+  return (chatState.peers || []).some((peer) => peer.peerId === 'peer-zed' && isStoredContact(peer));
+});
+check('and it survives the storage rule on the receiving side', contactStoredOnB === true);
+
+/* ---- phase three: a file the bundle was too small to carry ------------- */
+
+console.log('\n===== a large file travels only when asked =====');
+/* Past the inline cap, so the row syncs and the bytes stay home. Past one
+   part, so the pull is reassembled from more than a single envelope. */
+const BIG_BYTES = 3 * 1024 * 1024 + 512 * 1024;
+await A.evaluate(async ({ conv, size }) => {
+  const bytes = new Uint8Array(size);
+  bytes.fill(7);
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  persistMessageMedia(conv, { id: 'sync-big-1', type: 'file', name: 'big.bin', mime: 'application/octet-stream', createdAt: new Date().toISOString() }, blob);
+  appendHistory(conv, {
+    id: 'sync-big-1', direction: 'in', type: 'file', name: 'big.bin', size: blob.size,
+    mime: 'application/octet-stream', status: 'delivered', createdAt: new Date().toISOString(),
+  });
+  setDeviceSyncFilesEnabled(true);
+  await sendDeviceSync();
+}, { conv: CONV, size: BIG_BYTES });
+
+const rowOnB = await B.waitForFunction((conv) => {
+  const entry = (typeof chatState !== 'undefined' && chatState.history && chatState.history[conv] || []).find((item) => item.id === 'sync-big-1');
+  return entry ? !entry.downloadUrl && !entry.mediaData : false;
+}, CONV, { timeout: 20000 }).then((handle) => handle.jsonValue()).catch(() => null);
+check('the row arrived, and the bytes did not ride along', rowOnB === true);
+
+await B.evaluate((conv) => { requestDeviceFile(conv, 'sync-big-1'); }, CONV);
+const pullLanded = await B.waitForFunction((conv) => {
+  if (typeof chatState === 'undefined') return false;
+  const entry = (chatState.history[conv] || []).find((item) => item.id === 'sync-big-1');
+  return Boolean(entry?.downloadUrl);
+}, CONV, { timeout: 30000 }).then(() => true).catch(() => false);
+/* The bytes themselves, read back out of the receiving device's vault the
+   way the player would read them. The vault write lands asynchronously, so
+   read a few times rather than racing it once. */
+let pulledSize = 0;
+for (let attempt = 0; attempt < 10 && pulledSize !== BIG_BYTES; attempt += 1) {
+  await B.waitForTimeout(500);
+  pulledSize = await B.evaluate(async () => {
+    const stored = await readMessageMedia('sync-big-1').catch(() => null);
+    return stored ? stored.blob.size : 0;
+  });
+}
+check('asking brought the whole file back, every byte of it', pulledSize === BIG_BYTES,
+  pulledSize ? `${pulledSize} bytes` : 'nothing came');
+
 await browser.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

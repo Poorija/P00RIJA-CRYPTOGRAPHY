@@ -2120,11 +2120,15 @@ renderMessages();
  * ------------------------------------------------------------------ */
 
 const DEVICE_SYNC_BATCH_ENTRIES = 200;
-/* Small enough that an envelope stays far under the relay's frame cap
-   even with a full batch behind it, large enough that stickers, voice
-   notes and most photos travel whole. Larger files stay on the device
-   that received them — the row still syncs, the bytes do not. */
-const DEVICE_SYNC_FILE_INLINE_BYTES = 2 * 1024 * 1024;
+/* Inline-media budget, per entry and per batch. FILE_CHUNK_BYTES is the
+   size every relayed file transfer has used since the beginning — proven
+   on both production relays at scale — and measurement agrees: 64 KB
+   frames at the send rhythm below arrived 80 of 80 on each server, while
+   megabyte frames arrived sometimes and vanished others with no error
+   anywhere. Nothing bigger than this rides a sync envelope; the pull
+   below slices to the same size. */
+const DEVICE_SYNC_FILE_INLINE_BYTES = FILE_CHUNK_BYTES;
+const DEVICE_SYNC_BATCH_INLINE_BUDGET = 256 * 1024;
 /* A sibling coming online triggers a sync, but a flapping connection
    must not turn that into a broadcast every few seconds. */
 const DEVICE_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;
@@ -2160,20 +2164,47 @@ const includeFiles = deviceSyncFilesEnabled();
 const bundles = [];
 for (const conversationKey in chatState.history) {
 const entries = chatState.history[conversationKey] || [];
-for (let start = 0; start < entries.length; start += DEVICE_SYNC_BATCH_ENTRIES) {
-const slice = entries.slice(start, start + DEVICE_SYNC_BATCH_ENTRIES);
-/* Every entry is awaited separately: each may need a vault read, and
-   they are the cheap kind of await — local IndexedDB, no network. */
-const wireEntries = [];
-for (const entry of slice) wireEntries.push(await deviceSyncEntryForWire(entry, includeFiles));
+/* A batch closes on the entry count OR the inline-media budget, whichever
+   comes first: many small entries and a few stickerful ones must both
+   produce envelopes inside the frame size the relay path delivers. */
+let wireEntries = [];
+let inlineBytes = 0;
+for (const entry of entries) {
+/* Each entry is awaited separately: it may need a vault read, and these
+   are the cheap kind of await — local IndexedDB, no network. */
+const wireEntry = await deviceSyncEntryForWire(entry, includeFiles);
+wireEntries.push(wireEntry);
+inlineBytes += (wireEntry.mediaData || '').length;
+if (wireEntries.length >= DEVICE_SYNC_BATCH_ENTRIES || inlineBytes >= DEVICE_SYNC_BATCH_INLINE_BUDGET) {
 bundles.push({ conversation: conversationKey, entries: wireEntries });
+wireEntries = [];
+inlineBytes = 0;
 }
+}
+if (wireEntries.length) bundles.push({ conversation: conversationKey, entries: wireEntries });
 }
 /* The calls list is bounded by CALL_LOG_LIMIT on every device, so it
    fits one envelope with room to spare. */
 const calls = (chatState.calls || []).slice(0, CALL_LOG_LIMIT).map((call) => ({ ...call }));
 if (calls.length) bundles.push({ calls });
-return bundles;
+	const contactBundle = buildContactSyncBundle();
+	if (contactBundle) bundles.push(contactBundle);
+	return bundles;
+}
+
+/* The address book travels with the history: somebody engaged with on one
+   machine is somebody the others are about to write to as well. Personal
+   contacts only — a space or group is its own record and rides the space
+   envelopes, which every device of this account already receives. */
+function storedPersonalContacts() {
+return (chatState.peers || [])
+.filter((peer) => peer.peerId && !peer.type && !peer.system && !isSelfPeerRecord(peer) && isStoredContact(peer))
+.slice(0, 500)
+.map((peer) => normalizePeerRecord(peer));
+}
+function buildContactSyncBundle() {
+const contacts = storedPersonalContacts();
+return contacts.length ? { contacts } : null;
 }
 
 async function sealDeviceSyncBundle(bundle) {
@@ -2198,10 +2229,16 @@ await signOfflineEnvelope(envelope);
 return envelope;
 }
 
-async function sendDeviceSync() {
+async function sendDeviceSync({ contactsOnly = false } = {}) {
 if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return false;
 if (!chatState.identity?.fingerprint) return false;
-	const bundles = await buildDeviceSyncBundles();
+const bundles = contactsOnly ? [] : await buildDeviceSyncBundles();
+/* A contacts-only push is the delta path: the book changed while a sibling
+	   was listening, and the history has not. */
+if (contactsOnly) {
+const contactBundle = buildContactSyncBundle();
+if (contactBundle) bundles.push(contactBundle);
+}
 	for (const bundle of bundles) {
 	const envelope = await sealDeviceSyncBundle(bundle);
 	sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
@@ -2267,22 +2304,56 @@ renderPeers();
 renderMessages();
 }
 }
-if (Array.isArray(bundle?.calls)) {
-const known = new Set(chatState.calls.map((call) => call.id));
-let callsChanged = false;
-for (const call of bundle.calls) {
-if (!call?.id || known.has(call.id)) continue;
-chatState.calls.push(call);
-callsChanged = true;
-}
-if (callsChanged) {
-chatState.calls.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-chatState.calls = chatState.calls.slice(0, CALL_LOG_LIMIT);
-saveCalls();
-changed = true;
-}
-}
-return changed;
+	if (Array.isArray(bundle?.calls)) {
+	const known = new Set(chatState.calls.map((call) => call.id));
+	let callsChanged = false;
+	for (const call of bundle.calls) {
+	if (!call?.id || known.has(call.id)) continue;
+	chatState.calls.push(call);
+	callsChanged = true;
+	}
+	if (callsChanged) {
+	chatState.calls.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+	chatState.calls = chatState.calls.slice(0, CALL_LOG_LIMIT);
+	saveCalls();
+	changed = true;
+	}
+	}
+	/* Contacts arrive add-only: a record this device already knows by peer id
+	   or fingerprint is left exactly as it is, because what it holds locally —
+	   a nickname, a mute, a pin — is this device's own business. */
+	if (Array.isArray(bundle?.contacts)) {
+	const byPeerId = new Set(chatState.peers.map((peer) => peer.peerId).filter(Boolean));
+	const byFingerprint = new Set(chatState.peers.map((peer) => peer.fingerprint).filter(Boolean));
+	let contactsChanged = false;
+	for (const contact of bundle.contacts) {
+	const record = normalizePeerRecord(contact);
+	if (!record.peerId || byPeerId.has(record.peerId)) continue;
+	if (record.fingerprint && byFingerprint.has(record.fingerprint)) continue;
+	/* Marked so isStoredContact keeps it: nothing here has spoken to them
+	   yet, but this account has, on another machine. */
+	record.synced = true;
+	record.status = 'offline';
+	chatState.peers.push(record);
+	byPeerId.add(record.peerId);
+	if (record.fingerprint) byFingerprint.add(record.fingerprint);
+	contactsChanged = true;
+	}
+	if (contactsChanged) {
+	saveContacts();
+	renderPeers();
+	changed = true;
+	}
+	}
+	/* The two on-demand shapes. A request is answered in the background; a
+	   part is one slice of a pull this device asked for. */
+	if (bundle?.fileRequest?.messageId) {
+	serveDeviceFileRequest(bundle.fileRequest).catch((error) => console.warn('[Chat] serving a sibling file failed:', error));
+	}
+	if (bundle?.filePart?.messageId) {
+	acceptDeviceFilePart(bundle.filePart);
+	}
+	return changed;
 }
 
 async function handleDeviceSyncEnvelope(message) {
@@ -2331,4 +2402,149 @@ const now = Date.now();
 if (now - deviceSyncLastSentAt < DEVICE_SYNC_MIN_INTERVAL_MS) return;
 deviceSyncLastSentAt = now;
 setTimeout(() => { sendDeviceSync().catch((error) => console.warn('[Chat] device sync failed:', error)); }, 3000);
+}
+
+/* Contacts are an event, not only a snapshot: the moment a new one is
+   stored on this machine is the moment the siblings should learn it, not
+   the next time a full sync happens. The baseline is whatever the first
+   save of this session held, so a reload never re-announces the book. */
+const DEVICE_CONTACT_PUSH_MIN_INTERVAL_MS = 30 * 1000;
+let deviceContactPushLastAt = 0;
+let deviceContactPeerIdsBaseline = null;
+function maybePushContactDelta(contacts) {
+const ids = new Set((contacts || []).map((peer) => peer.peerId).filter(Boolean));
+if (!deviceContactPeerIdsBaseline) {
+deviceContactPeerIdsBaseline = ids;
+return;
+}
+const grew = Array.from(ids).some((id) => !deviceContactPeerIdsBaseline.has(id));
+deviceContactPeerIdsBaseline = ids;
+/* A sibling merging this device's contacts grows its own book, which lands
+   here again — with nothing new on the way back, the exchange ends. */
+if (!grew) return;
+if ((chatState.linkedDevices || []).length < 2) return;
+const now = Date.now();
+if (now - deviceContactPushLastAt < DEVICE_CONTACT_PUSH_MIN_INTERVAL_MS) return;
+deviceContactPushLastAt = now;
+setTimeout(() => {
+sendDeviceSync({ contactsOnly: true }).catch((error) => console.warn('[Chat] contact delta push failed:', error));
+}, 1000);
+}
+
+/* ------------------------------------------------------------------
+ * Files on demand.
+ *
+ * Phase two rides an attachment of up to DEVICE_SYNC_FILE_INLINE_BYTES
+ * inside the history bundle; a larger one stays on the machine that
+ * received it, and the row that reaches a sibling says so. This is the
+ * other half: the sibling that wants the bytes asks for them by message
+ * id, and they travel the same sealed envelopes, sliced into frames the
+ * relay already carries and cannot read.
+ * ------------------------------------------------------------------ */
+
+/* One slice of a pulled file: FILE_CHUNK_BYTES, the size the relay path
+   has carried reliably since file transfer existed. A pull has to
+   reassemble every part, so a part that arrived only sometimes is a pull
+   that cannot finish. */
+const DEVICE_SYNC_FILE_PART_BYTES = FILE_CHUNK_BYTES;
+/* The parts of one pull, held only while it runs. Ten minutes and the
+   pull is forgotten — half an assembled file is worth nothing. */
+const DEVICE_FILE_PULL_TTL_MS = 10 * 60 * 1000;
+const deviceFilePulls = new Map();
+
+function requestDeviceFile(conversationKey, messageId) {
+if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) {
+notify(t('اتصال به سرور برقرار نیست؛ بعد از اتصال دوباره تلاش کنید', 'Not connected to the relay; try again after reconnecting'), 'warning');
+return;
+}
+if (!chatState.identity?.fingerprint) return;
+if ((chatState.linkedDevices || []).length < 2) {
+notify(t('هیچ دستگاه دیگری از این حساب الان آنلاین نیست.', 'No other device of this account is online right now.'), 'warning');
+return;
+}
+if (deviceFilePulls.has(messageId)) return;
+deviceFilePulls.set(messageId, { parts: new Map(), total: 0, meta: null, at: Date.now() });
+sealDeviceSyncBundle({ fileRequest: { conversation: conversationKey, messageId } })
+.then((envelope) => {
+sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
+notify(t('درخواست فایل برای دستگاه‌های دیگر فرستاده شد', 'The file was requested from the other devices'), 'info');
+})
+.catch((error) => {
+deviceFilePulls.delete(messageId);
+console.warn('[Chat] the file request could not be sealed:', error);
+});
+}
+
+/* The sibling that holds the bytes answers. The toggle governs serving as
+   it governs pushing: off means this machine does not hand its files to
+   anyone, sibling or not. */
+async function serveDeviceFileRequest(request) {
+if (!deviceSyncFilesEnabled()) return;
+const messageId = String(request?.messageId || '');
+if (!messageId) return;
+const stored = await readMessageMedia(messageId).catch(() => null);
+if (!stored) return;
+const bytes = new Uint8Array(await stored.blob.arrayBuffer());
+const total = Math.max(1, Math.ceil(bytes.length / DEVICE_SYNC_FILE_PART_BYTES));
+for (let part = 0; part < total; part += 1) {
+const slice = bytes.subarray(part * DEVICE_SYNC_FILE_PART_BYTES, (part + 1) * DEVICE_SYNC_FILE_PART_BYTES);
+const envelope = await sealDeviceSyncBundle({
+filePart: {
+conversation: String(request.conversation || ''),
+messageId,
+part,
+total,
+name: stored.record.name || '',
+mime: stored.record.mime || '',
+kind: stored.record.kind || 'file',
+bytes: app().arrayBufferToBase64(slice),
+},
+});
+sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
+/* Same breathing room the history bundles take. */
+await new Promise((resolve) => setTimeout(resolve, 150));
+}
+}
+
+function acceptDeviceFilePart(part) {
+const messageId = String(part?.messageId || '');
+if (!messageId) return;
+const pull = deviceFilePulls.get(messageId);
+if (!pull || Date.now() - pull.at > DEVICE_FILE_PULL_TTL_MS) {
+deviceFilePulls.delete(messageId);
+return;
+}
+	if (!pull.total) {
+	pull.total = Math.max(1, Math.min(256, Number(part.total) || 1));
+	pull.meta = { name: String(part.name || ''), mime: String(part.mime || ''), kind: String(part.kind || 'file') };
+	}
+pull.parts.set(Number(part.part) || 0, String(part.bytes || ''));
+if (pull.parts.size < pull.total) return;
+deviceFilePulls.delete(messageId);
+const conversationKey = String(part.conversation || '');
+const assembled = new Uint8Array(pull.parts.size * DEVICE_SYNC_FILE_PART_BYTES);
+let offset = 0;
+for (let index = 0; index < pull.total; index += 1) {
+const slice = base64ToBytes(pull.parts.get(index) || '');
+assembled.set(slice, offset);
+offset += slice.length;
+}
+const blob = new Blob([assembled.subarray(0, offset)], { type: pull.meta.mime || 'application/octet-stream' });
+const entry = (chatState.history[conversationKey] || []).find((item) => item.id === messageId);
+persistMessageMedia(conversationKey, entry || {
+id: messageId,
+type: pull.meta.kind,
+name: pull.meta.name,
+mime: pull.meta.mime,
+createdAt: new Date().toISOString(),
+}, blob);
+const url = URL.createObjectURL(blob);
+chatState.mediaUrls.set(messageId, url);
+if (entry) {
+entry.downloadUrl = url;
+entry.mediaMissing = false;
+storeHistory();
+}
+renderMessages();
+notify(t(`«${pull.meta.name || 'فایل'}» از دستگاه دیگر رسید`, `"${pull.meta.name || 'file'}" arrived from the other device`), 'success');
 }

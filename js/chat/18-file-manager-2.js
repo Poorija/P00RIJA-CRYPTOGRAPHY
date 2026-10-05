@@ -141,6 +141,10 @@ ownerFingerprint: String(peer.ownerFingerprint || ''),
 manual: Boolean(peer.manual),
 pinned: Boolean(peer.pinned),
 pinOrder: Number(peer.pinOrder || 0),
+/* Arrived from a sibling device rather than earned here — the flag that
+   keeps isStoredContact holding a contact this machine has no history
+   with yet. */
+synced: Boolean(peer.synced),
 /* ---- per-contact state that must survive a reload -----------------------
    Blocking, muting, archiving and the conversation timer were kept only on
    the in-memory record, so each one silently reset the moment the app was
@@ -183,6 +187,9 @@ function isStoredContact(peer) {
 if (!peer || !peer.peerId) return false;
 if (peer.type || peer.system) return true;
 if (peer.manual || peer.pinned || peer.archived) return true;
+/* Arrived from a sibling device: the account engaged with them somewhere,
+   so they belong in the book even before this machine has spoken a word. */
+if (peer.synced) return true;
 if (chatState.sessionKeys?.[peer.peerId]) return true;
 if (peer.fingerprint && chatState.sessionKeys?.[peer.fingerprint]) return true;
 return conversationHistory(peer).length > 0;
@@ -203,6 +210,11 @@ const contacts = chatState.peers
 .filter((peer) => isStoredContact(peer))
 .map((peer) => normalizePeerRecord(peer));
 saveEncrypted(CHAT_CONTACTS_STORAGE_KEY, contacts);
+/* The book changed on disk, which is the moment a sibling should hear
+   about anything new in it — see maybePushContactDelta. The typeof guard
+   keeps the standalone-extract test harnesses (which lift this function
+   out of the page) running without the device-sync half. */
+if (typeof maybePushContactDelta === 'function') maybePushContactDelta(contacts);
 }
 /* Written into the conversation itself, so the change is still there tomorrow
    even if the banner was dismissed in a hurry today. */

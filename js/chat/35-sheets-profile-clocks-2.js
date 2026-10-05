@@ -649,6 +649,13 @@ document.getElementById('chatKeyKeepBtn')?.addEventListener('click', () => {
   if (peer) resolveKeyChange(peer, false);
 });
 document.getElementById('chatMessages')?.addEventListener('click', (event) => {
+/* A synced file whose bytes live on a sibling machine: the row says so,
+   and this is the ask. The conversation the row sits in is the open one. */
+const deviceFileBtn = event.target.closest('[data-chat-device-file]');
+if (deviceFileBtn) {
+requestDeviceFile(chatState.activeConversationId || '', deviceFileBtn.dataset.chatDeviceFile || '');
+return;
+}
 const replyBtn = event.target.closest('[data-chat-reply-message]');
 if (replyBtn) {
 handleReplyMessage(replyBtn.dataset.chatReplyMessage);
