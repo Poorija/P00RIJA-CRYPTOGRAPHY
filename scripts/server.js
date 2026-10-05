@@ -7477,12 +7477,29 @@ function broadcastPeers() {
     /* Stripped: the periodic presence table says who is here, not what they
      look like. Avatars travel on profile-card; re-serializing 2MB photos
      per peer per tick is a GC death spiral at scale. */
+  /* Whitelist, not blacklist: the spread (...) was copying `ws` (a WebSocket
+     with a circular timer reference), `sentMail` (a Set), and friends — and
+     JSON.stringify crashed the process on the circular reference. Only the
+     fields the peers table actually carries are listed here. */
   const lightPeers = Array.from(presence.values()).map((r) => ({
-    ...r, avatarData: undefined, publicKeyData: undefined, prekeyData: undefined,
+    clientId: r.clientId,
+    username: r.username,
+    peerId: r.peerId,
+    fingerprint: r.fingerprint,
+    identityVerified: r.identityVerified,
+    mood: r.mood,
+    avatarData: undefined,
+    connectedAt: r.connectedAt,
+    lastSeenAt: r.lastSeenAt,
+    lastActiveAt: r.lastActiveAt,
+    away: r.away,
+    ip: r.ip,
+    publicKeyData: undefined,
+    prekeyData: undefined,
   }));
   const payload = JSON.stringify({
       type: 'peers',
-      peers: lightPeersPeers(),
+      peers: lightPeers,
     })
   /* Stripped: the periodic table says who is here, not what they look like.
      Avatars travel on profile-card; re-serializing 2MB photos per peer per
