@@ -5869,9 +5869,31 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
   }
   const link = relayPeers.linkFor(facts.toRelay);
   if (!link) {
-    reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+    /* The link might be mid-redial (a drop-to-redial cycle is under two
+       seconds). Refusing instantly was turning a one-second window into a
+       user-visible error, because the client's three retries all hit the
+       same instant refusal. Park the envelope for up to ten seconds and
+       try again; only if the link is truly gone does the refusal go out. */
+    const parkDeadline = Date.now() + 10000;
+    const parkTimer = setInterval(() => {
+      if (Date.now() > parkDeadline) {
+        clearInterval(parkTimer);
+        reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+        return;
+      }
+      const revived = relayPeers.linkFor(facts.toRelay);
+      if (revived) {
+        clearInterval(parkTimer);
+        /* Fall through by re-invoking with the live link. */
+        carryWithLink(revived);
+      }
+    }, 500);
+    parkTimer.unref?.();
     return;
   }
+  /* The normal path: the link is live, send now. */
+  function carryWithLink(activeLink) {
+  const _link = activeLink || link;
   /* The outbound twin of the crash that was fixed inbound: a throw from
      seal or send here rides the WS receive handler into the fatal handler.
      This whole remainder is one try/catch so a transit failure is a
@@ -5908,6 +5930,9 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     console.warn('[Transit] carry failed:', transitError.message);
     reply({ type: 'error', reason: 'transit-failed', tag });
   }
+  }
+  /* If the link was live from the start, carryWithLink runs inline above. */
+  if (link) carryWithLink(link);
 }
 
 /* A frame off a relay link. Two kinds: an envelope to deliver here, and the

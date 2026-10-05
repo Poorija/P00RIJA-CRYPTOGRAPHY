@@ -47,7 +47,7 @@ const MISSED_PONGS_LIMIT = 2;
    liability: every transit envelope this relay accepted would sit in memory
    awaiting a drain that is never coming, and the 60-second wait would expire
    client-side before the socket ever said no. */
-const LINK_BUFFER_LIMIT_BYTES = 16 * 1024 * 1024;
+const LINK_BUFFER_LIMIT_BYTES = 48 * 1024 * 1024;
 
 /* The peers an operator named, as `<relay id>@<origin>` — or as a bare id,
    which means "accept a link from this relay but never dial it". That is the
@@ -231,9 +231,16 @@ function createRelayPeers({
            who never reads; a link deserves the same mercy in both directions.
            Crossing the line closes the link rather than dropping the frame,
            so the far end's redial — and ours — starts from a known state. */
+        /* Backpressure, not execution: the buffer being full means the far
+           side is slow, not dead. Closing the link here was killing the
+           connection for every user every time one burst exceeded the cliff
+           — the relay logs showed "stopped draining; closing it" twice in
+           fifteen minutes, and each close dropped every in-flight envelope.
+           Returning false lets the caller treat it as a transient refusal
+           (the client retries); the link stays open and the OS drains the
+           buffer at its own pace. The send is retried on the next call. */
         if (socket.bufferedAmount > LINK_BUFFER_LIMIT_BYTES) {
-          log.warn?.(`[Transit] link with ${peerId.slice(0, 12)} stopped draining; closing it`);
-          link.close('send buffer full');
+          log.warn?.(`[Transit] link with ${peerId.slice(0, 12)} send buffer full (${Math.round(socket.bufferedAmount / 1024 / 1024)}MB) — deferring, link stays open`);
           return false;
         }
         socket.send(JSON.stringify({ t: 'f', ...cipher.seal(payload) }));
