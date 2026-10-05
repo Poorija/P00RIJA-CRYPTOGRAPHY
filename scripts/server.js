@@ -7565,10 +7565,17 @@ function safeSend(ws, message) {
    relay to are about forwarding, and would otherwise count presence. */
 function safeSendText(ws, payload, countAsMessage = true) {
   if (ws.readyState === WebSocket.OPEN) {
-    if (ws.bufferedAmount > SEND_BUFFER_LIMIT_BYTES) {
+    /* A verified peer whose buffer is full is READING SLOWLY, not refusing
+       to read. Killing the socket here was turning every large mailbox dump
+       into a connect-kill-reconnect loop (37 queued messages, 16 MB buffer,
+       the same cycle forever). The limit stays for genuinely hostile
+       sockets; verified peers get a higher ceiling and a warning first. */
+    const isVerified = Boolean(ws.__poorijaVerifiedFingerprint);
+    const limit = isVerified ? SEND_BUFFER_LIMIT_BYTES * 2 : SEND_BUFFER_LIMIT_BYTES;
+    if (ws.bufferedAmount > limit) {
       if (!ws.__poorijaSendOverflow) {
         ws.__poorijaSendOverflow = true;
-        console.warn('[Presence] Send buffer above 16 MB — terminating a socket that never reads.');
+        console.warn(`[Presence] Send buffer above ${Math.round(limit / 1048576)} MB (${isVerified ? 'verified peer' : 'unverified socket'}) — terminating.`);
       }
       ws.terminate();
       return;
@@ -7666,6 +7673,16 @@ const MAIL_WINDOW = 50;
    the connection, not to the mailbox, so a reconnection re-sends anything
    that was in flight when the socket went -- which is what makes an
    unacknowledged envelope safe to drop. */
+/* The mailbox dump used to fire up to MAIL_WINDOW messages in one burst
+   with no flow control. A client with 37 queued items (some carrying
+   attachments) blew the 16 MB send buffer on every reconnect — the relay
+   killed the socket for "not reading", the client reconnected, the same
+   37 queued items fired again: a connect-overflow-disconnect loop that
+   never drained. The pump now checks the wire before every frame and
+   backs off when the socket is congested, resuming on the next ACK
+   (which is the client saying it finished reading what it got). */
+const MAIL_PUMP_BUFFER_SOFT_LIMIT = 1024 * 1024; /* 1 MB */
+
 function pumpHeldMail(record, ws) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const queued = offlineBoxes.get(record.fingerprint) || [];
@@ -7676,6 +7693,13 @@ function pumpHeldMail(record, ws) {
   for (const item of queued) {
     if (inFlight >= MAIL_WINDOW) break;
     if (record.sentMail.has(item.relayId)) continue;
+    /* Flow control: if the socket is still draining the previous batch,
+       stop here. The next ACK triggers another pump, so delivery resumes
+       the moment the client catches up — no timer, no polling. */
+    if (ws.bufferedAmount > MAIL_PUMP_BUFFER_SOFT_LIMIT) {
+      console.log(`[Presence] Mail pump paused for ${record.fingerprint?.slice(0, 12) ?? ''} — socket draining (${Math.round(ws.bufferedAmount / 1024)}KB buffered, ${inFlight} in flight, ${queued.length - inFlight} waiting)`);
+      return;
+    }
     safeSend(ws, item);
     record.sentMail.add(item.relayId);
     inFlight += 1;
@@ -7962,6 +7986,9 @@ wsServer.on('connection', (ws, req) => {
         /* Escape hatch: the claim itself counts as the proof, as before. */
         clearIdentityChallenge(record);
         record.identityVerified = true;
+      /* Mark the socket too: safeSendText reads this to decide whether the
+         buffer limit is a hostile-socket kill or a slow-reader backoff. */
+      ws.__poorijaVerifiedFingerprint = record.fingerprint || '';
         indexVerified(record);
         closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
