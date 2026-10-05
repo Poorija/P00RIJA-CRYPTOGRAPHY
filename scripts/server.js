@@ -5849,12 +5849,14 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
   }
   const link = relayPeers.linkFor(facts.toRelay);
   if (!link) {
-    /* The sender is told, and that matters: somebody who believes they are
-       sending through a carrier and is not would make a different decision
-       about what to send. */
     reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
     return;
   }
+  /* The outbound twin of the crash that was fixed inbound: a throw from
+     seal or send here rides the WS receive handler into the fatal handler.
+     This whole remainder is one try/catch so a transit failure is a
+     refused envelope, not a dead relay. */
+  try {
   /* The envelope is a parsed object on this side of the socket; its wire
      size is the JSON. Buffer.byteLength(object) THROWS — and this sits in
      the WS receive path, so one cross-relay message killed the whole relay,
@@ -5882,6 +5884,10 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     return;
   }
   console.log(`[Transit] carried ${facts.bytes} bytes for ${facts.toRelay.slice(0, 12)}`);
+  } catch (transitError) {
+    console.warn('[Transit] carry failed:', transitError.message);
+    reply({ type: 'error', reason: 'transit-failed', tag });
+  }
 }
 
 /* A frame off a relay link. Two kinds: an envelope to deliver here, and the

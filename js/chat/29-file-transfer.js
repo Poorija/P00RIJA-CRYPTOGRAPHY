@@ -1307,7 +1307,8 @@ if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) throw new Error
    saying about a message; about a presence question that simply went
    unanswered it is alarming and wrong. An unanswered question is answered by
    the next one. */
-if (!String(frame.type || '').endsWith('-query')) rememberTransit(frame.tag || '', frame, peerRecord);
+const chunkTag = frame.tag || frame.payload?.tag || (frame.type === 'file-chunk' ? `${frame.transferId}:${frame.index}` : '');
+if (!String(frame.type || '').endsWith('-query')) rememberTransit(chunkTag, frame, peerRecord);
 chatState.ws.send(JSON.stringify({ ...envelope, ...(frame.tag ? { tag: frame.tag } : {}) }));
 } catch (error) {
 console.warn('[Transit] could not seal for the far relay:', error?.message || error);
@@ -1319,14 +1320,37 @@ fallBackToDirect(frame, peerRecord, error?.message || '');
    on every message would be noise, and noise is how a warning stops being
    read. */
 function fallBackToDirect(frame, peerRecord, reason = '') {
-/* The message goes out through this relay — so mark it, don't write a note.
-   A note per conversation was the old answer, and it failed both ways: too
-   loud the first time (a full system-note bubble for a piece of routing the
-   person cannot act on), and too quiet after it (the once-per-conversation
-   flag suppressed the truth for every message that followed). The message
-   itself now carries the fact: a small route icon beside its timestamp,
-   click it for the sentence. The icon is per-message, always correct, and
-   costs the thread nothing. */
+/* The message goes out through this relay — but ONLY when the contact
+   actually lives on this relay. When their home relay is elsewhere, sending
+   through mine strands the message in a mailbox they will never open:
+   they connect to THEIR relay, not mine. In that case the honest answer
+   is to tell the sender the link is down and mark the message failed,
+   not to pretend it was delivered into a void. */
+const peerHome = typeof routableHomeRelay === 'function' ? routableHomeRelay(peerRecord) : null;
+const anyHome = peerRecord?.homeRelay?.id ? peerRecord.homeRelay : null;
+const knownFarRelay = (peerHome || anyHome);
+const myPin = typeof relayPinFor === 'function' ? (relayPinFor(chatServerOrigin())?.id || '') : '';
+if (knownFarRelay && myPin && knownFarRelay.id !== myPin) {
+/* The contact lives on another relay and the transit link is down. The
+   message would sit in MY relay's mailbox forever — the recipient never
+   connects here. Mark it failed with an honest reason. */
+const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
+if (conversationId) {
+const messageId = String(frame?.payload?.tag || frame?.tag || frame?.payload?.id || frame?.payload?.messageId || '');
+const history = chatState.history[conversationId] || [];
+const entry = history.find((item) => item.id === messageId);
+if (entry) {
+entry.status = 'failed';
+entry.failureReason = 'transit-down';
+storeHistory();
+if (chatState.activeConversationId === conversationId) renderMessages();
+}
+if (typeof notify === 'function') {
+notify(t('لینک بین‌رله‌ها قطع است؛ پیام نرسید و بعداً دوباره بفرستید.', 'The cross-relay link is down; the message was not delivered — please retry.'), 'warning');
+}
+}
+return;
+}
 let sent = false;
 if (chatState.ws?.readyState === WebSocket.OPEN) {
 try { chatState.ws.send(JSON.stringify(frame)); sent = true; } catch (_error) { sent = false; }

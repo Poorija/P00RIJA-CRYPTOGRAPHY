@@ -11,11 +11,11 @@ x-logging: &default-logging
 services:
   poorija-cryptography:
     # The image tag carries the app version, handed in by the deploy so it
-    # can never sit still on a stale number: a build of 2.91.28 is tagged
-    # 2.91.28, on a fresh install and on an update alike. The default is the
+    # can never sit still on a stale number: a build of 2.98.21 is tagged
+    # 2.98.21, on a fresh install and on an update alike. The default is the
     # version this file shipped with, which is what a GitHub-apply overlay
     # lands on when nobody handed one in.
-    image: poorija-crypto:${APP_VERSION:-2.91.28}
+    image: poorija-crypto:${APP_VERSION:-2.98.21}
     build:
       context: ../
       dockerfile: config/Dockerfile
@@ -176,6 +176,10 @@ services:
       - ${CERTS_DIR:-../certs}:/deploy-certs
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock
+      # The one certificate this machine serves, shared by this stack and
+      # 3X-UI alike: both read the same pair from /root/cert/ so a renewal
+      # is one event, not two divergent ones.
+      - /root/cert:/root-cert
     restart: unless-stopped
 
 networks:

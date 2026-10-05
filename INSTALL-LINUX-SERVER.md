@@ -2,7 +2,7 @@
 
 # P00RIJA Cryptography Linux Server Package
 
-This package contains the Linux server deployment for P00RIJA Cryptography v2.91.28, including the web app, Chat Signal relay, Monitor_Server, coturn, offline encrypted queues, server policies, and server-synced self-destruct message counters.
+This package contains the Linux server deployment for P00RIJA Cryptography v2.98.21, including the web app, Chat Signal relay, Monitor_Server, coturn, offline encrypted queues, server policies, and server-synced self-destruct message counters.
 
 > Running more than one relay, or want calls to take the short path through a
 > TURN server near your users? [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md)
