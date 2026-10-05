@@ -1,7 +1,6 @@
 /*
  * P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
  * Copyright (C) 2026 Poorija <p00rija@tutamail.com>
-let ensureChatTransportRetried = 0;
  * https://github.com/Poorija/P00RIJA-Cryptography
  *
  * Licensed under the GNU Affero General Public License, version 3 only.
@@ -31,6 +30,10 @@ let ensureChatTransportRetried = 0;
    open / save / delete. Nothing here leaves the device — saving writes
    through the browser's own download path from a decrypted blob.
    ===================================================================== */
+/* How many times the relay probe-and-discover cycle has run without an
+   answer. The declaration used to sit inside the licence comment above, so
+   it never existed and the retry path threw instead of retrying. */
+let ensureChatTransportRetried = 0;
 const FILE_CATEGORIES = [
   { id: 'image', fa: 'تصویرها', en: 'Images', icon: 'fa-image', color: '#38bdf8' },
   { id: 'video', fa: 'ویدیوها', en: 'Video', icon: 'fa-film', color: '#a78bfa' },
@@ -498,6 +501,9 @@ channels: [],
 },
 calls: [],
 peers: [],
+/* Sockets elsewhere that hold this same identity — filled from the peers
+   payload by the relay handler, never persisted. Family, not contacts. */
+linkedDevices: [],
 stickerPacks: [],
 stickerActivePackId: '',
 stickerManageMode: false,

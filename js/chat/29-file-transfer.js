@@ -2631,6 +2631,10 @@ prekeyExpiresAt: prekey?.expiresAt || '',
    on it. It is still worth sending: it is how somebody learns their contact
    has moved, and prompts them to ask for a fresh card. */
 homeRelay: myHomeRelay(),
+/* Which install is speaking: two devices of the same account share the
+   fingerprint but never the device id, and the peers table uses this to
+   tell them apart. */
+deviceId: typeof getDeviceId === 'function' ? getDeviceId() : '',
 }));
 /* Push is NOT armed from here any more. Subscribing on every hello meant the
    relay was handed a device record before the user had been told that a push

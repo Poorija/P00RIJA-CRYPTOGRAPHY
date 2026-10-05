@@ -6062,7 +6062,22 @@ totalRelays++;
      queue confirmation up with the message it was sent for. */
   const tag = String(message.tag || '').slice(0, 96);
   const target = openPresenceRecord(message.toClientId) || findOpenPresenceByFingerprint(toFingerprint);
-  
+  /* One account may be online from several sockets at once, and a frame
+     addressed to the identity belongs on all of them: the phone in a pocket
+     and the desktop on a desk both get it. The set is the target as it was
+     always resolved — so a single-device delivery is byte-for-byte what it
+     has always been — plus every other verified live socket of the same
+     fingerprint, drawn from the index findOpenPresenceByFingerprint reads. */
+  const allTargets = [];
+  if (target) allTargets.push(target);
+  if (toFingerprint) {
+    for (const candidate of verifiedByFingerprint.get(toFingerprint) || []) {
+      if (candidate.ws?.readyState !== WebSocket.OPEN) continue;
+      if (allTargets.includes(candidate)) continue;
+      allTargets.push(candidate);
+    }
+  }
+
   const payloadType = String(message.payload?.type || 'unknown');
   /* Call signaling the relay already sees; the live-calls report keys on it. */
   if (payloadType.startsWith('call') || payloadType.startsWith('gcall')) {
@@ -6194,12 +6209,14 @@ totalRelays++;
       sendPushNotification(toFingerprint, kind).catch((error) => console.error(error));
     }
   }
-  safeSend(target.ws, {
-    type: 'relay',
-    fromClientId: clientId,
-    fromFingerprint: fromFingerprint,
-    payload: message.payload || null,
-  });
+  for (const recipient of allTargets) {
+    safeSend(recipient.ws, {
+      type: 'relay',
+      fromClientId: clientId,
+      fromFingerprint: fromFingerprint,
+      payload: message.payload || null,
+    });
+  }
 }
 
 /* The socket another relay arrives on.
@@ -7485,6 +7502,7 @@ function broadcastPeers() {
     clientId: r.clientId,
     username: r.username,
     peerId: r.peerId,
+    deviceId: r.deviceId,
     fingerprint: r.fingerprint,
     identityVerified: r.identityVerified,
     mood: r.mood,
@@ -7817,6 +7835,16 @@ function closeDuplicatePresenceRecords(record) {
     const sameFingerprint = record.fingerprint && existing.fingerprint === record.fingerprint;
     const samePeerId = record.peerId && existing.peerId === record.peerId;
     if (!sameFingerprint && !samePeerId) continue;
+    /* One account may prove itself from several sockets at once: a second
+       VERIFIED connection for a fingerprint is a second device of the same
+       identity, not a reconnect, and closing it here would make multi-device
+       impossible no matter what delivery did. Anything unproven is still
+       replaced, exactly as before — this is not a door back to claim-based
+       kicks, because the newcomer has proven and the old one has not. */
+    if (sameFingerprint && record.identityVerified && existing.identityVerified) {
+      console.log(`[Presence] Second verified device for ${record.fingerprint?.slice(0, 12) ?? ''} (${clientId.slice(0, 8)}) — coexisting`);
+      continue;
+    }
     console.log(`[Presence] Replacing duplicate connection ${clientId} for ${record.username || record.peerId}`);
     presence.delete(clientId);
     try {
@@ -7943,6 +7971,10 @@ wsServer.on('connection', (ws, req) => {
     if (message.type === 'hello') {
       record.username = String(message.username || '').slice(0, 80);
       record.peerId = String(message.peerId || '').slice(0, 160);
+      /* Which install said hello, not which identity: two devices may hold one
+         key pair, and this is the only field that tells their sockets apart.
+         A random client-generated string, no more identifying than peerId. */
+      record.deviceId = String(message.deviceId || '').slice(0, 128);
       /* A public key is under a kilobyte in every format the app uses, and the
          field is rebroadcast to every connected client on every presence
          change — one of the few fields with no ceiling of its own. */

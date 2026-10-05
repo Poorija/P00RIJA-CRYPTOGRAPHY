@@ -42,6 +42,7 @@ const CHAT_SETTINGS_TABS = [
   { id: 'privacy', fa: 'فایل‌ها و حریم خصوصی', en: 'Files & privacy', icon: 'fa-shield-halved' },
   { id: 'connection', fa: 'اتصال و TURN', en: 'Connection & TURN', icon: 'fa-network-wired' },
   { id: 'lock', fa: 'قفل چت', en: 'Chat lock', icon: 'fa-lock' },
+  { id: 'devices', fa: 'دستگاه‌های من', en: 'My devices', icon: 'fa-mobile-screen-button' },
   { id: 'storage', fa: 'حافظهٔ رمزنگاری‌شده', en: 'Encrypted vault', icon: 'fa-database' },
   { id: 'tools', fa: 'ابزارها', en: 'Tools', icon: 'fa-stethoscope' },
 ];
@@ -132,6 +133,13 @@ function buildChatSettingsTabs() {
   panes.tools.appendChild(archiveCard);
   body.querySelectorAll(':scope > .chat-ringtone-row').forEach((row) => move(row, 'sounds'));
   move(document.getElementById('chatLockToggle')?.closest('.chat-storage-card'), 'lock');
+  /* The devices pane is built here because it has no static markup to move:
+     its content is the live list of sockets sharing this fingerprint, drawn
+     from the peers payload the relay already broadcasts. */
+  const devicesCard = document.createElement('div');
+  devicesCard.id = 'chatDevicesCard';
+  devicesCard.className = 'chat-storage-card';
+  panes.devices.appendChild(devicesCard);
   move(document.getElementById('chatStorageCard'), 'storage');
   /* Stickers are stored things, and the vault pane is where somebody
      already goes to see what this app is keeping on their device. */
@@ -213,6 +221,56 @@ function settingsPaneTitle(id) {
   return tab ? t(tab.fa, tab.en) : t('تنظیمات', 'Settings');
 }
 
+/* My devices — one identity, several machines, one panel to see them on.
+ * The list is chatState.linkedDevices, filled by the peers handler from the
+ * relay's live presence table: it names sockets, so everyone in it is online
+ * right now, and a device that is away is simply absent until it returns. */
+function renderDevicesCard() {
+  const card = document.getElementById('chatDevicesCard');
+  if (!card) return;
+  const myDeviceId = typeof getDeviceId === 'function' ? getDeviceId() : '';
+  const linked = new Map();
+  for (const device of chatState.linkedDevices || []) {
+    linked.set(device.deviceId || device.clientId, {
+      name: device.name || String(device.deviceId || device.clientId || '').slice(0, 8) || '?',
+      online: true,
+      /* deviceId is the precise test. The clientId half only matters against a
+         relay that has not learned to echo deviceId yet — it still tells this
+         device's own socket from a sibling's. */
+      isSelf: Boolean(
+        (device.deviceId && device.deviceId === myDeviceId)
+        || (!device.deviceId && device.clientId && device.clientId === chatState.clientId)
+      ),
+    });
+  }
+  /* This device is always in the list, whether or not the relay round-trip
+     has shown it yet — the peers payload may lag a reconnect by a beat. */
+  if (!linked.has(myDeviceId)) {
+    linked.set(myDeviceId, { name: chatState.profile?.name || t('این دستگاه', 'This device'), online: true, isSelf: true });
+  }
+
+  const rows = Array.from(linked.values()).map((d) =>
+    '<div class="chat-device-row" style="display:flex;align-items:center;gap:0.7rem;padding:0.55rem 0.7rem;border:1px solid rgba(148, 163, 184, 0.2);border-radius:0.7rem;margin-bottom:0.4rem">'
+    + '<i class="fas ' + (d.isSelf ? 'fa-mobile-screen' : 'fa-laptop') + '" style="color:#38bdf8"></i>'
+    + '<span style="flex:1;font-weight:600;color:#e2e8f0">' + app().escapeHTML(d.name) + (d.isSelf ? ' <em style="opacity:0.6">(' + t('این دستگاه', 'this device') + ')</em>' : '') + '</span>'
+    + '<span style="font-size:0.72rem;color:' + (d.online ? '#34d399' : '#7d93b8') + '">' + (d.online ? t('آنلاین', 'online') : t('آفلاین', 'offline')) + '</span>'
+    + '</div>'
+  ).join('');
+
+  card.innerHTML =
+    '<div style="font-weight:700;margin-bottom:0.5rem">' + t('دستگاه‌های متصل به این هویت', 'Devices linked to this identity') + '</div>'
+    + '<p style="font-size:0.74rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
+    + t('هر دستگاهی که این هویت را دارد پیام‌ها را همزمان دریافت می‌کند. برای افزودن دستگاه جدید، پروفایل همراه را از این دستگاه خروجی بگیرید و روی دستگاه جدید وارد کنید.',
+        'Every device holding this identity receives messages simultaneously. To add a device, export the portable profile from this device and import it on the new one.')
+    + '</p>'
+    + rows
+    + '<div style="display:flex;gap:0.5rem;margin-top:0.8rem">'
+    + '<button type="button" class="btn" onclick="exportPortableProfileFile()" style="font-size:0.78rem"><i class="fas fa-qrcode"></i> '
+    + t('افزودن دستگاه (خروجی پروفایل)', 'Add device (export profile)')
+    + '</button>'
+    + '</div>';
+}
+
 function setChatSettingsTab(id) {
   const wanted = CHAT_SETTINGS_TABS.some((tab) => tab.id === id) ? id : 'connection';
   const pane = document.querySelector(`#chatConnectionPanel [data-settings-pane="${wanted}"]`)
@@ -230,6 +288,9 @@ function setChatSettingsTab(id) {
   document.querySelectorAll('#chatConnectionPanel [data-settings-tab]').forEach((button) => {
     button.classList.toggle('is-on', button.getAttribute('data-settings-tab') === wanted);
   });
+  /* The devices pane draws from the live peers state, so it is rendered
+     every time it is shown rather than once at build time. */
+  if (wanted === 'devices' && typeof renderDevicesCard === 'function') renderDevicesCard();
 
   if (wide && stage) {
     if (!settingsPaneHomes.has(wanted)) {

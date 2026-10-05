@@ -583,6 +583,7 @@ if (!isUnlocked()) return;
 if (!await PoorijaDialogs.confirm(t('بازنشانی کلید چت، سشن‌ها و پیام‌های آفلاین قبلی را غیرقابل بازکردن می‌کند. ادامه می‌دهید؟', 'Resetting the chat key can make previous sessions and offline messages unreadable. Continue?'))) {
 return;
 }
+const previousFingerprint = chatState.identity?.fingerprint || '';
 localStorage.removeItem(CHAT_IDENTITY_STORAGE_KEY);
 localStorage.removeItem(CHAT_SESSION_KEYS_STORAGE_KEY);
 chatState.identity = null;
@@ -592,6 +593,24 @@ await ensureIdentity();
 renderStaticUi();
 broadcastHello();
 notify(t('کلید هویتی چت بازسازی شد', 'Chat identity key rotated'), 'success');
+/* Tell the other devices that hold this identity that the key changed.
+   They see a system-note in their system conversation and a push, and can
+   re-link by importing the profile from this device — or stay on the old
+   key, which means they become their own identity from here on. */
+if (previousFingerprint && chatState.identity?.fingerprint && previousFingerprint !== chatState.identity.fingerprint) {
+  const newFp = chatState.identity.fingerprint;
+  try {
+    await sendRelayEnvelope({ fingerprint: previousFingerprint }, {
+      type: 'system-note',
+      message: t(
+        `کلید این هویت روی یکی از دستگاه‌ها بازنشانی شد. کلید تازه: ${newFp.slice(0, 16)}… — برای سینک با دستگاه جدید، پروفایل همراه را از آن دستگاه ایمپورت کنید. اگر این کار را نمی‌کنید، همین دستگاه با کلید قبلی خودش ادامه می‌دهد.`,
+        `The identity key was reset on one of the devices. New key: ${newFp.slice(0, 16)}… — to sync with the new device, import the portable profile from it. If you don't, this device continues with its own previous key.`,
+      ),
+      title: t('تغییر کلید هویت', 'Identity key changed'),
+      keyChange: { old: previousFingerprint, new: newFp },
+    });
+  } catch (_notifyError) { /* the other device is not reachable — the mailbox holds it */ }
+}
 }
 async function retryQueuedMessages() {
 if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;

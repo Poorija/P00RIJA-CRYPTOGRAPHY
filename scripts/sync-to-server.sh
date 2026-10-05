@@ -235,7 +235,7 @@ log "Restarting the stack"
 # Handed in on the command line rather than written into .env: they are this
 # machine's facts, not settings a person should be able to get wrong.
 OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION" \
-"" up -d --force-recreate poorija-cryptography chat-signal || {
+"${COMPOSE_CMD[@]}" up -d --force-recreate poorija-cryptography chat-signal || {
     fail "Bringing the stack up failed."
     exit 1
 }

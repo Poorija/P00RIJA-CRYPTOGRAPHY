@@ -423,15 +423,35 @@ if (peer.type) return;
 if (typeof presenceAnsweredElsewhere === 'function' && presenceAnsweredElsewhere(peer)) return;
 peer.status = 'offline';
 });
-/* Every record is checked against its own key before it is believed. */
-Promise.all((message.peers || []).map((peer) => withVerifiedFingerprint(peer)))
-.then((verified) => {
-verified.forEach((peer) => mergePeerRecord(peer, { online: true }));
-chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
-dropStaleSessionChannels();
-saveContacts();
-renderPeers();
-renderActivePeer();
+	/* Every record is checked against its own key before it is believed. */
+	Promise.all((message.peers || []).map((peer) => withVerifiedFingerprint(peer)))
+	.then((verified) => {
+	/* Other machines holding this same identity are family, not contacts. The
+	   fingerprint half of isSelfPeerRecord still drops them from chatState.peers
+	   below — correctly, or every device would list its siblings as contacts —
+	   so they are set aside here for the devices panel and the identity strip.
+	   The relay table names live sockets, so presence in this list means the
+	   device is connected right now; an away device is simply absent. */
+	const myFingerprint = chatState.identity?.fingerprint || '';
+	chatState.linkedDevices = myFingerprint
+	? verified
+	.filter((peer) => peer.fingerprint === myFingerprint)
+	.map((peer) => ({
+	deviceId: String(peer.deviceId || ''),
+	clientId: String(peer.clientId || ''),
+	name: String(peer.username || ''),
+	}))
+	: [];
+	verified.forEach((peer) => mergePeerRecord(peer, { online: true }));
+	chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
+	dropStaleSessionChannels();
+	saveContacts();
+	renderPeers();
+	renderActivePeer();
+	/* The live device list just changed: the strip count follows it, and an
+	   open devices pane redraws so the list stays current while watched. */
+	renderLinkedDeviceCount();
+	if (chatState.settingsPane === 'devices' && typeof renderDevicesCard === 'function') renderDevicesCard();
 /* Somebody being rung while they were away may have just walked in. */
 if (chatState.offlineRing) {
 const arrived = chatState.peers.find((peer) => peer.peerId === chatState.offlineRing.peerId && peer.status === 'online');

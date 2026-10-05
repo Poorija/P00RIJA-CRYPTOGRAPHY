@@ -114,6 +114,21 @@ async function ensurePrekey() {
   chatState.prekeys = prekeys;
   return entry;
 }
+
+/* Each INSTALL has a unique device id, distinct from the identity it holds.
+   Two devices linked to the same account share the fingerprint but never
+   the device id — this is how the device list tells them apart and how
+   "which device am I on" is answered without asking the user. */
+function getDeviceId() {
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(CHAT_DEVICE_ID_STORAGE_KEY) || 'null'); } catch (_error) { stored = null; }
+  if (!stored || !stored.id) {
+    stored = { id: generateId('device'), linkedAt: new Date().toISOString() };
+    try { localStorage.setItem(CHAT_DEVICE_ID_STORAGE_KEY, JSON.stringify(stored)); } catch (_error) { /* private mode */ }
+  }
+  return stored.id;
+}
+
 function findPrekey(id) {
 if (!id) return null;
 const now = Date.now();

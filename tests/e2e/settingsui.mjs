@@ -88,9 +88,10 @@ console.log('  ' + JSON.stringify(tabs));
    is open at a time — not that a particular strip element exists.
    Five became eight when Appearance, Chat notifications and Files & privacy
    were split out of Connection & TURN, which had been collecting every card
-   the builder was not told where to put. */
-check('all eight settings sections are reachable',
-  tabs.tabs.join(',')==='appearance,notifications,sounds,privacy,connection,lock,storage,tools',
+   the builder was not told where to put. Devices joined when one identity
+   started living on more than one machine. */
+check('all nine settings sections are reachable',
+  tabs.tabs.join(',')==='appearance,notifications,sounds,privacy,connection,lock,devices,storage,tools',
   JSON.stringify(tabs.tabs));
 check('exactly one section is open at a time', tabs.visiblePanes.length===1 && tabs.visiblePanes[0]===tabs.on, JSON.stringify(tabs.visiblePanes));
 

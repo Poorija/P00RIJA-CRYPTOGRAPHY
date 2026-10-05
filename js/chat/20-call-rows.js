@@ -831,6 +831,17 @@ window.scrollTo(0, 0);
 syncComposerViewportFocus(true);
 }, 0);
 }
+/* The identity strip's device count, on its own because the peers handler
+   refreshes it on every relay table update while renderStaticUi runs only on
+   connection and identity changes. */
+function renderLinkedDeviceCount() {
+const deviceCountEl = document.getElementById('chatLinkedDeviceCount');
+if (!deviceCountEl) return;
+const linkedCount = (chatState.linkedDevices || []).length;
+deviceCountEl.textContent = linkedCount > 0
+? String(linkedCount)
+: t('فقط این دستگاه', 'This device only');
+}
 function renderStaticUi() {
 if (!document.getElementById('content-chat')) return;
 /* Setting .value on an input the user is mid-typing in silently eats their
@@ -922,6 +933,9 @@ document.getElementById('chatPeerId').textContent = shortSecurityValue(localPeer
 document.getElementById('chatPeerId').title = localPeerId;
 document.getElementById('chatFingerprint').textContent = shortSecurityValue(localFingerprint);
 document.getElementById('chatFingerprint').title = localFingerprint;
+/* How many devices hold this identity right now — linkedDevices is filled by
+   the peers handler from the relay's live table, so the count is live too. */
+renderLinkedDeviceCount();
 document.getElementById('chatServerMeta').textContent = t(
 `Signal: ${chatServerOrigin()} | WebSocket: ${wsUrl()}`,
 `Signal: ${chatServerOrigin()} | WebSocket: ${wsUrl()}`

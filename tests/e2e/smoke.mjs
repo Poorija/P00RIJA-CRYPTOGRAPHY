@@ -119,7 +119,7 @@ console.log('  ' + JSON.stringify(chat));
    asserted too: it is by how often somebody opens a section, not by how the
    code grew. */
 check('the settings tabs are there',
-  chat.settingsTabs.join(',')==='appearance,notifications,sounds,privacy,connection,lock,storage,tools',
+  chat.settingsTabs.join(',')==='appearance,notifications,sounds,privacy,connection,lock,devices,storage,tools',
   JSON.stringify(chat.settingsTabs));
 check('the section is named Settings', chat.navLabel==='تنظیمات', chat.navLabel);
 check('the group maker ships with the payload', chat.groupMaker, String(chat.groupMaker));

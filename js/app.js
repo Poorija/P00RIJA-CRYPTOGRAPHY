@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v111';
+  return 'chat-v112';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -995,6 +995,7 @@ desktopBiometricWebOnly: 'Runtime icon switching is available only in the deskto
 yourChatIdentity: 'هویت شما در چت',
 peerIdLabel: 'شناسه Peer',
 securityKeyLabel: 'کلید امنیتی',
+devicesLabel: 'دستگاه‌های متصل',
 copyFullIdentity: 'کپی کامل هویت',
 showQrCode: 'نمایش QR code',
 startChat: 'شروع چت',
@@ -2048,6 +2049,7 @@ desktopBiometricWebOnly: 'Runtime icon switching is available only in the deskto
 yourChatIdentity: 'Your Identity in Chat',
 peerIdLabel: 'Peer ID',
 securityKeyLabel: 'Security Key',
+devicesLabel: 'Linked devices',
 copyFullIdentity: 'Copy Full Identity',
 showQrCode: 'Show QR code',
 startChat: 'Start Chat',
@@ -6572,7 +6574,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.21-chat-v111';
+const reloadKey = 'poorija-sw-reload-2.98.21-chat-v112';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6585,7 +6587,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.21-chat-v111', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.21-chat-v112', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();

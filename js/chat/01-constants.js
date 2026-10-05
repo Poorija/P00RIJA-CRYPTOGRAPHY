@@ -18,6 +18,9 @@
 
 const CHAT_PROFILE_STORAGE_KEY = 'poorija_chat_profile';
 const CHAT_IDENTITY_STORAGE_KEY = 'poorija_chat_identity';
+/* Unique per install, distinct from the identity: two linked devices share
+   the fingerprint but never the device id. */
+const CHAT_DEVICE_ID_STORAGE_KEY = 'poorija_chat_device_id';
 const CHAT_HISTORY_STORAGE_KEY = 'poorija_chat_history';
 const CHAT_SESSION_KEYS_STORAGE_KEY = 'poorija_chat_session_keys';
 const CHAT_SPACES_STORAGE_KEY = 'poorija_chat_spaces';

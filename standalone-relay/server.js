@@ -3991,6 +3991,9 @@ function snapshotPeers() {
       clientId: client.clientId,
       username: client.username || `User ${client.guestId || ''}`,
       peerId: client.peerId,
+      /* Which install, not which identity: two devices may hold one key pair,
+         and this is the only field that tells their sockets apart. */
+      deviceId: client.deviceId,
       publicKeyData: client.publicKeyData || '',
       fingerprint: client.fingerprint || '',
       avatarData: client.avatarData || '',
@@ -4070,6 +4073,15 @@ function closeDuplicatePresenceRecords(record) {
     const sameFingerprint = record.fingerprint && existing.fingerprint === record.fingerprint;
     const samePeerId = record.peerId && existing.peerId === record.peerId;
     if (!sameFingerprint && !samePeerId) continue;
+    /* One account may prove itself from several sockets at once: a second
+       VERIFIED connection for a fingerprint is a second device of the same
+       identity, not a reconnect. Anything unproven is still replaced, exactly
+       as before — this is not a door back to claim-based kicks, because the
+       newcomer has proven and the old one has not. */
+    if (sameFingerprint && record.identityVerified && existing.identityVerified) {
+      console.log(`[Presence] Second verified device for ${record.fingerprint?.slice(0, 12) ?? ''} (${clientId.slice(0, 8)}) — coexisting`);
+      continue;
+    }
     console.log(`[Presence] Replacing duplicate connection ${clientId} for ${record.username || record.peerId}`);
     presence.delete(clientId);
     try {
@@ -4489,6 +4501,20 @@ totalRelays++;
      requires the target to have proven the identity it claims. */
   const target = presence.get(String(message.toClientId || '')) ||
     findOpenPresenceByFingerprint(toFingerprint);
+  /* One account may be online from several sockets at once, and a frame
+     addressed to the identity belongs on all of them. The set is the target
+     as it was always resolved — so a single-device delivery is exactly what
+     it has always been — plus every other verified live socket of the same
+     fingerprint. */
+  const allTargets = [];
+  if (target) allTargets.push(target);
+  if (toFingerprint) {
+    for (const candidate of presence.values()) {
+      if (candidate.fingerprint !== toFingerprint || !candidate.identityVerified) continue;
+      if (candidate.ws?.readyState !== WebSocket.OPEN || allTargets.includes(candidate)) continue;
+      allTargets.push(candidate);
+    }
+  }
 
   const payloadType = String(message.payload?.type || 'unknown');
 
@@ -4548,12 +4574,14 @@ totalRelays++;
     return;
   }
 
-  safeSend(target.ws, {
-    type: 'relay',
-    fromClientId: clientId,
-    fromFingerprint: fromFingerprint,
-    payload: message.payload || null,
-  });
+  for (const recipient of allTargets) {
+    safeSend(recipient.ws, {
+      type: 'relay',
+      fromClientId: clientId,
+      fromFingerprint: fromFingerprint,
+      payload: message.payload || null,
+    });
+  }
 
   /* Store-and-forward is not only for offline targets. A "connected" client
      can be a locked app whose webview is suspended: the socket accepts the
@@ -4754,6 +4782,10 @@ wsServer.on('connection', (ws, req) => {
     if (message.type === 'hello') {
       record.username = String(message.username || '').slice(0, 80);
       record.peerId = String(message.peerId || '').slice(0, 160);
+      /* Which install said hello, not which identity: two devices may hold one
+         key pair, and this is the only field that tells their sockets apart.
+         A random client-generated string, no more identifying than peerId. */
+      record.deviceId = String(message.deviceId || '').slice(0, 128);
       /* A public key is under a kilobyte in every format the app uses, and the
          field is rebroadcast to every connected client on every presence
          change — one of the few fields that had no ceiling of its own. */
