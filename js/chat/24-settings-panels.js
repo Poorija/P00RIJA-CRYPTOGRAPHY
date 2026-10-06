@@ -544,7 +544,13 @@ const presenceClass = isGroup
 const isSystem = record.system === true;
 const pendingDraft = draftFor(key);
 const previewLine = pendingDraft
-|| last?.text
+/* A hidden message says it is one, and nothing else — not in the thread, and
+   most of all not here, where the whole point of the list is to be read at a
+   glance over somebody's shoulder. The label stands even while the message
+   happens to be revealed in the open thread: the list is a different surface
+   and owes the secret nothing. */
+|| (last?.hidden ? t('پیام مخفی', 'Hidden message') : '')
+|| (last?.hidden ? '' : last?.text)
 || (last?.type === 'sticker' || last?.type === 'rich' ? mediaEntryLabel(last) : '')
 || last?.name
 || (record.type === 'group' ? t('گروه محلی', 'Local group') : '')
@@ -627,10 +633,14 @@ chatState.activeConversationId = button.getAttribute('data-chat-conversation');
 const openedRecord = conversationRecordById(chatState.activeConversationId);
 chatState.timerSeconds = Number(openedRecord?.timerSeconds || 0);
 if (typeof syncTimerUi === 'function') syncTimerUi();
-if (previousConversationId !== chatState.activeConversationId) {
-if (chatState.editingMessageId && typeof clearMessageContext === 'function') clearMessageContext();
-if (chatState.selectedMessages?.size && typeof exitSelectionMode === 'function') exitSelectionMode();
-}
+	if (previousConversationId !== chatState.activeConversationId) {
+	if (chatState.editingMessageId && typeof clearMessageContext === 'function') clearMessageContext();
+	if (chatState.selectedMessages?.size && typeof exitSelectionMode === 'function') exitSelectionMode();
+	/* Another thread means the reader stopped reading this one: anything they
+	   swiped open in it goes back behind the mask, where it stays until they
+	   return and ask again. */
+	if (typeof hideRevealedMessages === 'function') hideRevealedMessages();
+	}
 const hadUnread = firstUnreadEntryId(chatState.activeConversationId);
 clearManualUnread(chatState.activeConversationId);
 markConversationRead(chatState.activeConversationId);
@@ -897,6 +907,7 @@ status: 'offline',
 if (!record) return null;
 record.manual = true;
 saveContacts();
+if (typeof hideRevealedMessages === 'function') hideRevealedMessages();
 chatState.activePeerClientId = record.clientId;
 chatState.activeConversationId = getConversationKey(record);
 setChatView('chats');

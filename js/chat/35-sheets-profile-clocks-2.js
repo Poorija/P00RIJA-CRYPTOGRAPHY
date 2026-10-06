@@ -555,21 +555,43 @@ document.getElementById('chatGroupMaker')?.addEventListener('click', (event) => 
 document.getElementById('chatGroupMakerAvatarBtn')?.addEventListener('click', () => {
   document.getElementById('chatGroupMakerAvatarInput')?.click();
 });
-document.getElementById('chatGroupMakerAvatarInput')?.addEventListener('change', (event) => {
+document.getElementById('chatGroupMakerAvatarInput')?.addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   event.target.value = '';
-  if (!file || !file.type.startsWith('image/')) return;
+  /* No image/ type gate, and the same drawer as the profile avatar: a DNG
+     arrives from the picker with an empty type, and "any format in, one
+     format out" is the rule everywhere a picture is chosen. */
+  if (!file) return;
   if (file.size > MAX_PROFILE_AVATAR_BYTES) {
-    notify(t('تصویر گروه باید کمتر از ۵ مگابایت باشد.', 'A group picture must be under 5 MB.'), 'warning');
+    notify(t('تصویر گروه باید کمتر از 20 مگابایت باشد.', 'A group picture must be under 20 MB.'), 'warning');
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    groupMakerAvatar = String(reader.result || '');
+  let dataUrl = '';
+  try {
+    ({ dataUrl } = await window.PoorijaImageFormats.toDrawableDataUrl(file));
+  } catch (error) {
+    notify(describeImageFailure(error), 'error');
+    return;
+  }
+  const image = new Image();
+  image.onload = () => {
+    const size = 640;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, size, size);
+    const scale = Math.max(size / image.width, size / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    ctx.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+    groupMakerAvatar = canvas.toDataURL('image/jpeg', 0.92);
     const img = document.getElementById('chatGroupMakerAvatarImg');
     if (img) { img.src = groupMakerAvatar; img.hidden = false; }
   };
-  reader.readAsDataURL(file);
+  image.onerror = () => notify(t('این تصویر باز نشد.', 'That image could not be opened.'), 'error');
+  image.src = dataUrl;
 });
 document.getElementById('chatStartSessionBtn')?.addEventListener('click', () => startSecureSession());
 document.getElementById('chatDeleteConversationBtn')?.addEventListener('click', deleteActiveConversation);

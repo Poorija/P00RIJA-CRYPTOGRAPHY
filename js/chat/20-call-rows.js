@@ -565,17 +565,21 @@ if (chatState.pendingAvatarData) {
 profile.avatarData = chatState.pendingAvatarData;
 chatState.pendingAvatarData = '';
 }
+/* Bumped on every save so contacts can compare cards against it; see
+   announceProfileCardIfStale. */
+profile.updatedAt = new Date().toISOString();
 chatState.profile = profile;
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, profile);
 renderStaticUi();
 broadcastHello();
 /* broadcastHello is how everybody learns a profile changed, and it reaches
-   exactly the people this relay can see. Contacts on another relay are told the
-   same thing the only way it can reach them -- the card goes to each of them
-   individually, because there is no broadcast that crosses a relay link and
-   there should not be: a relay that announced its clients to its peers would be
-   handing over the one thing it is not supposed to know about them together. */
-announceProfileToFarContacts();
+   exactly the people this relay can see. The card is what carries the
+   photograph itself — the presence table stopped carrying avatars — so it
+   goes to each contact individually, on this relay and on another alike:
+   there is no broadcast that crosses a relay link and there should not be,
+   because a relay that announced its clients to its peers would be handing
+   over the one thing it is not supposed to know about them together. */
+announceProfileToContacts();
 notify(t('پروفایل چت ذخیره شد', 'Chat profile saved'), 'success');
 }
 function sessionSecurityText(session) {

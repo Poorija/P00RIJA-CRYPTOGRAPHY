@@ -1075,6 +1075,15 @@ function renderChatNavBadges() {
 }
 
 function setChatView(view) {
+/* Leaving the message screen at all — another list, the settings pane, any
+   tab — is the reader walking away: whatever they had swiped open goes back
+   behind its mask, exactly like switching to another conversation. Telegram
+   semantics, asked for by name. The repaint matters on the path where the
+   open thread survives the switch: the mask is cleared in state, and state
+   is what a render reads. */
+if (typeof hideRevealedMessages === 'function' && hideRevealedMessages()) {
+window.requestAnimationFrame(() => { renderMessages(); });
+}
 /* The chrome has to be re-measured for the view being shown: Settings needs an
    explicit body height and nothing scrolls when you switch to it, so the
    scroll handler would never fire. */
@@ -1243,7 +1252,7 @@ async function updateProfileAvatar(file) {
    of the file, which is the question asked below. */
 if (!file) return;
 if (file.size > MAX_PROFILE_AVATAR_BYTES) {
-notify(t('تصویر پروفایل باید کمتر از 5 مگابایت باشد', 'Profile image must be under 5 MB'), 'warning');
+notify(t('تصویر پروفایل باید کمتر از 20 مگابایت باشد', 'Profile image must be under 20 MB'), 'warning');
 return;
 }
 /* An iPhone shoots HEIC and a camera in raw mode writes DNG. Most engines
@@ -1337,7 +1346,13 @@ ctx.restore();
 }
 function canvasToAvatarDataUrl(canvas) {
 try {
-return canvas.toDataURL('image/png');
+/* JPEG, not PNG, and for a reason that is not size alone. Whatever format
+   came in — HEIC off an iPhone, a raw container whose embedded JPEG this
+   editor is drawing — the STORED avatar must be something every device can
+   display and every browser can download, and PNG here was also three to
+   five times the bytes for a photograph. The alpha channel is painted over
+   anyway (drawAvatarEditor fills the background first). */
+return canvas.toDataURL('image/jpeg', 0.92);
 } catch (error) {
 console.warn('Avatar canvas export failed:', error);
 return '';
@@ -1407,10 +1422,18 @@ chatState.profile = {
 ...chatState.profile,
 ...buildProfileDraft(),
 avatarData,
+/* The version contacts' cards are compared against; see
+   announceProfileCardIfStale. Without a bump here an avatar change reached
+   nobody who already had any avatar at all. */
+updatedAt: new Date().toISOString(),
 };
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 broadcastHello();
+/* The relay strips avatars from the presence table (they travel on
+   profile-card), so a hello alone tells nobody anything about a new photo —
+   the card has to be pushed to the contacts that are here right now. */
+announceProfileToContacts();
 }
 async function updateGroupAvatar(file) {
 const space = getActiveConversation();

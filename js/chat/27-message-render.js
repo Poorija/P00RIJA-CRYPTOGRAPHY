@@ -1159,8 +1159,19 @@ picker.classList.remove('open-up', 'open-down');
    already carries per-message metadata; it means an observer of the transport
    can tell that A message is hidden, never what it says. */
 function revealedMessageSet() {
-if (!chatState.revealedMessages) chatState.revealedMessages = new Set();
-return chatState.revealedMessages;
+	if (!chatState.revealedMessages) chatState.revealedMessages = new Set();
+	return chatState.revealedMessages;
+}
+/* Telegram's rule, adopted verbatim: the reveal lasts exactly as long as the
+   reader stays. Switching to another conversation, or out of the chat screen
+   altogether, hides everything again — each return asks for a fresh tap. The
+   old behaviour kept the set until the app reloaded, so a message swiped open
+   once sat in plain text through every other thing the reader did. */
+function hideRevealedMessages() {
+	const set = chatState.revealedMessages;
+	if (!set || !set.size) return false;
+	set.clear();
+	return true;
 }
 function isMessageHidden(entry) {
 return Boolean(entry?.hidden) && !revealedMessageSet().has(entry.id);
@@ -1751,9 +1762,18 @@ function openPeerPhotoCard(peer) {
   closePeerPhotoCard();
   const name = peer.username || peer.name || peer.peerId || t('کاربر', 'User');
   const mood = String(peer.mood || '').trim();
-  const avatarHtml = peer.avatarData
-    ? `<img src="${peer.avatarData}" alt="">`
+  /* sanitizeAvatarData, not trust: this string came over a wire from someone
+     never verified, and it is about to sit in an src and in a download
+     attribute. Raster data: URLs only — the same gate every other render
+     path applies. */
+  const photoSrc = sanitizeAvatarData(peer.avatarData);
+  const avatarHtml = photoSrc
+    ? `<img src="${photoSrc}" alt="">`
     : `<span class="chat-peer-photo-initials">${app().escapeHTML(initials(name))}</span>`;
+  /* The extension follows what is actually in the string, not what format it
+     started life as: everything is re-encoded to JPEG the day it is chosen,
+     but a record from an older round may still hold a PNG. */
+  const photoExtension = /^data:image\/png/.test(photoSrc) ? 'png' : 'jpg';
   const host = document.createElement('div');
   host.className = 'chat-peer-photo';
   host.innerHTML = `
@@ -1763,9 +1783,21 @@ function openPeerPhotoCard(peer) {
       <div class="chat-peer-photo-frame">${avatarHtml}</div>
       <div class="chat-peer-photo-name">${app().escapeHTML(name)}</div>
       ${mood ? `<div class="chat-peer-photo-mood">${app().escapeHTML(mood)}</div>` : ''}
+      ${photoSrc ? `<button type="button" class="chat-peer-photo-download" data-peer-photo-download><i class="fas fa-download"></i><span>${app().escapeHTML(t('دانلود عکس', 'Download photo'))}</span></button>` : ''}
     </section>`;
   host.addEventListener('click', (event) => {
     if (event.target.closest('[data-peer-photo-close]')) closePeerPhotoCard();
+    const download = event.target.closest('[data-peer-photo-download]');
+    if (download && photoSrc) {
+      /* A plain anchor on a data: URL — no blob to revoke, no fetch to fail,
+         and the browser names the file from the download attribute. */
+      const link = document.createElement('a');
+      link.href = photoSrc;
+      link.download = `${name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'photo'}.${photoExtension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
   });
   document.addEventListener('keydown', peerPhotoCardKeydown);
   document.body.appendChild(host);

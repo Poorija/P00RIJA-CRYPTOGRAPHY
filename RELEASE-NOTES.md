@@ -1,20 +1,43 @@
-# P00RIJA Cryptography 2.98.25
+# P00RIJA Cryptography 2.98.26
 
-Version 2.98.25 · build chat-v118
+Version 2.98.26 · build chat-v119
 
 این نسخه همهٔ فاصلهٔ از 2.91.28 تا امروز را پوشش می‌دهد: یک اکانت روی چند
 دستگاه — با همگام‌سازی مهر وموم‌شدهٔ تاریخچه، تماس‌ها، مخاطبین و فایل‌ها — یک
-ممیزی سختگیرانهٔ چنددستگاهی که هجده یافته پیدا کرد و همه‌شان فیکس شدند، و
+ممیزی سختگیرانهٔ چنددستگاهی که هجده یافته پیدا کرد و همه‌شان فیکس شدند،
 دوره‌ای از فیکس‌های مانیتور که با پسوردی که عوض نمی‌شد شروع شد و به عددی
-رسید که داشبورد هرگز نشان نداده بود. متن هر بخش اول فارسی است و بعد
-انگلیسی.
+رسید که داشبورد هرگز نشان نداده بود، و بازگشتِ واقعی عکس پروفایل: انتخاب
+با هر فرمتی، ذخیره به‌صورت JPEG، و رساندن عکس جدید به مخاطبی که از قبل عکس
+قدیمی را داشت. متن هر بخش اول فارسی است و بعد انگلیسی.
 
 This release covers the whole distance from 2.91.28 to today: one account on
 several devices — with sealed synchronisation of history, calls, contacts and
 files — a hostile multi-device audit that found eighteen defects and fixed
-every one, and a round of monitor fixes that began with a password that would
-not change and ended with a number the dashboard had never shown. Each
-section is Persian first, English after.
+every one, a round of monitor fixes that began with a password that would not
+change and ended with a number the dashboard had never shown, and profile
+photographs that finally travel: any format in, JPEG out, and a new picture
+delivered to contacts who already had the old one. Each section is Persian
+first, English after.
+
+---
+
+## عکس پروفایل، از اول تا آخر · The profile photograph, end to end
+
+- **هر فرمتی که دوربین می‌سازد** — HEIC آیفون، کانتینرهای خام (DNG، CR2،
+  NEF، ARW، ORF، RW2، RAF) با پیش‌نمایشِ درونی، و هر فرمت معمولی؛ سقف
+  ورود ۲۰ مگابایت. چیزی که ذخیره می‌شود JPEG است — روی هر دستگاهی باز
+  می‌شود و دانلودش می‌شود.
+- **عکس جدید به مخاطب می‌رسد** — جدول حضور دیگر عکس حمل نمی‌کند (درست هم
+  هست) و کارت پروفایل تنها مسیر بود؛ اما کارت فقط به مخاطبِ رلهٔ دیگر
+  می‌رفت و فقط وقتی گیرنده اصلاً عکسی نداشت. نتیجه: عکس عوض‌شده به هیچ‌کس
+  نمی‌رسید. حالا کارت به مخاطب هم‌رله هم می‌رود، لحظهٔ ذخیره به همهٔ
+  حاضران فشرده می‌شود، و با هر تغییر نسخهٔ پروفایل دوباره ارسال می‌شود —
+  به آنلاین‌ها فوری، به غایبان در اولین حضور.
+- **نمایش کامل، نه برش دایره‌ای** — لمس عکس، تمام عکس را contain-fit نشان
+  می‌دهد (دیگر همان دایرهٔ کوچک هدر نیست) و دکمهٔ دانلود همان‌جا است.
+- **پیام مخفی در فهرست چت‌ها لو نمی‌رود** — به جای متنِ پیام، فقط
+  «پیام مخفی» نوشته می‌شود؛ و ترتیب تلگرامی برقرار شد: با خروج از گفتگو
+  یا جابه‌جایی بین تب‌ها، پیام‌های بازشده دوباره پشت ماسک می‌روند.
 
 ---
 
@@ -100,7 +123,7 @@ section is Persian first, English after.
   برتری env ویرایش‌شده، و برگشت.
 - یازده تعریف نسخه در کل پروژه هم‌خوان‌اند و نسخهٔ اندروید که از نسخهٔ
   ۲۳ عقب مانده بود جلو آمد.
-- هر دو سرور (فنلاند و ایران) یک‌جوار 2.98.25-chat-v118 را سرو می‌کنند و
+- هر دو سرور (فنلاند و ایران) یک‌جوار 2.98.26-chat-v119 را سرو می‌کنند و
   لینک بین‌رله‌ای روشن و بالا است.
 
 ---
@@ -122,7 +145,7 @@ sha256sum -c SHA256SUMS.txt
 روی ویندوز (PowerShell) · on Windows:
 
 ```powershell
-Get-FileHash ".\P00RIJA Cryptography_2.98.25_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\P00RIJA Cryptography_2.98.26_x64-setup.exe" -Algorithm SHA256
 ```
 
 برای یک فایل تکی، چک‌سام را با سطر مربوط به همان فایل در `SHA256SUMS.txt`

@@ -110,7 +110,11 @@ const LARGE_FILE_CONFIRM_BYTES = 25 * 1024 * 1024;
 const TRANSFER_CONSENT_TIMEOUT_MS = 60000;
 const DEFAULT_AUTO_DOWNLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
 const CHAT_PREFS_STORAGE_KEY = 'poorija_chat_prefs';
-const MAX_PROFILE_AVATAR_BYTES = 5 * 1024 * 1024;
+/* Twenty megabytes, not five: a raw file from a camera is nobody's "small"
+   picture, and the editor — not this ceiling — is what makes the stored avatar
+   a sane size. The limit exists for the INPUT, so a 40MB sensor dump is still
+   refused before it is ever read into memory. */
+const MAX_PROFILE_AVATAR_BYTES = 20 * 1024 * 1024;
 const SESSION_READY_TIMEOUT_MS = 8000;
 /* How long a phone rings before the call gives up. The same number on both
    sides, and on group calls: a ring that never stops is worse than a missed

@@ -457,6 +457,12 @@ peer.status = 'offline';
 	chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
 	dropStaleSessionChannels();
 	saveContacts();
+	/* A photograph travels on the card, and this broadcast — which carries
+	   who is HERE but never what they look like — is the moment a same-relay
+	   contact becomes known to be here. That is the moment a card held back
+	   for an absent contact may finally go out: the version map inside makes
+	   this a no-op once each contact is current. */
+	(chatState.peers || []).forEach((peer) => { announceProfileCardIfStale(peer); });
 	renderPeers();
 	renderActivePeer();
 	/* The live device list just changed: the strip count follows it, an

@@ -926,13 +926,20 @@ function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaR
    * display name, a photograph and a prekey -- the same things the card says to
    * anybody who asks. */
   const route = known || viaRoute;
-  if (!route) return false;
+  /* A contact on THIS relay is somebody to reach too. The presence table
+     stopped carrying avatars (it says who is here, not what they look like),
+     which made the card the only carrier of a photograph — and this guard
+     used to refuse the card for exactly the people this relay CAN deliver
+     to, so a changed avatar reached nobody who already had one at all. Any
+     identified record goes on below; sendRelayEnvelope picks the transit leg
+     by itself when the contact lives elsewhere. */
+  if (!route && !peerRecord?.clientId && !peerRecord?.fingerprint) return false;
   const key = peerRecord.fingerprint || peerRecord.clientId;
   const last = profileCardSentAt.get(key) || 0;
   if (!force && Date.now() - last < PROFILE_CARD_MIN_MS) return false;
   profileCardSentAt.set(key, Date.now());
   const card = myProfileCard(askForTheirs);
-  if (known) return sendRelayEnvelope(peerRecord, card);
+  if (known || !route) return sendRelayEnvelope(peerRecord, card);
   sendViaTransit({
     type: 'relay',
     toClientId: peerRecord.clientId || '',
@@ -1041,6 +1048,11 @@ function askIfPeerIsThere(peerRecord, { force = false } = {}) {
   if (!peerRecord.avatarData && typeof peerLooksOnline === 'function' && peerLooksOnline(peerRecord)) {
     sendProfileCard(peerRecord, { askForTheirs: true });
   }
+  /* And ours, whenever it changed since this contact last heard it — the
+     presence question is already the once-every-twelve-seconds moment this
+     contact is thought about, which is cheap enough to piggyback the
+     "here is what I look like now" on. */
+  announceProfileCardIfStale(peerRecord);
   const tag = `presence-${fingerprint.slice(0, 12)}-${Date.now().toString(36)}`;
   sendViaTransit({ type: 'presence-query', toFingerprint: fingerprint, tag }, home, peerRecord);
   return true;
@@ -1086,17 +1098,37 @@ function keepAskingAboutTheOpenConversation() {
   presenceTimer.unref?.();
 }
 
-/* Everybody on another relay, told that this profile changed.
+/* Everybody who can be told that this profile changed, told in the way that
+ * reaches them — which since the presence table dropped avatars is the card,
+ * for contacts on this relay exactly as much as for contacts on another.
  *
- * `force`, because a profile change is exactly the moment the throttle is wrong:
- * it exists to stop a card being re-sent for no reason, and this is the reason.
- * It asks for nothing back -- the other side already has whatever it needs from
- * us, and a reply would turn one save into a round trip per contact. */
-function announceProfileToFarContacts() {
+ * The `force` in announceProfileCardIfStale is because a profile change is the
+ * one moment the send-throttle is wrong: the throttle exists to stop a card
+ * being re-sent for no reason, and this is the reason. It asks for nothing
+ * back -- the other side already has whatever it needs from us, and a reply
+ * would turn one save into a round trip per contact. */
+/* Which profile version each conversation was last told about. In memory on
+   purpose: a fresh session may fairly re-tell, because a contact who was
+   replaced by a reinstall never says so. */
+const profileCardVersionSent = new Map();
+function announceProfileCardIfStale(peerRecord) {
+if (!peerRecord || peerRecord.type || peerRecord.system) return false;
+const conversationKey = getConversationKey(peerRecord);
+const version = String(chatState.profile?.updatedAt || '');
+if (!conversationKey || !version) return false;
+/* Never queue a card for somebody absent: cards are persist:false by design
+   (a photograph is not mail), and a card into an empty room is traffic for
+   nothing. Their presence is what says the room is occupied — and when it
+   later does, this is called again and the version still disagrees. */
+if (typeof peerLooksOnline === 'function' && !peerLooksOnline(peerRecord)) return false;
+if (profileCardVersionSent.get(conversationKey) === version) return false;
+profileCardVersionSent.set(conversationKey, version);
+return sendProfileCard(peerRecord, { askForTheirs: false, force: true });
+}
+function announceProfileToContacts() {
   for (const peer of chatState.peers || []) {
     if (peer?.type) continue;
-    if (!transitRouteFor(peer)) continue;
-    sendProfileCard(peer, { askForTheirs: false, force: true });
+    announceProfileCardIfStale(peer);
   }
 }
 
