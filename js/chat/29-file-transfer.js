@@ -2649,7 +2649,35 @@ registerChatPush(false).catch((error) => console.warn('Web Push refresh skipped:
 }
 function ackRelayMessage(relayId) {
 if (!relayId || chatState.ws?.readyState !== WebSocket.OPEN) return;
+/* One mailbox is shared by every device of this account. An ACK destroys
+   the copy for ALL of them, so a device that has siblings holds its ACK
+   while any sibling is absent from the live table — the copy in the box is
+   that sibling's only guaranteed delivery. The ids are kept and flushed the
+   moment the table says everyone is here again; what never comes back is
+   swept by the relay's retention in the end.
+   An account that never linked devices acks as it always did: there is no
+   second reader the copy could belong to. */
+if (chatState.hasLinkedDevices && (chatState.linkedDevices || []).length < 2) {
+chatState.deferredMailAcks = chatState.deferredMailAcks || [];
+if (!chatState.deferredMailAcks.includes(relayId)) {
+chatState.deferredMailAcks.push(relayId);
+/* Bounded: a mailbox drain past this size acks the overflow — retention
+   holds the rest of the guarantee, and the set must not grow forever. */
+if (chatState.deferredMailAcks.length > 2000) chatState.deferredMailAcks.shift();
+}
+return;
+}
 chatState.ws.send(JSON.stringify({ type: 'relay-ack', ids: [relayId] }));
+}
+/* The sibling came back: everything held for them can be acked now — they
+   drained their own window on connect, and the live frames reach everyone
+   that is here. */
+function flushDeferredMailAcks() {
+const held = chatState.deferredMailAcks || [];
+if (!held.length || chatState.ws?.readyState !== WebSocket.OPEN) return;
+const batch = held.splice(0, 500);
+chatState.ws.send(JSON.stringify({ type: 'relay-ack', ids: batch }));
+if (held.length) flushDeferredMailAcks();
 }
 function clearReconnectTimer() {
 if (chatState.reconnectTimer) {

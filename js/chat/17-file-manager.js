@@ -1394,6 +1394,24 @@ async function importPortableProfileFile(file) {
   const prekeys = Array.isArray(payload.prekeys) ? payload.prekeys : [];
   chatState.prekeys = prunePrekeys(prekeys);
   savePrekeys(chatState.prekeys);
+  /* Replacing a live identity means the history and calls on this device
+     belong to a DIFFERENT account now — sessions the new identity cannot
+     open, threads half of which the old account's contacts still seal to
+     the old key. Mixing the two in one vault reads as one conversation
+     list with holes in it; the confirmation already said this replaces
+     the identity, and this is what replacing means. */
+  if (replacing) {
+    chatState.history = {};
+    chatState.calls = [];
+    chatState.sessions.clear();
+    localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
+    localStorage.removeItem(CHAT_CALLS_STORAGE_KEY);
+    localStorage.removeItem(CHAT_SESSION_KEYS_STORAGE_KEY);
+    /* The account's device role starts over with its new identity. */
+    chatState.profile.peerIdSuffix = false;
+    chatState.hasLinkedDevices = false;
+    chatState.profile.hasLinkedDevices = false;
+  }
   chatState.p2pNoticeShown = false;
   chatState.reconnectAttempt = 0;
   renderStaticUi();

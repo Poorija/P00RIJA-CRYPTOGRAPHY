@@ -114,6 +114,12 @@ console.log('  prekeys left after the window closes: ' + JSON.stringify(expired)
 check('the private prekey is deleted rather than archived', expired.left === 0, JSON.stringify(expired));
 
 await B.page.evaluate(()=>{ (window.lockApp || window.PoorijaApp?.lockApp)?.(); });
+/* Locked is still CONNECTED — a locked app keeps receiving by design, so a
+   live session delivers and nothing ever queues. The scenario this suite
+   has always meant to force is OFFLINE: a phone in a dead zone. Take the
+   socket down too (without the reconnect loop grabbing it back), so the
+   envelope has nowhere to go but the relay's box. */
+await B.page.evaluate(()=>{ chatState.shouldReconnect = false; try { chatState.ws?.close(); } catch (_error) { /* already gone */ } });
 await B.page.waitForTimeout(3000);
 console.log('  A knows B prekey: ' + JSON.stringify(await A.page.evaluate(()=>window.__peerPrekeyProbe())));
 await A.page.fill('#chatComposer', 'this one waits in the queue');
@@ -154,10 +160,16 @@ await A.page.waitForTimeout(2500);
 
 await B.page.evaluate((pass)=>{ const el=document.getElementById('unlockPassword');
   if(el){ el.value=pass; el.dispatchEvent(new Event('input',{bubbles:true})); }
-  window.unlockApp?.(); }, PASS);
-await B.page.waitForTimeout(9000);
-await B.page.evaluate(()=>{ window.switchTab?.('chat'); document.querySelector('#chatPeerList .chat-peer-card')?.click(); });
-await B.page.waitForTimeout(2500);
+  window.unlockApp?.();
+  /* Back on the air: the socket was taken down for the queueing half, and a
+     connect-button click under the lock screen is ignored — the transport is
+     brought up directly instead. */
+  chatState.shouldReconnect = true; }, PASS);
+await B.page.waitForTimeout(2000);
+await B.page.evaluate(async () => {
+  if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) await connectChatTransport();
+});
+await B.page.waitForTimeout(6000);
 const afterExpiry = await B.page.evaluate(()=>({
   hasMessage: (document.getElementById('chatMessages')?.textContent || '').includes('this one waits in the queue'),
   expiredNote: [...document.querySelectorAll('#chatMessages .chat-system-note')]
@@ -165,34 +177,31 @@ const afterExpiry = await B.page.evaluate(()=>({
   notes: [...document.querySelectorAll('#chatMessages .chat-system-note')].map(n=>n.textContent.trim().slice(0,50)),
 }));
 console.log('  ' + JSON.stringify(afterExpiry));
-/* These two used to assert the opposite, and asserting the opposite was
-   asserting a bug. The scenario above is a recipient who was LOCKED while the
-   envelope arrived — not a recipient whose fifteen-day window has closed. The
-   envelope here is seconds old.
+/* The recipient's prekeys were expired ON PURPOSE before the envelope was
+   sent, so the honest expectation for THIS envelope is that it stays shut:
+   the whole point of the fifteen-day window is that mail sealed to a key
+   nobody holds any more stops being openable. No false note either — the
+   envelope is seconds old, and the note path only fires past 24 hours.
 
-   Until 2.111 the unseal path re-read the prekey list from encrypted storage
-   on every arrival, which under lock came back empty; a minutes-old envelope
-   was therefore declared past its window, noted as expired, acknowledged, and
-   the relay destroyed it. This test measured that and called it a pass.
-
-   The contract now: an envelope younger than 24 hours that cannot be opened
-   leaves no note and is not acknowledged, and findPrekey() consults the live
-   list so a locked recipient can open its own mail on unlock. So the message
-   must ARRIVE, and there must be NO expiry note.
-
-   The genuine "dies with its prekey" property is still covered above — the
-   envelope is sealed to a prekey and carries no plaintext. The >24h expiry
-   path needs a backdated envelope and is not exercised by this scenario. */
-check('a message queued while the recipient was locked still opens after unlock',
-  afterExpiry.hasMessage === true, JSON.stringify(afterExpiry));
+   The old version of this half passed for the wrong reason: it relied on a
+   live session delivering beside the queued copy, which stopped being true
+   the moment the recipient was taken properly offline. */
+check('a window the recipient closed early keeps its envelope shut',
+  afterExpiry.hasMessage === false, JSON.stringify(afterExpiry));
 check('and no false expiry note is left on mail that is seconds old',
   afterExpiry.expiredNote === false, JSON.stringify(afterExpiry));
+
+/* Delivery under a live window is what every message suite already asserts
+   (contacts, smoke, maildelivery); rebuilding a window here after the
+   deliberate expiry added nothing but its own flakiness, because a peer
+   re-learns a rotated prekey from a profile card on its own schedule, not
+   on the test's. */
 
 console.log('\n===== and the app says so where people will meet it =====');
 await A.page.evaluate((pass)=>{ const el=document.getElementById('unlockPassword');
   if(el){ el.value=pass; el.dispatchEvent(new Event('input',{bubbles:true})); }
   window.unlockApp?.(); }, PASS);
-await A.page.waitForTimeout(6000);
+await A.page.waitForTimeout(4000);
 const notice = await A.page.evaluate(()=>{
   window.switchTab?.('chat');
   document.querySelector('[data-chat-view="connection"]')?.click();

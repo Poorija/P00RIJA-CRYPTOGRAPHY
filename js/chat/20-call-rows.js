@@ -401,6 +401,11 @@ if (!chatState.profile.stablePeerId) {
 chatState.profile.stablePeerId = generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-');
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 }
+/* Whether this account has ever been seen on more than one machine at
+   once — sticky across reconnects and reloads; see ackRelayMessage for
+   what it decides. */
+chatState.hasLinkedDevices = Boolean(chatState.profile.hasLinkedDevices);
+chatState.deferredMailAcks = [];
 const savedHistory = loadEncrypted(CHAT_HISTORY_STORAGE_KEY, {});
 if (savedHistory && typeof savedHistory === 'object') {
 Object.keys(savedHistory).forEach((key) => {

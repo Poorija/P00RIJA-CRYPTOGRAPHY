@@ -942,6 +942,9 @@ hideIncomingCall();
 async function acceptIncomingCall() {
 const call = chatState.pendingIncomingCall;
 const invite = chatState.pendingIncomingInvite;
+/* This device took the call: the siblings still ringing it stand down —
+   see announceCallHandled. */
+announceCallHandled(invite?.peerId || call?.peer || '', 'answered');
 hideIncomingCall();
 if (chatState.incomingCallTimer) {
 clearTimeout(chatState.incomingCallTimer);
@@ -1007,6 +1010,9 @@ function rejectIncomingCall() {
 const call = chatState.pendingIncomingCall;
 const invite = chatState.pendingIncomingInvite;
 const peerId = call?.peer || invite?.peerId;
+/* This device refused the ring: the siblings still ringing the same call
+   stand down — see announceCallHandled. */
+announceCallHandled(peerId, 'rejected');
 if (peerId) {
 const peer = findPeerRecordByPeerId(peerId);
 if (peer) {

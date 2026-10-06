@@ -4745,7 +4745,12 @@ for (const fp of fingerprints) noteKnownIdentity(fp);
      mailbox, and whichever arrives second must be recognised as the same
      announcement, not rendered (and rung) twice. */
   const announceId = crypto.randomUUID();
-  const payload = { type: 'system-note', announceId, message: message || attachment.name, title, attachment };
+  /* The stamp the recipient checks against the relay identity it pinned:
+   the relay's signing material cannot make signatures a browser verifies
+   (its key is ECDH), so the stamp plus "no peer can send in the relay's
+   name" (the fromFingerprint below is written by THIS server, and transit
+   refuses the type) is what makes a server note unfakeable. */
+  const payload = { type: 'system-note', announceId, message: message || attachment.name, title, attachment, relayId: relayIdentity.id };
   for (const fingerprint of fingerprints) {
     const items = offlineBoxes.get(fingerprint) || [];
     items.push({
@@ -5995,6 +6000,14 @@ function handleTransitFrame(payload, link) {
       });
       return;
     }
+    /* The relay's own voice never arrives by transit. A system-note is either
+       a peer's (signed, checked where it is rendered) or THIS relay's (stamped
+       with an id only this relay could put there). Anything else is somebody
+       on another relay quoting a stamp they do not hold. */
+    if (String(inner?.payload?.type || '') === 'system-note') {
+      link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-rejected' } });
+      return;
+    }
     deliverRelayMessage(inner, {
       clientId: '',
       /* Deliberately blank. For a local client this field is the fingerprint
@@ -6174,16 +6187,24 @@ totalRelays++;
      message id and acks the redelivered copy, so a healthy live path
      costs one extra frame per message and an unhealthy one costs nothing
      at all. */
+  /* The id of the mailbox copy this delivery also queued, so a connected
+     recipient can acknowledge the copy out of the box the moment it has the
+     live frame in hand — without it the box held every message for an
+     account whose devices never disconnect, and re-delivered all of them on
+     the one reconnect that finally drained it. */
+  let liveRelayId = '';
   if (message.persist && toFingerprint) {
     const queuedLive = offlineBoxes.get(toFingerprint) || [];
-    queuedLive.push({
+    const queuedItem = {
       type: 'relay',
       relayId: crypto.randomUUID(),
       fromClientId: clientId,
       fromFingerprint: fromFingerprint,
       payload: message.payload || null,
       queuedAt: new Date().toISOString(),
-    });
+    };
+    queuedLive.push(queuedItem);
+    liveRelayId = queuedItem.relayId;
     offlineBoxes.set(toFingerprint, queuedLive);
     saveOfflineBox(toFingerprint);
     sweepRetention(toFingerprint);
@@ -6215,6 +6236,7 @@ totalRelays++;
   for (const recipient of allTargets) {
     safeSend(recipient.ws, {
       type: 'relay',
+      relayId: liveRelayId || undefined,
       fromClientId: clientId,
       fromFingerprint: fromFingerprint,
       payload: message.payload || null,

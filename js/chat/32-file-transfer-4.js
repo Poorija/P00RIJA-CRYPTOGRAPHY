@@ -589,6 +589,14 @@ localStorage.removeItem(CHAT_SESSION_KEYS_STORAGE_KEY);
 chatState.identity = null;
 chatState.sessionKeys = {};
 chatState.sessions.clear();
+/* A new identity is a fresh account: whatever device role this install held
+   for the old one (primary address vs the suffixed sibling id) no longer
+   applies — the next transport build contests the plain id like any first
+   device. */
+chatState.profile.peerIdSuffix = false;
+chatState.hasLinkedDevices = false;
+chatState.profile.hasLinkedDevices = false;
+saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 await ensureIdentity();
 renderStaticUi();
 broadcastHello();
@@ -599,16 +607,25 @@ notify(t('کلید هویتی چت بازسازی شد', 'Chat identity key rota
    key, which means they become their own identity from here on. */
 if (previousFingerprint && chatState.identity?.fingerprint && previousFingerprint !== chatState.identity.fingerprint) {
   const newFp = chatState.identity.fingerprint;
+  const note = {
+    type: 'system-note',
+    fromFingerprint: newFp,
+    fromPeerId: chatState.peerId || '',
+    createdAt: new Date().toISOString(),
+    message: t(
+      `کلید این هویت روی یکی از دستگاه‌ها بازنشانی شد. کلید تازه: ${newFp.slice(0, 16)}… — برای سینک با دستگاه جدید، پروفایل همراه را از آن دستگاه ایمپورت کنید. اگر این کار را نمی‌کنید، همین دستگاه با کلید قبلی خودش ادامه می‌دهد.`,
+      `The identity key was reset on one of the devices. New key: ${newFp.slice(0, 16)}… — to sync with the new device, import the portable profile from it. If you don't, this device continues with its own previous key.`,
+    ),
+    title: t('تغییر کلید هویت', 'Identity key changed'),
+    keyChange: { old: previousFingerprint, new: newFp },
+    /* Signed with the NEW key, and the new public key rides along: the
+       signature is the proof the writer holds the key it announces, which
+       is the whole difference between a rotation and an impostor. */
+    newPublicKeyData: chatState.identity.publicKeyData,
+  };
+  await signOfflineEnvelope(note);
   try {
-    await sendRelayEnvelope({ fingerprint: previousFingerprint }, {
-      type: 'system-note',
-      message: t(
-        `کلید این هویت روی یکی از دستگاه‌ها بازنشانی شد. کلید تازه: ${newFp.slice(0, 16)}… — برای سینک با دستگاه جدید، پروفایل همراه را از آن دستگاه ایمپورت کنید. اگر این کار را نمی‌کنید، همین دستگاه با کلید قبلی خودش ادامه می‌دهد.`,
-        `The identity key was reset on one of the devices. New key: ${newFp.slice(0, 16)}… — to sync with the new device, import the portable profile from it. If you don't, this device continues with its own previous key.`,
-      ),
-      title: t('تغییر کلید هویت', 'Identity key changed'),
-      keyChange: { old: previousFingerprint, new: newFp },
-    });
+    await sendRelayEnvelope({ fingerprint: previousFingerprint }, note);
   } catch (_notifyError) { /* the other device is not reachable — the mailbox holds it */ }
 }
 }

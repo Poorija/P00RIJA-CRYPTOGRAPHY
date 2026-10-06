@@ -249,10 +249,13 @@ function renderDevicesCard() {
     linked.set(myDeviceId, { name: chatState.profile?.name || t('این دستگاه', 'This device'), online: true, isSelf: true });
   }
 
-  const rows = Array.from(linked.values()).map((d) =>
+  const rows = Array.from(linked.entries()).map(([id, d]) =>
     '<div class="chat-device-row" style="display:flex;align-items:center;gap:0.7rem;padding:0.55rem 0.7rem;border:1px solid rgba(148, 163, 184, 0.2);border-radius:0.7rem;margin-bottom:0.4rem">'
     + '<i class="fas ' + (d.isSelf ? 'fa-mobile-screen' : 'fa-laptop') + '" style="color:#38bdf8"></i>'
     + '<span style="flex:1;font-weight:600;color:#e2e8f0">' + app().escapeHTML(d.name) + (d.isSelf ? ' <em style="opacity:0.6">(' + t('این دستگاه', 'this device') + ')</em>' : '') + '</span>'
+    /* The id tail is what tells two same-named machines apart: every device
+       of one account shares the profile name, never the device id. */
+    + '<span style="font-size:0.66rem;color:#7d93b8;font-family:monospace">' + app().escapeHTML(String(id).slice(-6)) + '</span>'
     + '<span style="font-size:0.72rem;color:' + (d.online ? '#34d399' : '#7d93b8') + '">' + (d.online ? t('آنلاین', 'online') : t('آفلاین', 'offline')) + '</span>'
     + '</div>'
   ).join('');
@@ -262,6 +265,10 @@ function renderDevicesCard() {
     + '<p style="font-size:0.74rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
     + t('هر دستگاهی که این هویت را دارد پیام‌ها را همزمان دریافت می‌کند و تاریخچه و تماس‌ها با آن‌ها سینک می‌شود — بسته‌شده، فقط برای دستگاه‌های خودتان. برای افزودن دستگاه جدید، پروفایل همراه را از این دستگاه خروجی بگیرید و روی دستگاه جدید وارد کنید.',
         'Every device holding this identity receives messages simultaneously, and the history and call log sync with them — sealed, and readable only by your own devices. To add a device, export the portable profile from this device and import it on the new one.')
+    + '</p>'
+    + '<p style="font-size:0.72rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
+    + t('دستگاه‌های یک حساب همه‌چیزِ حساب را می‌بینند: مخاطبین و تأییدهای امنیتی آن‌ها مشترک است و پاک‌سازی اضطراری از هر دستگاهی، دادهٔ مشترک (مثل صف پیام‌های سرور) را برای همه برمی‌دارد.',
+        'Devices of one account see everything the account sees: contacts and their safety-number verifications are shared, and an emergency wipe from any device removes the account\'s shared data (such as the server\'s queued mail) for all of them.')
     + '</p>'
     + rows
     + '<div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">'

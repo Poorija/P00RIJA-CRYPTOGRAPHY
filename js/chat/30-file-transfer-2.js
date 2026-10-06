@@ -442,6 +442,17 @@ peer.status = 'offline';
 	name: String(peer.username || ''),
 	}))
 	: [];
+	/* Sticky, not live: "this account has siblings" must survive every one of
+	   them being away, because the ACK policy below needs to keep protecting
+	   their mailbox copies exactly then. Persisted so a reload knows it too. */
+	if (chatState.linkedDevices.length >= 2 && !chatState.hasLinkedDevices) {
+	chatState.hasLinkedDevices = true;
+	chatState.profile.hasLinkedDevices = true;
+	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+	}
+	/* Everyone is here: whatever mail was held back for the sibling that was
+	   away can be acknowledged out of the shared box now. */
+	if (chatState.hasLinkedDevices && chatState.linkedDevices.length >= 2) flushDeferredMailAcks();
 	verified.forEach((peer) => mergePeerRecord(peer, { online: true }));
 	chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
 	dropStaleSessionChannels();
@@ -946,35 +957,9 @@ if (payload.announceId) {
   if (seenAnnouncementIds().has(payload.announceId)) { ackRelayMessage(message.relayId); return; }
   markAnnouncementSeen(payload.announceId);
 }
-/* The server's announce centre: a note the RELAY itself wrote, carried the
-   same way mail is — online as a relay frame, offline out of the mailbox.
-   It is not sealed (the server cannot seal what it cannot read), and that
-   is the point: it is the server's own voice, shown in the system
-   conversation the old broadcast already used. An attachment, when there
-   is one, rides along as a small data URL and renders inside the note. */
-/* A real chat message from the server — a bubble with a sender, not a grey
-   pill mid-thread: an announcement from the operator reads as
-   correspondence, not furniture. Attachment rides as a data URL the file
-   bubble already knows how to open. */
-const serverAttachment = payload.attachment || null;
-appendHistory('system', {
-id: generateId('sys'),
-type: serverAttachment ? 'file' : 'text',
-kind: serverAttachment?.kind === 'audio' ? 'voice' : (serverAttachment?.kind || 'text'),
-/* Subject first, body under it — the operator typed both, both arrive. */
-text: (payload.title ? payload.title + '\n' : '') + (payload.message || payload.text || ''),
-name: serverAttachment?.name || '',
-downloadUrl: serverAttachment?.dataUrl || '',
-senderName: t('سرور', 'Server'),
-direction: 'in',
-status: 'delivered',
-timestamp: payload.queuedAt ? Date.parse(payload.queuedAt) : Date.now(),
-createdAt: payload.queuedAt || new Date().toISOString(),
-system: true,
-});
-/* No in-app notify here: the server pushes only when the app is NOT awake,
-   so the badge and the buzz belong to exactly one of the two, never both. */
-ackRelayMessage(message.relayId);
+/* The attribution check can await a signature, the listener cannot: the
+   whole note runs in its own turn and is acknowledged from inside. */
+handleSystemNote(message, payload).catch((error) => console.error('Failed to process a system note:', error));
 return;
 }
 if (payload.type === 'typing') {
@@ -1131,9 +1116,12 @@ if (!PeerCtor) {
 notify(t('کتابخانه PeerJS لود نشده است', 'PeerJS client failed to load'), 'error');
 return;
 }
-const stablePeerId = chatState.profile.stablePeerId || generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-');
-chatState.profile.stablePeerId = stablePeerId;
-saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+	/* The account's address, or this install's own when a sibling device
+	   already holds the account's — see the unavailable-id handler above. */
+	const stablePeerId = (chatState.profile.stablePeerId || generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-'))
+	+ (chatState.profile.peerIdSuffix ? `~${String(getDeviceId()).slice(-6)}` : '');
+	chatState.profile.stablePeerId = chatState.profile.stablePeerId || stablePeerId;
+	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 // Add a small delay to ensure identity and other async states are fully hydrated
 if (chatState.reconnectAttempt === 0) {
 await new Promise(r => setTimeout(r, 500));
@@ -1202,26 +1190,47 @@ markPeerUnavailable(missingPeer || activePeer()?.peerId || '', t('Peer انتخ�
 setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('متصل به رله؛ Peer مقصد در دسترس نیست', 'Relay connected; target peer is unreachable'));
 return;
 }
-if (errorText.includes('unavailable-id')) {
-// Usually this is our *own* previous registration that the relay has not
-// reaped yet after an unclean disconnect. Every stored contact is keyed on
-// this id, so regenerating it silently orphans the whole contact list.
-// Wait for the stale entry to expire and reclaim the same id first.
-chatState.peerIdRetryAttempt += 1;
-if (chatState.peerIdRetryAttempt <= 3) {
-console.warn(`Peer ID busy, retrying the same id (${chatState.peerIdRetryAttempt}/3)...`);
-setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('در حال بازیابی شناسه...', 'Reclaiming identity...'));
-setTimeout(() => rebuildPeerTransport(), 4000 * chatState.peerIdRetryAttempt);
-return;
-}
-console.warn('Peer ID still in use after retries, regenerating...');
-chatState.peerIdRetryAttempt = 0;
-chatState.profile.stablePeerId = generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-');
-saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
-// Force immediate reconnect with new ID
-setTimeout(() => connectChatTransport(), 500);
-return;
-}
+	if (errorText.includes('unavailable-id')) {
+	/* Who is holding the id decides what happens next. The portable profile
+	   carries the account's stablePeerId, so a LINKED sibling online on this
+	   relay holds it — contesting it can never win, and the old answer
+	   (regenerate the id outright) forked the account's address into two,
+	   with contacts' records flapping between them forever. A second device
+	   instead takes its own DETERMINISTIC id — the account's id plus this
+	   install's device suffix — which is stable across reconnects, visibly
+	   belongs to the same account, and leaves the primary address to the
+	   device that already holds it.
+	   The other holder can also be this device's own ghost socket after an
+	   unclean reload; for that one the suffixed id works just as well, and
+	   the reaper clears the ghost on its own. */
+	if (!chatState.profile.peerIdSuffix) {
+	chatState.profile.peerIdSuffix = true;
+	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+	console.warn('[Transport] Peer id held by another device of this account; taking the per-device id.');
+	setTimeout(() => rebuildPeerTransport(), 500);
+	return;
+	}
+	/* Already on the per-device id and still contested: retry the same id —
+	   every stored contact is keyed on it, and regenerating silently
+	   orphans the whole contact list. */
+	chatState.peerIdRetryAttempt += 1;
+	if (chatState.peerIdRetryAttempt <= 3) {
+	console.warn(`Peer ID busy, retrying the same id (${chatState.peerIdRetryAttempt}/3)...`);
+	setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('در حال بازیابی شناسه...', 'Reclaiming identity...'));
+	setTimeout(() => rebuildPeerTransport(), 4000 * chatState.peerIdRetryAttempt);
+	return;
+	}
+	console.warn('Peer ID still in use after retries, regenerating...');
+	chatState.peerIdRetryAttempt = 0;
+	chatState.profile.stablePeerId = generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-');
+	/* A regenerated id belongs to this device alone; the suffix flag has
+	   nothing to say about it any more. */
+	chatState.profile.peerIdSuffix = false;
+	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+	// Force immediate reconnect with new ID
+	setTimeout(() => connectChatTransport(), 500);
+	return;
+	}
 // PeerJS reports ordinary transport hiccups down the same channel as fatal
 // configuration errors. Treating every one of them as fatal is what put a red
 // toast on screen for each network blip while leaving the peer unrepaired.
@@ -2100,6 +2109,63 @@ clearTransferBanner(700, owner);
 renderMessages();
 }
 
+/* Whose voice a system note is. Three shapes exist, and each has to prove
+   itself:
+   — The relay's own: this server writes 'monitor' into the from-field
+     itself (a verified peer carries their real fingerprint, an unverified
+     socket an empty one, and neither can produce the marker), and the
+     payload carries the relay id the recipient has pinned. Transit refuses
+     the type, so no far relay can quote the stamp.
+   — A sibling's key-change notice: signed with the NEW identity key it
+     announces, so the signature is proof the writer holds that key.
+   — Any other peer note: nothing legitimate sends them, and they drop. */
+async function handleSystemNote(message, payload) {
+const noteSender = String(message.fromFingerprint || '');
+let authenticated = false;
+if (noteSender === 'monitor') {
+const pinnedRelayId = chatState.profile?.relayPins?.[chatServerOrigin()]?.id || '';
+/* No pin yet is the first-contact case every relay pin starts from; with
+   one, only this relay's stamp passes. */
+authenticated = !pinnedRelayId || String(payload.relayId || '') === pinnedRelayId;
+} else if (payload.keyChange && payload.newPublicKeyData && payload.sig) {
+authenticated = await verifyIdentitySignature(
+payload.newPublicKeyData,
+app().base64ToArrayBuffer(payload.sig),
+offlineEnvelopeSignBytes(payload),
+).catch(() => false);
+}
+if (!authenticated) {
+console.warn('[Chat] a system note arrived that could not be attributed; ignored');
+ackRelayMessage(message.relayId);
+return;
+}
+/* The server's announce centre: a note the RELAY itself wrote, carried the
+   same way mail is — online as a relay frame, offline out of the mailbox.
+   It is not sealed (the server cannot seal what it cannot read), and that
+   is the point: it is the server's own voice, shown in the system
+   conversation the old broadcast already used. A peer's key-change notice
+   renders through the same door, as a bubble from the account itself. */
+const serverAttachment = payload.attachment || null;
+appendHistory('system', {
+id: generateId('sys'),
+type: serverAttachment ? 'file' : 'text',
+kind: serverAttachment?.kind === 'audio' ? 'voice' : (serverAttachment?.kind || 'text'),
+/* Subject first, body under it — the operator typed both, both arrive. */
+text: (payload.title ? payload.title + '\n' : '') + (payload.message || payload.text || ''),
+name: serverAttachment?.name || '',
+downloadUrl: serverAttachment?.dataUrl || '',
+senderName: noteSender === 'monitor' ? t('سرور', 'Server') : t('دستگاه دیگر همین حساب', 'Another device of this account'),
+direction: 'in',
+status: 'delivered',
+timestamp: payload.queuedAt ? Date.parse(payload.queuedAt) : Date.now(),
+createdAt: payload.queuedAt || new Date().toISOString(),
+system: true,
+});
+/* No in-app notify here: the server pushes only when the app is NOT awake,
+   so the badge and the buzz belong to exactly one of the two, never both. */
+ackRelayMessage(message.relayId);
+}
+
 /* ------------------------------------------------------------------
  * Device sync — one history, several machines.
  *
@@ -2142,20 +2208,29 @@ try { localStorage.setItem(CHAT_DEVICE_SYNC_FILES_STORAGE_KEY, enabled ? '1' : '
 }
 
 /* What one history entry looks like on the wire. An object URL is a
-   handle into THIS page's memory and means nothing on another machine,
-   so it never travels; whether the bytes do is the opt-in, and only
-   for media small enough to ride inline. */
+   handle into THIS page's memory and means nothing on another machine, so
+   it never travels; whether the bytes do is the opt-in, and only for media
+   small enough to ride inline. Two sources of bytes exist: the vault, and
+   the rare attachment that never had one — an announcement's data URL,
+   which lives only inside the encrypted history itself. */
 async function deviceSyncEntryForWire(entry, includeFiles) {
 const copy = { ...entry };
+const dataUrl = typeof entry.downloadUrl === 'string' && entry.downloadUrl.startsWith('data:')
+? entry.downloadUrl
+: '';
 delete copy.downloadUrl;
-if (includeFiles && isMediaEntry(copy)) {
+if (!includeFiles || !isMediaEntry(copy)) return copy;
 try {
+if (dataUrl) {
+const dataBase64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+if (dataBase64.length <= DEVICE_SYNC_FILE_INLINE_BYTES) copy.mediaData = dataBase64;
+return copy;
+}
 const stored = await readMessageMedia(copy.id);
 if (stored && stored.blob.size <= DEVICE_SYNC_FILE_INLINE_BYTES) {
 copy.mediaData = app().arrayBufferToBase64(await stored.blob.arrayBuffer());
 }
 } catch (_error) { /* the vault declined; the metadata still travels */ }
-}
 return copy;
 }
 
@@ -2189,6 +2264,14 @@ const calls = (chatState.calls || []).slice(0, CALL_LOG_LIMIT).map((call) => ({ 
 if (calls.length) bundles.push({ calls });
 	const contactBundle = buildContactSyncBundle();
 	if (contactBundle) bundles.push(contactBundle);
+	/* The prekey store travels with everything else. Each device rotates on
+	   its own clock, and two diverging stores meant a message sealed to the
+	   prekey one device published could only be opened by that device — its
+	   sibling met a wall of "could not be opened" notes. A union of both
+	   stores, pruned of what has expired, gives every device every private
+	   half, whichever prekey a sender happens to seal to. */
+	const prekeys = prunePrekeys(loadPrekeys() || []);
+	if (prekeys.length) bundles.push({ prekeys: prekeys.map((entry) => ({ ...entry })) });
 	return bundles;
 }
 
@@ -2205,6 +2288,39 @@ return (chatState.peers || [])
 function buildContactSyncBundle() {
 const contacts = storedPersonalContacts();
 return contacts.length ? { contacts } : null;
+}
+
+/* The bytes a sibling vouches for. Offline envelopes sign
+   (fingerprint, peer id, time, body); a device-sync envelope names one more
+   thing the relay could otherwise rewrite — WHICH device sent it — so the
+   claim and the signature cover it too. */
+function deviceSyncSignBytes(envelope) {
+return new TextEncoder().encode([
+offlineEnvelopeSignBytes(envelope),
+String(envelope?.fromDeviceId || ''),
+].join('\n'));
+}
+async function signDeviceSyncEnvelope(envelope) {
+try {
+const key = await importIdentitySigningKey();
+const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, deviceSyncSignBytes(envelope));
+envelope.sig = app().arrayBufferToBase64(signature);
+envelope.sigv = 1;
+} catch (error) {
+console.warn('[Chat] could not sign the device-sync envelope:', error);
+}
+}
+async function verifyDeviceSyncSender(envelope) {
+try {
+if (!envelope?.sig) return false;
+return await verifyIdentitySignature(
+chatState.identity.publicKeyData,
+app().base64ToArrayBuffer(envelope.sig),
+deviceSyncSignBytes(envelope),
+);
+} catch (_error) {
+return false;
+}
 }
 
 async function sealDeviceSyncBundle(bundle) {
@@ -2225,20 +2341,35 @@ seal: app().arrayBufferToBase64(seal),
 body: { iv: Array.from(iv), cipher: app().arrayBufferToBase64(cipher) },
 createdAt: new Date().toISOString(),
 };
-await signOfflineEnvelope(envelope);
-return envelope;
+	await signDeviceSyncEnvelope(envelope);
+	return envelope;
 }
 
+let deviceSyncInFlight = false;
 async function sendDeviceSync({ contactsOnly = false } = {}) {
 if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return false;
 if (!chatState.identity?.fingerprint) return false;
-const bundles = contactsOnly ? [] : await buildDeviceSyncBundles();
-/* A contacts-only push is the delta path: the book changed while a sibling
-	   was listening, and the history has not. */
-if (contactsOnly) {
-const contactBundle = buildContactSyncBundle();
-if (contactBundle) bundles.push(contactBundle);
+/* One sync at a time: the manual button and the sibling-arrival trigger can
+   fire together, and two interleaved loops send every bundle twice for
+   nothing — the merge would absorb it, the bandwidth would not. A caller
+   that arrives mid-sync WAITS for it and then runs: a person pressing the
+   button while the automatic pass is on wants their newest history in the
+   next pass, not a silent refusal. Bounded, because an in-flight sync is
+   finite and a stuck one must not wedge the button for good. */
+const waitDeadline = Date.now() + 120 * 1000;
+while (deviceSyncInFlight && Date.now() < waitDeadline) {
+await new Promise((resolve) => setTimeout(resolve, 200));
 }
+if (deviceSyncInFlight) return false;
+deviceSyncInFlight = true;
+try {
+	const bundles = contactsOnly ? [] : await buildDeviceSyncBundles();
+	/* A contacts-only push is the delta path: the book changed while a sibling
+	   was listening, and the history has not. */
+	if (contactsOnly) {
+	const contactBundle = buildContactSyncBundle();
+	if (contactBundle) bundles.push(contactBundle);
+	}
 	for (const bundle of bundles) {
 	const envelope = await sealDeviceSyncBundle(bundle);
 	sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
@@ -2247,6 +2378,9 @@ if (contactBundle) bundles.push(contactBundle);
 	await new Promise((resolve) => setTimeout(resolve, 150));
 	}
 	return true;
+} finally {
+deviceSyncInFlight = false;
+}
 }
 async function sendDeviceSyncFromUi() {
 const sent = await sendDeviceSync();
@@ -2273,7 +2407,10 @@ next.reactions = existing.reactions || next.reactions;
 next.downloadUrl = existing.downloadUrl || next.downloadUrl;
 Object.assign(existing, next);
 } else {
-entry.unread = false;
+/* The sender's attention state, not a recomputed one: history arriving is
+   not news arriving, but a message their device had not read yet is still
+   worth a badge on this one. */
+entry.unread = Boolean(entry.unread);
 list.push(entry);
 list.splice(0, Math.max(0, list.length - 2000));
 }
@@ -2345,6 +2482,34 @@ renderMessages();
 	changed = true;
 	}
 	}
+	if (Array.isArray(bundle?.prekeys)) {
+	const known = new Set((loadPrekeys() || []).map((entry) => entry.id));
+	const merged = prunePrekeys(loadPrekeys() || []);
+	let prekeysChanged = false;
+	for (const entry of bundle.prekeys) {
+	/* Only a shape a prekey store would hold: an id, both halves, an
+	   expiry still in the future (prunePrekeys re-checks it). */
+	if (!entry?.id || !entry.publicKeyData || !entry.privateKeyData || known.has(entry.id)) continue;
+	merged.push({ ...entry });
+	known.add(entry.id);
+	prekeysChanged = true;
+	}
+	if (prekeysChanged) {
+	savePrekeys(prunePrekeys(merged));
+	chatState.prekeys = prunePrekeys(merged);
+	changed = true;
+	}
+	}
+	/* One ring, whichever machine takes it. The invite fans out to every
+	   device of the account; the first to answer or refuse tells the others,
+	   sealed the same way everything between these devices travels. */
+	if (bundle?.callHandled?.callerPeerId) {
+	const fromCaller = String(bundle.callHandled.callerPeerId);
+	if (chatState.pendingIncomingInvite?.peerId === fromCaller
+	|| chatState.pendingIncomingCall?.peer === fromCaller) {
+	clearIncomingCall();
+	}
+	}
 	/* The two on-demand shapes. A request is answered in the background; a
 	   part is one slice of a pull this device asked for. */
 	if (bundle?.fileRequest?.messageId) {
@@ -2365,15 +2530,11 @@ if (!payload.body || payload.fromFingerprint !== myFingerprint) return;
    including the one that sent it — this device's own copy is a receipt
    it has no use for. */
 if (payload.fromDeviceId && payload.fromDeviceId === getDeviceId()) return;
-/* The whole gate: signed by this account's private key, which only a
-   linked device holds. Anything else is a stranger sealing garbage and
-   claiming a deviceId, and it stops here — unopened and unmerged. */
-if (!payload.sig) return;
-const authentic = await verifyIdentitySignature(
-chatState.identity.publicKeyData,
-app().base64ToArrayBuffer(payload.sig),
-offlineEnvelopeSignBytes(payload),
-).catch(() => false);
+	/* The whole gate: signed by this account's private key — over the
+	   deviceId it names as well — which only a linked device holds. Anything
+	   else is a stranger sealing garbage and claiming a deviceId, and it
+	   stops here — unopened and unmerged. */
+	const authentic = await verifyDeviceSyncSender(payload);
 if (!authentic) {
 console.warn('[Chat] a device-sync envelope arrived that this identity key did not sign; ignored');
 return;
@@ -2397,6 +2558,12 @@ console.warn('[Chat] a device-sync envelope could not be opened; ignored');
    always late by three seconds so the sibling's own connection settles
    first. */
 function maybeAnnounceDeviceSync(linkedDeviceCount) {
+/* Whatever the count says, this runs on every peers broadcast and is the
+   cheap place to forget the pulls that never finished. */
+const sweepNow = Date.now();
+for (const [pullId, pull] of deviceFilePulls) {
+if (sweepNow - pull.at > DEVICE_FILE_PULL_TTL_MS) deviceFilePulls.delete(pullId);
+}
 if (!linkedDeviceCount || linkedDeviceCount < 2) return;
 const now = Date.now();
 if (now - deviceSyncLastSentAt < DEVICE_SYNC_MIN_INTERVAL_MS) return;
@@ -2452,6 +2619,18 @@ const DEVICE_SYNC_FILE_PART_BYTES = FILE_CHUNK_BYTES;
 const DEVICE_FILE_PULL_TTL_MS = 10 * 60 * 1000;
 const deviceFilePulls = new Map();
 
+/* One ring, whichever machine takes it: the invite reaches every device of
+   the account, and the device that answers or refuses tells the others in
+   the same sealed envelopes everything between these machines travels in.
+   The caller's own cancel already reaches them — it is a relay frame too. */
+function announceCallHandled(callerPeerId, action) {
+if (!callerPeerId || !chatState.identity?.fingerprint) return;
+if ((chatState.linkedDevices || []).length < 2) return;
+sealDeviceSyncBundle({ callHandled: { callerPeerId: String(callerPeerId), action } })
+.then((envelope) => sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope))
+.catch(() => { /* the siblings time their own rings out */ });
+}
+
 function requestDeviceFile(conversationKey, messageId) {
 if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) {
 notify(t('اتصال به سرور برقرار نیست؛ بعد از اتصال دوباره تلاش کنید', 'Not connected to the relay; try again after reconnecting'), 'warning');
@@ -2463,7 +2642,16 @@ notify(t('هیچ دستگاه دیگری از این حساب الان آنلا�
 return;
 }
 if (deviceFilePulls.has(messageId)) return;
-deviceFilePulls.set(messageId, { parts: new Map(), total: 0, meta: null, at: Date.now() });
+const pull = { parts: new Map(), total: 0, meta: null, at: Date.now() };
+deviceFilePulls.set(messageId, pull);
+/* A pull nobody serves is a button that did nothing: the ring has to come
+   back and say so. Generous, because the parts arrive paced. */
+pull.timeout = setTimeout(() => {
+if (deviceFilePulls.has(messageId)) {
+deviceFilePulls.delete(messageId);
+notify(t('دریافت فایل از دستگاه دیگر طول کشید و رها شد؛ دوباره تلاش کنید', 'Fetching the file from the other device took too long and was given up; try again'), 'warning');
+}
+}, 60 * 1000);
 sealDeviceSyncBundle({ fileRequest: { conversation: conversationKey, messageId } })
 .then((envelope) => {
 sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
@@ -2521,6 +2709,7 @@ return;
 pull.parts.set(Number(part.part) || 0, String(part.bytes || ''));
 if (pull.parts.size < pull.total) return;
 deviceFilePulls.delete(messageId);
+if (pull.timeout) clearTimeout(pull.timeout);
 const conversationKey = String(part.conversation || '');
 const assembled = new Uint8Array(pull.parts.size * DEVICE_SYNC_FILE_PART_BYTES);
 let offset = 0;

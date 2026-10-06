@@ -364,6 +364,12 @@ if (existing.trustedFingerprint) setPeerVerified(existing.trustedFingerprint, fa
 noteKeyChangeInThread(existing);
 }
 }
+/* Between two prekeys, the FRESHER window wins rather than the more recent
+   hello: a multi-device contact publishes one prekey per device, and
+   "whoever hailed last" made the record flap between them message by
+   message. */
+const fresherPrekey = Boolean(normalized.prekeyId && normalized.prekeyPublic)
+&& Date.parse(normalized.prekeyExpiresAt || 0) > Date.parse(existing.prekeyExpiresAt || 0);
 Object.assign(existing, {
 ...normalized,
 clientId: normalized.clientId || existing.clientId,
@@ -378,9 +384,9 @@ publicKeyData: keyConflict ? trusted : (normalized.publicKeyData || existing.pub
    prekey, and merging it used to blank what presence had just published. The
    sender then silently fell back to the identity-wrapped seal, which never
    expires, and the fifteen-day window quietly did not apply. */
-prekeyId: normalized.prekeyId || existing.prekeyId || '',
-prekeyPublic: normalized.prekeyPublic || existing.prekeyPublic || '',
-prekeyExpiresAt: normalized.prekeyExpiresAt || existing.prekeyExpiresAt || '',
+prekeyId: fresherPrekey ? normalized.prekeyId : (existing.prekeyId || normalized.prekeyId || ''),
+prekeyPublic: fresherPrekey ? normalized.prekeyPublic : (existing.prekeyPublic || normalized.prekeyPublic || ''),
+prekeyExpiresAt: fresherPrekey ? normalized.prekeyExpiresAt : (existing.prekeyExpiresAt || normalized.prekeyExpiresAt || ''),
 fingerprint: keyConflict
 ? (existing.trustedFingerprint || existing.fingerprint)
 : (normalized.fingerprint || existing.fingerprint),

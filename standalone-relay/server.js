@@ -4430,6 +4430,14 @@ function handleTransitFrame(payload, link) {
       });
       return;
     }
+    /* The relay's own voice never arrives by transit: a system-note is either
+       a peer's (signed, checked where it is rendered) or THIS relay's (stamped
+       with an id only this relay could put there). Anything else is somebody
+       on another relay quoting a stamp they do not hold. */
+    if (String(inner?.payload?.type || '') === 'system-note') {
+      link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-rejected' } });
+      return;
+    }
     deliverRelayMessage(inner, {
       clientId: '',
       /* Deliberately blank. For a local client this field is the fingerprint
@@ -4577,9 +4585,38 @@ totalRelays++;
     return;
   }
 
+  /* The id of the mailbox copy this delivery also queues, so a connected
+     recipient can acknowledge the copy the moment it has the live frame —
+     without it the box held every message for an account whose devices
+     never disconnect, and re-delivered all of them on the one reconnect
+     that finally drained it. Queued before the live send for one reason
+     only: the id has to exist when the frame below carries it. */
+  let liveRelayId = '';
+  if (message.persist && toFingerprint) {
+    const queuedLive = offlineBoxes.get(toFingerprint) || [];
+    const queuedItem = {
+      type: 'relay',
+      relayId: crypto.randomUUID(),
+      fromClientId: clientId,
+      fromFingerprint: fromFingerprint,
+      payload: message.payload || null,
+      queuedAt: new Date().toISOString(),
+    };
+    queuedLive.push(queuedItem);
+    liveRelayId = queuedItem.relayId;
+    offlineBoxes.set(toFingerprint, queuedLive);
+    /* Retention and the caps decide what stays — media bytes first,
+       then the text tail — and the sweep logs anything it drops. */
+    sweepRetention(toFingerprint);
+    saveOfflineBoxes();
+    const remainingLive = offlineBoxes.get(toFingerprint);
+    reply({ type: 'queued', toFingerprint, count: remainingLive ? remainingLive.length : 0, tag });
+  }
+
   for (const recipient of allTargets) {
     safeSend(recipient.ws, {
       type: 'relay',
+      relayId: liveRelayId || undefined,
       fromClientId: clientId,
       fromFingerprint: fromFingerprint,
       payload: message.payload || null,
@@ -4591,22 +4628,11 @@ totalRelays++;
      frame and nothing reads it, and a message forwarded only live into that
      socket was lost — no queue entry, no error, and a sender stuck watching
      an hourglass. Persistent envelopes are queued for connected recipients
-     too, and a recipient whose app has gone quiet is pushed as well. The
-     client de-duplicates by message id and acks the redelivered copy, so a
-     healthy live path costs one extra frame and an unhealthy one is saved. */
+     too (above, where the live frame gets the queued id), and a recipient
+     whose app has gone quiet is pushed as well. The client de-duplicates by
+     message id and acks the redelivered copy, so a healthy live path costs
+     one extra frame and an unhealthy one is saved. */
   if (message.persist && toFingerprint) {
-    const queuedLive = offlineBoxes.get(toFingerprint) || [];
-    queuedLive.push({
-      type: 'relay',
-      relayId: crypto.randomUUID(),
-      fromClientId: clientId,
-      fromFingerprint: fromFingerprint,
-      payload: message.payload || null,
-      queuedAt: new Date().toISOString(),
-    });
-    offlineBoxes.set(toFingerprint, queuedLive);
-    sweepRetention(toFingerprint);
-    saveOfflineBoxes();
     if (!isAppAwake(target)) {
       const wakes = payloadType === 'offline-chat'
         ? message.payload?.notify !== false
