@@ -22,7 +22,7 @@ const { pushKindFor, pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions
 const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey } = require('./lib/relay-identity.js');
 const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
 const { openTransit, transitFacts } = require('./lib/relay-transit.js');
-/* The 3.33 dashboard sheet the relay serves at /Monitor_Server — HTML lives
+/* The 3.34 dashboard sheet the relay serves at /Monitor_Server — HTML lives
    in its own module so the server file stays about the server. */
 const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
@@ -285,23 +285,41 @@ function loadServerConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      /* Whose password is newer: the one the dashboard changed to, or the
+         one in the environment? The env used to win ALWAYS, which meant a
+         password rotated from the Monitor silently turned back into the
+         .env original at the next container restart — and the person who
+         changed it was locked out with "old password incorrect".
+         The save records what the env SAID at the time it happened. On
+         boot, the saved rotation wins by default; the env wins when it
+         differs from that stamp — a changed .env is a deliberate override.
+         Config files from before the stamp existed answer null for it, the
+         comparison is then always unequal, and the env wins exactly as it
+         always did for them. */
       if (config.monitorPassword) {
         MONITOR_PASSWORD = config.monitorPassword;
+      }
+      const env = process.env.MONITOR_PASSWORD || '';
+      const savedEnv = typeof config.monitorPasswordEnvAtSave === 'string' ? config.monitorPasswordEnvAtSave : null;
+      if (env && env !== savedEnv) {
+        MONITOR_PASSWORD = env;
       }
     }
   } catch (error) {
     console.error('Failed to load server config:', error);
-  }
-  // Environment variable ALWAYS takes priority over config file
-  if (process.env.MONITOR_PASSWORD) {
-    MONITOR_PASSWORD = process.env.MONITOR_PASSWORD;
   }
 }
 
 function saveServerConfig() {
   try {
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    writeJsonAtomic(CONFIG_PATH, { monitorPassword: MONITOR_PASSWORD });
+    /* The env stamp is what lets the next boot tell "the operator changed
+       nothing, keep the dashboard's rotation" from "the operator edited
+       .env, their value wins" — see loadServerConfig. */
+    writeJsonAtomic(CONFIG_PATH, {
+      monitorPassword: MONITOR_PASSWORD,
+      monitorPasswordEnvAtSave: process.env.MONITOR_PASSWORD || '',
+    });
   } catch (error) {
     console.error('Failed to save server config:', error);
   }
@@ -1322,6 +1340,18 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     /* The same transit honesty /chat-health reports, for the dashboard's
        overview card without a second request. */
     transit: relayPeers.status(),
+    /* The dashboard's overview card reads this to say "3 / 50000 sockets";
+       without it the card can only say "— / —". /chat-health has always
+       published the same numbers to anybody who asks, so an authenticated
+       monitor gaining them gives away nothing it did not already have. */
+    capacity: {
+      tier: CAPACITY.tier,
+      sockets: {
+        inUse: Array.from(wsPerAddress.values()).reduce((sum, count) => sum + count, 0),
+        max: WS_MAX_TOTAL,
+        maxPerAddress: WS_MAX_PER_IP,
+      },
+    },
     cert: certSummary()
   });
 });
@@ -1538,13 +1568,19 @@ app.post('/admin/broadcast', authMiddleware, (req, res) => {
 });
 
 app.post('/admin/change-password', authMiddleware, (req, res) => {
-  const { oldPassword, newPassword } = req.body || {};
+  const { oldPassword, newPassword, currentPassword } = req.body || {};
+  /* The Monitor dashboard called this field `currentPassword` while this
+     endpoint read `oldPassword`, so every password change made from the
+     Monitor itself was refused with "old password incorrect" — whatever was
+     typed. Both names answer now: the endpoint heals an already-deployed
+     dashboard, and the dashboard sends the canonical one. */
+  const suppliedOld = oldPassword ?? currentPassword;
 
   /* The old password is required, not merely checked when supplied. The guard
      used to read `if (oldPassword && ...)`, so omitting the field skipped the
      comparison altogether — a stolen session cookie was enough to take the
      account over without ever learning the password. */
-  if (!secretsMatch(oldPassword, MONITOR_PASSWORD)) {
+  if (!secretsMatch(suppliedOld, MONITOR_PASSWORD)) {
     return res.status(403).json({ ok: false, reason: 'Old password incorrect' });
   }
 
@@ -1852,7 +1888,7 @@ app.get('/Monitor_Server', (req, res) => {
     return res.status(401).send('Invalid credentials');
   }
 
-  /* The 3.33 dashboard, drawn by scripts/lib/monitor-dashboard.js. The old
+  /* The 3.34 dashboard, drawn by scripts/lib/monitor-dashboard.js. The old
      single-scroll sheet still hangs below this line and stays reachable at
      ?classic=1 for the remainder of this release — it is deleted once an
      operator has confirmed the new one on a real deployment. */
@@ -7569,7 +7605,7 @@ let totalRelays = 0;
    messenger is on; this says which dashboard round the server is on — they
    move on different schedules and the dashboard must be able to say which
    of the two an operator is actually looking at. */
-const MONITOR_VERSION = '3.33';
+const MONITOR_VERSION = '3.34';
 
 /* Fine-grained traffic, for the dashboard's traffic tab: the same events the
    totals count, kept per client and per relay link. The maps are capped so

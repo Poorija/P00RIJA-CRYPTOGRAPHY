@@ -47,11 +47,13 @@
  *
  * The ladder only goes up. A presence hint cannot displace a value from a
  * card, and no amount of repetition promotes it -- an attacker who can
- * rewrite presence can repeat it as often as they like. When transit starts
- * routing in step five, it will require one of the top two ranks: a wrong
- * home relay does not expose a message, which stays end-to-end encrypted, but
- * it does hand the metadata to a relay of somebody else's choosing, and that
- * metadata is exactly what this design exists to withhold. */
+ * rewrite presence can repeat it as often as they like. Routing acts on a
+ * presence-rank claim only when it names a whole relay -- id and key, with
+ * the key checked against the id at seal time -- because refusing to route
+ * it strands a real contact's messages on the wrong relay. A wrong relay
+ * still never sees a message, which stays end-to-end encrypted; what it can
+ * see is the carrying metadata, which is the reason a card outranks a
+ * presence hint for everything else. */
 const HOME_RELAY_TRUST = { presence: 1, session: 2, card: 3 };
 /* A home relay is an origin, the id of the relay that must be there, and
    that relay's public key.

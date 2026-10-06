@@ -1345,29 +1345,39 @@ const peerHome = typeof routableHomeRelay === 'function' ? routableHomeRelay(pee
 const anyHome = peerRecord?.homeRelay?.id ? peerRecord.homeRelay : null;
 const knownFarRelay = (peerHome || anyHome);
 const myPin = typeof relayPinFor === 'function' ? (relayPinFor(chatServerOrigin())?.id || '') : '';
-if (knownFarRelay && myPin && knownFarRelay.id !== myPin) {
-/* The contact lives on another relay and the transit link is down. The
-   message would sit in MY relay's mailbox forever — the recipient never
-   connects here. Mark it failed with an honest reason. */
-const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
-if (conversationId) {
-const messageId = String(frame?.payload?.tag || frame?.tag || frame?.payload?.id || frame?.payload?.messageId || '');
-const history = chatState.history[conversationId] || [];
-const entry = history.find((item) => item.id === messageId);
-if (entry) {
-entry.status = 'failed';
-entry.failureReason = 'transit-down';
-storeHistory();
-if (chatState.activeConversationId === conversationId) renderMessages();
-}
-if (typeof notify === 'function') {
-/* Three transit retries already failed — the link is genuinely down for
-   this moment. Softer than the first cut: say what happened, offer the
-   retry, don't shout. */
-notify(t('پیام به مخاطب بین‌رله‌ای نرسید (لینک موقتاً قطع است) — دوباره بفرستید.', 'Message not delivered (cross-relay link temporarily down) — please retry.'), 'warning');
-}
-}
-return;
+	if (knownFarRelay && myPin && knownFarRelay.id !== myPin) {
+	/* The contact lives on another relay and the transit link is down. The
+	   message would sit in MY relay's mailbox forever — the recipient never
+	   connects here. Mark it failed with an honest reason — but only a real
+	   message earns the warning. Most of what crosses the link is background:
+	   presence questions, photographs, receipts. Those carry no history entry,
+	   nothing changes when they fail, and a warning per attempt — re-fired by
+	   every presence sweep, every time the app opens — is how a warning
+	   teaches the reader to stop reading it. */
+	const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
+	if (conversationId) {
+	const messageId = String(frame?.payload?.tag || frame?.tag || frame?.payload?.id || frame?.payload?.messageId || '');
+	const history = chatState.history[conversationId] || [];
+	const entry = history.find((item) => item.id === messageId);
+	if (entry && entry.status !== 'failed') {
+	entry.status = 'failed';
+	entry.failureReason = 'transit-down';
+	storeHistory();
+	if (chatState.activeConversationId === conversationId) renderMessages();
+	/* Once per conversation per session: a note on every message would be
+	   noise, and noise is how a warning stops being read. The set lives only
+	   as long as the page does — a fresh session may fairly warn again. */
+	fallBackToDirect.warned = fallBackToDirect.warned || new Set();
+	if (typeof notify === 'function' && !fallBackToDirect.warned.has(conversationId)) {
+	fallBackToDirect.warned.add(conversationId);
+	/* Three transit retries already failed — the link is genuinely down for
+	   this moment. Softer than the first cut: say what happened, offer the
+	   retry, don't shout. */
+	notify(t('پیام به مخاطب بین‌رله‌ای نرسید (لینک موقتاً قطع است) — دوباره بفرستید.', 'Message not delivered (cross-relay link temporarily down) — please retry.'), 'warning');
+	}
+	}
+	}
+	return;
 }
 let sent = false;
 if (chatState.ws?.readyState === WebSocket.OPEN) {

@@ -8,7 +8,7 @@
  * version as a network service and its users are entitled to your source.
  */
 
-/* The monitor dashboard, monitor 3.33. The relay serves this HTML from
+/* The monitor dashboard, monitor 3.34. The relay serves this HTML from
  * GET /Monitor_Server once the operator has a session; everything the page
  * shows arrives over the same JSON actions the page's buttons use, so the
  * HTML carries no state and no secrets.
@@ -695,8 +695,11 @@ async function loadHealth() {
       chipRow(LANG === 'fa' ? 'میل‌باکس‌ها' : 'mailboxes', relay.mailboxes) +
       chipRow(LANG === 'fa' ? 'سوکت‌ها' : 'sockets', relay.sockets) +
       chipRow(LANG === 'fa' ? 'تعدادیل' : 'throttle', relay.throttle);
-    const discardRows = Object.entries(relay.discarded?.summary || {})
-      .map(([reason, count]) => '<tr><td><span class="tag bad">' + esc(reason) + '</span></td><td>' + esc(String(count)) + '</td><td>' + fmtTime((relay.discarded?.recent || [])[0]?.at) + '</td></tr>');
+    /* byReason is the field /healthz actually ships; the first cut read a
+       summary field that never existed, so the table said "empty" on every
+       relay that had thrown messages away. The recent list stamps expiredAt. */
+    const discardRows = Object.entries(relay.discarded?.byReason || {})
+      .map(([reason, count]) => '<tr><td><span class="tag bad">' + esc(reason) + '</span></td><td>' + esc(String(count)) + '</td><td>' + fmtTime((relay.discarded?.recent || [])[0]?.expiredAt) + '</td></tr>');
     $('relayDiscards').querySelector('tbody').innerHTML = discardRows.join('') || '<tr><td colspan="3" class="empty">' + t('empty') + '</td></tr>';
 
     /* system cards + logs — TURN and RelayID drew blank on day one because
@@ -1144,7 +1147,11 @@ $('bsShow').addEventListener('click', async () => {
 /* ---------- system ---------- */
 $('pwSave').addEventListener('click', async () => {
   if ($('pwNew').value !== $('pwNew2').value) { toast(LANG === 'fa' ? 'رمزها یکی نیستند' : 'passwords differ', 'err'); return; }
-  const result = await api('/admin/change-password', { currentPassword: $('pwOld').value, newPassword: $('pwNew').value });
+  /* oldPassword is the endpoint's name. This form shipped calling it
+     currentPassword for a release, and the endpoint refused every change
+     with "old password incorrect" — the server now answers to both names,
+     and the form uses the canonical one. */
+  const result = await api('/admin/change-password', { oldPassword: $('pwOld').value, newPassword: $('pwNew').value });
   toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
   if (result.ok) { $('pwOld').value = ''; $('pwNew').value = ''; $('pwNew2').value = ''; }
 });

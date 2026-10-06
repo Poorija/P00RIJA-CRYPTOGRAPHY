@@ -87,7 +87,7 @@ fs.writeFileSync(storePath, JSON.stringify({
 
 /* A quota small enough that two 40 KB envelopes cannot both fit, so the quota
    rule fires as well as the retention rule and `byReason` has two entries. */
-const relay = spawn(process.execPath, ['scripts/server.js'], {
+let relay = spawn(process.execPath, ['scripts/server.js'], {
   /* fileURLToPath, not URL.pathname: this repository's path contains spaces, and
      pathname hands back the percent-encoded form, which is a directory that
      does not exist. spawn then reports ENOENT against the interpreter, which
@@ -96,6 +96,9 @@ const relay = spawn(process.execPath, ['scripts/server.js'], {
   env: {
     ...process.env,
     MONITOR_PASSWORD: PASSWORD,
+    /* Its own bootstrap port: the harness's relay binds the default one, and
+       two servers on 9080 is a race the suite can never win. */
+    CHAT_BOOTSTRAP_PORT: '9312',
     CHAT_SIGNAL_PORT: String(PORT),
     CHAT_PRESENCE_PORT: String(PRESENCE_PORT),
     CHAT_OFFLINE_STORE_PATH: storePath,
@@ -219,38 +222,44 @@ try {
 
   await page.fill('#passInput', PASSWORD);
   await page.keyboard.press('Enter');
-  await page.waitForSelector('#relayLimits', { timeout: 20000 }).catch(() => {});
+  /* The login screen is served by the relay; the sheet behind it is the 3.3x
+     dashboard, whose overview is six stat cards and a chip grid. The ids this
+     section used to wait for — relayLimits, relayMailboxes — belonged to the
+     2.x sheet and stopped existing the day the new one shipped, which is why
+     the section read 0/0/0 while the dashboard itself was working. */
+  await page.waitForSelector('#statCards', { timeout: 20000 }).catch(() => {});
   await page.waitForFunction(
-    () => (document.getElementById('relayLimits')?.children.length || 0) > 0,
+    () => (document.getElementById('statCards')?.children.length || 0) > 0,
     null, { timeout: 20000 }).catch(() => {});
 
+  const relayId = String((await health()).relayId || '');
   const web = await page.evaluate(() => ({
-    limits: document.getElementById('relayLimits')?.children.length || 0,
-    mailboxes: document.getElementById('relayMailboxes')?.children.length || 0,
-    throttle: document.getElementById('relayThrottle')?.children.length || 0,
-    discardRows: document.getElementById('relayDiscardBody')?.querySelectorAll('tr').length || 0,
-    summary: document.getElementById('relayDiscardSummary')?.textContent || '',
-    instance: document.getElementById('relayInstance')?.textContent || '',
-    limitsText: document.getElementById('relayLimits')?.textContent || '',
+    cards: document.getElementById('statCards')?.children.length || 0,
+    cardsText: document.getElementById('statCards')?.textContent || '',
+    chips: document.getElementById('relayHealth')?.children.length || 0,
+    discardRows: document.getElementById('relayDiscards')?.querySelectorAll('tbody tr').length || 0,
+    discardTotal: Array.from(document.getElementById('relayDiscards')?.querySelectorAll('tbody tr') || [])
+      .reduce((sum, row) => sum + (Number(row.children[1]?.textContent) || 0), 0),
+    system: document.getElementById('sysCards')?.textContent || '',
+    live: document.getElementById('statusPill')?.classList.contains('live') || false,
   }));
-  console.log(`  ${JSON.stringify({ ...web, limitsText: web.limitsText.slice(0, 90) })}`);
-  check('the web monitor logs in and paints the relay panel',
-    web.limits > 0 && web.mailboxes > 0 && web.throttle > 0,
-    `${web.limits}/${web.mailboxes}/${web.throttle}`);
+  console.log(`  ${JSON.stringify({
+    cards: web.cards, chips: web.chips, discardRows: web.discardRows,
+    live: web.live, sockets: (web.cardsText.match(/\d+ \/ \d+ sockets/) || [''])[0],
+  })}`);
+  check('the web monitor logs in and paints the overview',
+    web.cards >= 6 && web.live, `${web.cards} cards, live ${web.live}`);
   check('it shows usage against the ceiling, not a bare number',
-    web.limitsText.includes('از'), web.limitsText.slice(0, 80));
+    /\d+ \/ \d+ sockets/.test(web.cardsText), (web.cardsText.match(/\d+ \/ \d+ sockets/) || ['—'])[0]);
   check('the discard table has the dropped messages in it',
-    web.discardRows > 0 && !web.summary.includes('هیچ پیامی'),
-    `${web.discardRows} rows — ${web.summary.slice(0, 70)}`);
-  check('the instance id is shown', web.instance.length > 0, web.instance);
+    web.discardRows > 0, `${web.discardRows} rows`);
+  check('the instance id is shown', relayId !== '' && web.system.includes(relayId.slice(0, 16)),
+    relayId.slice(0, 16));
 
   /* The values must be the relay's, not placeholders that happen to render. */
-  const agrees = await page.evaluate(() => {
-    const text = document.getElementById('relayDiscardSummary')?.textContent || '';
-    return text.match(/(\d+)\s*روی هم/)?.[1] || '';
-  });
   check('the number on screen is the number the relay reported',
-    Number(agrees) === discarded.total, `screen ${agrees} vs api ${discarded.total}`);
+    web.discardTotal === discarded.total,
+    `screen ${web.discardTotal} vs api ${discarded.total}`);
 
   check('no script threw while rendering it', pageErrors.length === 0,
     pageErrors.slice(0, 2).join(' | '));
@@ -307,16 +316,27 @@ try {
 
   console.log('\n===== an older relay, with no relay block =====');
 
-  const fallback = await page.evaluate(() => {
-    renderRelayHealth(undefined, undefined);
+  /* The old check called renderRelayHealth directly; that function left with
+     the 2.x sheet. The question is unchanged and is asked where the answer
+     now lives: loadHealth, handed a server that reports nothing about its
+     relay side, renders no invented numbers — the chips simply do not appear,
+     and the overview that DOES have data still paints. */
+  const fallback = await page.evaluate(async () => {
+    const realFetch = window.fetch;
+    window.fetch = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: (name) => (name === 'content-type' ? 'application/json' : '') },
+      json: () => Promise.resolve({ peers: 1, cpuLoad: 2 }),
+    });
+    try { await loadHealth(); } finally { window.fetch = realFetch; }
     return {
-      instance: document.getElementById('relayInstance')?.textContent || '',
-      limits: document.getElementById('relayLimits')?.children.length || 0,
-      summary: document.getElementById('relayDiscardSummary')?.textContent || '',
+      chips: document.getElementById('relayHealth')?.children.length || 0,
+      cards: document.getElementById('statCards')?.children.length || 0,
     };
   });
-  check('it says the server cannot report this, rather than showing zeros',
-    fallback.instance.includes('نمی‌دهد') && fallback.limits === 0,
+  check('a relay that reports nothing about itself shows no invented numbers',
+    fallback.chips === 0 && fallback.cards > 0,
     JSON.stringify(fallback));
 
   /* ===== the controls still work ======================================== */
@@ -351,6 +371,115 @@ try {
   check('the discard record survives the queue being cleared',
     afterClear.relay?.discarded?.total >= discarded.total,
     `${afterClear.relay?.discarded?.total} vs ${discarded.total}`);
+
+  /* ===== changing the password, from the shapes that actually arrive ===== */
+  /* Here, not at the end: the throttling section below floods the write
+     bucket on purpose, and a change-password that runs afterwards is refused
+     as rate-limited before the password is even looked at. The restarts in
+     this section empty those buckets again, so the flood gets a clean
+     window. */
+
+  console.log('\n===== the password screen does what it says =====');
+
+  /* The Monitor's own form shipped calling the field currentPassword while
+     the endpoint read oldPassword, so every change was refused with "old
+     password incorrect" whatever was typed. Both names must answer. */
+  const NEW_PASSWORD = 'rotated-monitor-pw-778899';
+  const rotated = await fetch(`${RELAY}/admin/change-password`, {
+    method: 'POST',
+    headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD }),
+  }).then((response) => response.json()).catch(() => ({}));
+  check('a change in the dashboard\'s own field names is accepted', rotated.ok === true,
+    JSON.stringify(rotated).slice(0, 90));
+
+  const newAuth = 'Basic ' + Buffer.from(`admin:${NEW_PASSWORD}`).toString('base64');
+  const oldRejected = await fetch(`${RELAY}/healthz`, { headers: { Authorization: AUTH } }).then((r) => r.status);
+  const newAccepted = await fetch(`${RELAY}/healthz`, { headers: { Authorization: newAuth } }).then((r) => r.status);
+  check('the old password stops working and the new one starts', oldRejected === 401 && newAccepted === 200,
+    `old ${oldRejected}, new ${newAccepted}`);
+
+  /* The rotation must outlive a restart: the env used to win over the saved
+     password on every boot, turning each change back into the .env original
+     and locking the operator out with the very error this section began
+     with. Same env at boot, saved password wins. */
+  const spawnRelay = (envPassword) => new Promise((resolveSpawn) => {
+    /* SIGTERM is a graceful ask, and the ports outlive the call by a moment:
+       a spawn that races the dying listener dies of EADDRINUSE before it
+       ever answers. Wait for the exit — with a stick, for a process that
+       hangs — and only then start the next one. */
+    let started = false;
+    const startNext = () => {
+      if (started) return;
+      started = true;
+      setTimeout(() => {
+        const child = spawn(process.execPath, ['scripts/server.js'], {
+          cwd: path.resolve(fileURLToPath(new URL('../..', import.meta.url))),
+          env: {
+            ...process.env,
+            MONITOR_PASSWORD: envPassword,
+            CHAT_BOOTSTRAP_PORT: '9312',
+            CHAT_SIGNAL_PORT: String(PORT),
+            CHAT_PRESENCE_PORT: String(PRESENCE_PORT),
+            CHAT_OFFLINE_STORE_PATH: storePath,
+            CHAT_PUSH_STORE_PATH: path.join(dir, 'push-subscriptions.json'),
+            CHAT_MEDIA_QUOTA_BYTES: '50000',
+            CHAT_RETENTION_SWEEP_MS: '1000',
+            CHAT_RATE_WRITE: '12',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        child.stdout.on('data', (chunk) => relayLog.push(String(chunk)));
+        child.stderr.on('data', (chunk) => relayLog.push(String(chunk)));
+        relay = child;
+        const ready = setInterval(async () => {
+          try {
+            const response = await fetch(`${RELAY}/chat-health`);
+            if (response.ok) { clearInterval(ready); resolveSpawn(true); }
+          } catch (error) { /* not up yet */ }
+        }, 250);
+        setTimeout(() => { clearInterval(ready); resolveSpawn(false); }, 20000);
+      }, 400);
+    };
+    relay.once('exit', startNext);
+    relay.kill();
+    /* A graceful SIGTERM can take seconds the next listener does not have;
+       after a short grace the stick settles it and the exit fires at once. */
+    setTimeout(() => { try { relay.kill('SIGKILL'); } catch (_error) { /* gone */ } }, 800);
+    setTimeout(startNext, 3000);
+  });
+
+  const sameEnvRestart = await spawnRelay(PASSWORD);
+  const afterRestart = sameEnvRestart
+    ? await fetch(`${RELAY}/healthz`, { headers: { Authorization: newAuth } }).then((r) => r.status).catch(() => 0)
+    : 0;
+  check('a rotation survives a restart when the operator changed nothing', afterRestart === 200,
+    `healthz ${afterRestart}${sameEnvRestart ? '' : ' (relay never came up)'}`);
+
+  /* And the override the env rule existed for: an EDITED .env still wins. */
+  const FORCED_PASSWORD = 'operator-forced-pw-445566';
+  const changedEnvRestart = await spawnRelay(FORCED_PASSWORD);
+  const forcedAuth = 'Basic ' + Buffer.from(`admin:${FORCED_PASSWORD}`).toString('base64');
+  const forcedWorks = changedEnvRestart
+    ? await fetch(`${RELAY}/healthz`, { headers: { Authorization: forcedAuth } }).then((r) => r.status).catch(() => 0)
+    : 0;
+  const rotatedRefused = changedEnvRestart
+    ? await fetch(`${RELAY}/healthz`, { headers: { Authorization: newAuth } }).then((r) => r.status).catch(() => 0)
+    : 0;
+  check('an edited environment still overrides the saved password', forcedWorks === 200 && rotatedRefused === 401,
+    `forced ${forcedWorks}, rotated ${rotatedRefused}`);
+
+  /* Back where the suite started, so the sections that follow — and the
+     finally that cleans up — speak the password they opened with. */
+  const restored = await fetch(`${RELAY}/admin/change-password`, {
+    method: 'POST',
+    headers: { Authorization: forcedAuth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldPassword: FORCED_PASSWORD, newPassword: PASSWORD }),
+  }).then((response) => response.json()).catch(() => ({}));
+  const originalAgain = await fetch(`${RELAY}/healthz`, { headers: { Authorization: AUTH } }).then((r) => r.status);
+  check('and the operator can rotate back to where they started',
+    restored.ok === true && originalAgain === 200,
+    `restored ${restored.ok}, healthz ${originalAgain}`);
 
   /* ===== rate limiting shows up while it is happening =================== */
 
@@ -392,6 +521,7 @@ try {
   const unauthorised = await fetch(`${RELAY}/healthz`).then((response) => response.status);
   check('/healthz still refuses an unauthenticated caller', unauthorised === 401,
     String(unauthorised));
+
 } finally {
   await browser?.close();
   relay.kill();

@@ -257,7 +257,12 @@ console.log('\nWhen it cannot be carried');
   const other = ids.generateRelayIdentity();
   const envelope = transit.sealTransit(other.id, other.keys.p256.publicKey, { type: 'relay', toFingerprint: 'x' });
   sender.send({ ...envelope, tag: 'no-link' });
-  const answer = await attempt(sender.waitFor((message) => message.tag === 'no-link'));
+  /* Fifteen seconds, not the default eight: an envelope for a link that is
+     not there is parked for up to ten first — a link mid-redial comes back
+     inside two, and refusing that instantly turned a one-second window into
+     a user-visible error. The refusal for a link that is truly gone is the
+     parked timer running out. */
+  const answer = await attempt(sender.waitFor((message) => message.tag === 'no-link', 15000));
   ok(answer?.reason === 'transit-unavailable',
     `a relay with no link to the named one says so (${answer?.reason || answer?.error})`);
 }
@@ -415,14 +420,97 @@ console.log('\nWhich way the client sends');
   ok(route(HERE)(card(HERE)) === null,
     'a contact on this same relay goes the ordinary way — nothing to carry');
   ok(route(HERE)({}) === null, 'and so does one with no home relay recorded');
-  ok(route(HERE)({ homeRelay: { origin: 'https://theirs.example', id: THERE, key: KEY, source: 'presence' } }) === null,
-    'a home relay that only a hello claimed is not routed on');
+  /* Presence-rank routes, a deliberate change: a contact whose home relay is
+     only known from a presence answer still lives on that relay, and refusing
+     to route strands their messages on this one. What a mere hello still
+     cannot do is name a relay with no key — and the key must hash to the id
+     at seal time, so an invented relay cannot borrow a real one's identity. */
+  ok(route(HERE)({ homeRelay: { origin: 'https://theirs.example', id: THERE, key: KEY, source: 'presence' } })?.id === THERE,
+    'a presence answer naming a whole relay — id and key — is routed on');
   ok(route(HERE)({ homeRelay: { origin: 'https://theirs.example', id: THERE, source: 'card' } }) === null,
     'nor is one with no key to seal to');
   /* Without a pinned id for the relay in hand there is nothing to compare
      against, and guessing wrong sends every message the long way round. */
   ok(route('')(card(THERE)) === null,
     'and a device that has not pinned its own relay yet does not guess');
+}
+
+/* ---- what the client says when the link is down ------------------------ */
+
+/* The presence sweep asks about far contacts on a loop, so a warning per
+   failed probe is a warning every twelve seconds for as long as the app is
+   open — and once more each time it starts. Only a real message, one the
+   sender can see fail, is allowed to speak; and it speaks once. */
+console.log('\nWhat the client says when the link is down');
+
+{
+  const source = readFileSync(join(ROOT, 'js', 'chat', '29-file-transfer.js'), 'utf8');
+  const extract = (text, name) => {
+    const start = text.search(new RegExp(`(async )?function ${name}\\(`));
+    if (start < 0) throw new Error(`${name} is gone`);
+    let depth = 0;
+    for (let i = text.indexOf('{', text.indexOf(')', start)); i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') { depth -= 1; if (!depth) return text.slice(start, i + 1); }
+    }
+    throw new Error(`${name} is not closed`);
+  };
+  const warnings = [];
+  const history = {
+    'conv-far': [
+      { id: 'msg-1', direction: 'out', status: 'queued', text: 'hello' },
+      { id: 'msg-2', direction: 'out', status: 'queued', text: 'again' },
+    ],
+    'conv-other-far': [
+      { id: 'msg-3', direction: 'out', status: 'queued', text: 'elsewhere' },
+    ],
+  };
+  const fall = new Function('routableHomeRelay', 'relayPinFor', 'chatServerOrigin',
+    'getConversationKey', 'chatState', 'storeHistory', 'renderMessages', 'notify', 't', 'WebSocket', `
+    ${extract(source, 'fallBackToDirect')}
+    return fallBackToDirect;
+  `)(
+    () => ({ origin: 'https://theirs.example', id: 'b'.repeat(8), key: 'k', source: 'card' }),
+    () => ({ id: 'a'.repeat(8) }),
+    () => 'https://mine.example',
+    (peer) => peer.conversationKey,
+    { history, activeConversationId: '' },
+    () => {},
+    () => {},
+    (message) => warnings.push(String(message)),
+    (fa) => fa,
+    function Closed() {},
+  );
+  const farPeer = (conversationKey) => ({
+    peerId: `peer-${conversationKey}`,
+    conversationKey,
+    homeRelay: { origin: 'https://theirs.example', id: 'b'.repeat(8), source: 'card' },
+  });
+
+  fall({ type: 'presence-query', toFingerprint: 'x'.repeat(64), tag: 'presence-abc-1' }, farPeer('conv-far'), 'link down');
+  ok(warnings.length === 0,
+    'a presence probe that cannot cross says nothing to the user');
+  ok(history['conv-far'].every((entry) => entry.status === 'queued'),
+    'and marks nothing failed — there was no message to fail');
+
+  fall({ type: 'relay', tag: 'msg-1', payload: { id: 'msg-1', type: 'text' } }, farPeer('conv-far'), 'link down');
+  ok(history['conv-far'][0].status === 'failed' && history['conv-far'][0].failureReason === 'transit-down',
+    'a real message that cannot cross is marked failed, with the reason why');
+  ok(warnings.length === 1, 'and the user hears about it once');
+
+  fall({ type: 'relay', tag: 'msg-2', payload: { id: 'msg-2', type: 'text' } }, farPeer('conv-far'), 'link down');
+  ok(history['conv-far'][1].status === 'failed',
+    'a second message that cannot cross is still marked failed');
+  ok(warnings.length === 1,
+    'but the same conversation does not warn twice in one session');
+
+  fall({ type: 'relay', tag: 'msg-3', payload: { id: 'msg-3', type: 'text' } }, farPeer('conv-other-far'), 'link down');
+  ok(history['conv-other-far'][0].status === 'failed' && warnings.length === 2,
+    'a different contact still gets its own warning');
+
+  fall({ type: 'relay', tag: 'msg-1', payload: { id: 'msg-1', type: 'text' } }, farPeer('conv-far'), 'link down');
+  ok(warnings.length === 2,
+    're-failing a message already marked failed stays quiet');
 }
 
 console.log(`\n${failures ? 'FAILED' : 'passed'} — ${checks - failures}/${checks} checks`);

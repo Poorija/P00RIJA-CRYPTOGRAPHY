@@ -166,16 +166,26 @@ function loadServerConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      /* Whose password is newer: the one the dashboard changed to, or the
+         one in the environment? The env used to win ALWAYS, which meant a
+         password rotated from the Monitor silently turned back into the
+         .env original at the next restart. The save records what the env
+         SAID at the time it happened: the saved rotation wins by default,
+         and the env wins only when it differs from that stamp — a changed
+         .env is a deliberate override. Unstamped legacy files answer null,
+         the comparison is always unequal, and the env wins as it always
+         did for them. */
       if (config.monitorPassword) {
         MONITOR_PASSWORD = config.monitorPassword;
+      }
+      const env = process.env.MONITOR_PASSWORD || '';
+      const savedEnv = typeof config.monitorPasswordEnvAtSave === 'string' ? config.monitorPasswordEnvAtSave : null;
+      if (env && env !== savedEnv) {
+        MONITOR_PASSWORD = env;
       }
     }
   } catch (error) {
     console.error('Failed to load server config:', error);
-  }
-  // Environment variable ALWAYS takes priority over config file
-  if (process.env.MONITOR_PASSWORD) {
-    MONITOR_PASSWORD = process.env.MONITOR_PASSWORD;
   }
 }
 
@@ -183,8 +193,13 @@ function saveServerConfig() {
   try {
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
     /* 0600: this file holds the monitor's password in the clear, and the
-       default 0644 hands it to every other account on the host. */
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify({ monitorPassword: MONITOR_PASSWORD }, null, 2), { mode: 0o600 });
+       default 0644 hands it to every other account on the host. The env
+       stamp is what lets the next boot keep a dashboard rotation that the
+       operator has not overridden — see loadServerConfig. */
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+      monitorPassword: MONITOR_PASSWORD,
+      monitorPasswordEnvAtSave: process.env.MONITOR_PASSWORD || '',
+    }, null, 2), { mode: 0o600 });
     try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (_error) { /* pre-existing file on a filesystem without modes */ }
   } catch (error) {
     console.error('Failed to save server config:', error);
@@ -846,7 +861,17 @@ app.get('/healthz', authMiddleware, (_req, res) => {
     logs: serverLogs,
     storage: storage,
     suspendedUsers: listSuspensions(),
-    kickedUsers: listActiveKickBans()
+    kickedUsers: listActiveKickBans(),
+    /* The dashboard's overview card reads this to say "3 / 5000 sockets";
+       the deployed relay ships the same block, and a number with no ceiling
+       next to it is a reading nobody can act on. */
+    capacity: {
+      sockets: {
+        inUse: Array.from(wsPerAddress.values()).reduce((sum, count) => sum + count, 0),
+        max: WS_MAX_TOTAL,
+        maxPerAddress: WS_MAX_PER_IP,
+      },
+    }
   });
 });
 
@@ -1109,13 +1134,16 @@ app.post('/admin/broadcast', authMiddleware, (req, res) => {
 });
 
 app.post('/admin/change-password', authMiddleware, (req, res) => {
-  const { oldPassword, newPassword } = req.body;
+  const { oldPassword, newPassword, currentPassword } = req.body;
+  /* See the deployed relay: the Monitor dashboard named this field
+     `currentPassword` and was refused forever; both names answer now. */
+  const suppliedOld = oldPassword ?? currentPassword;
 
   /* The old password is required, not optional: an empty field skipping the
      check made "change the password" into "anybody logged in sets the
      password to anything". And the comparison is timing-safe, like the login
      it mirrors. */
-  if (!oldPassword || !secretsMatch(oldPassword, MONITOR_PASSWORD)) {
+  if (!suppliedOld || !secretsMatch(suppliedOld, MONITOR_PASSWORD)) {
     return res.status(403).json({ ok: false, reason: 'Old password incorrect' });
   }
 

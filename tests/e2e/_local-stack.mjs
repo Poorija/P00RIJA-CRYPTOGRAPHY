@@ -23,6 +23,10 @@ const port = Number(process.env.E2E_PORT || 8241);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorija-e2e-'));
 const log = fs.openSync(path.join(dir, 'servers.log'), 'w');
 const env = { ...process.env, CHAT_SIGNAL_HOST:'127.0.0.1', CHAT_SIGNAL_PORT:String(port+2), CHAT_PRESENCE_PORT:String(port+3),
+  /* Its own bootstrap port: the monitor suite spawns a relay of its own
+     beside this one, and two servers on the default 9080 is a race neither
+     can win. */
+  CHAT_BOOTSTRAP_PORT:String(port+9),
   CHAT_OFFLINE_STORE_PATH:path.join(dir,'offline-messages.json'), CHAT_OFFLINE_STORE_DIR:path.join(dir,'mailboxes'),
   CHAT_PUSH_STORE_PATH:path.join(dir,'push.json'), CHAT_VAPID_STORE_PATH:path.join(dir,'vapid.json'),
   CHAT_POLICY_STORE_PATH:path.join(dir,'policy.json'), CHAT_EXPIRY_LOG_PATH:path.join(dir,'expiry.json'),
