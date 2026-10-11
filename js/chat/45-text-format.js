@@ -140,27 +140,289 @@ function plainMessageText(text) {
 
 /* ---- composing ------------------------------------------------------------ */
 
-/* Wraps the selection (or the caret) in a marker pair. The composer is a
-   textarea, so this is string surgery plus an input event — the draft store
-   and the height sync both listen for that. */
-function wrapComposerSelection(marker) {
+/* The order markers nest in, outermost first. The renderer turns *, _ and ~
+   into tags in that order, and each needs a word edge outside it, so a bold
+   around an italic renders and an italic around a bold does not. Spoilers and
+   code need no edge and go innermost. Writing every layer back in this order
+   is what lets "bold, then italic" from the bar always come out formatted. */
+const FORMAT_NEST_ORDER = ['*', '_', '~', '||', '`'];
+/* Longest first, so ``` is never read as three inline code marks. */
+const FORMAT_PEEL_ORDER = ['```', '||', '*', '_', '~', '`'];
+const FORMAT_BOUNDED = new Set(['*', '_', '~']);
+const FORMAT_MARK_CHARS = '*_~|`';
+/* The raw-text twins of FORMAT_EDGE_BEFORE/AFTER. Every character escapeHTML
+   turns into an entity counts on both sides: the entity ends in `;` and
+   starts with `&`, which is what the renderer's edges accept. */
+const FORMAT_RAW_BEFORE = /[\s([{«;‘“<>"'&]/;
+const FORMAT_RAW_AFTER = /[\s)\]}».,;:!?؟،’”<>"'&]/;
+const FORMAT_WORD_STOP = /[\s([{«‘“)\]}».,;:!?؟،’”"'*_~|`]/;
+
+function formatEdgeOk(value, index, before) {
+  if (before ? index <= 0 : index >= value.length) return true;
+  const ch = value[before ? index - 1 : index];
+  return FORMAT_MARK_CHARS.includes(ch) || (before ? FORMAT_RAW_BEFORE : FORMAT_RAW_AFTER).test(ch);
+}
+
+/* Would this marker pair, at these positions, render? Only a pair that would
+   is treated as formatting — so the underscores in snake_case_name are never
+   offered as italics, nor removed as such. */
+function formatPairOk(value, open, close, marker) {
+  const inner = value.slice(open + marker.length, close);
+  if (!inner) return false;
+  if (marker === '```') return !inner.includes('```');
+  if (marker === '`') return !/[`\n]/.test(inner);
+  if (/^\s|\s$/.test(inner)) return false;
+  if (marker !== '||' && (inner.includes('\n') || !formatEdgeOk(value, open, true) || !formatEdgeOk(value, close + marker.length, false))) return false;
+  /* The renderer closes a pair at the first marker that can close it, so in
+     "*one* and *two*" the outer stars are two pairs, not one. */
+  for (let i = open + marker.length + 1; i < close; i += 1) {
+    if (value.startsWith(marker, i) && /\S/.test(value[i - 1])
+      && (marker === '||' || formatEdgeOk(value, i + marker.length, false))) return false;
+  }
+  return true;
+}
+
+/* A code block's fences usually sit on their own lines; the newline next to
+   each fence belongs to the fence. `at` is where the fence would start (an
+   opening one) or end (a closing one); `outside` reads it from the other
+   side of that position. */
+function blockFenceLength(value, at, opening, outside) {
+  const ahead = opening !== outside;
+  const fenced = (text) => (ahead ? value.startsWith(text, at) : at >= text.length && value.slice(at - text.length, at) === text);
+  const withBreak = opening ? '```\n' : '\n```';
+  if (fenced(withBreak)) return 4;
+  return fenced('```') ? 3 : 0;
+}
+
+/* The layers of formatting around [start, end): markers the selection itself
+   begins and ends with, then markers just outside it. Returns the bare text's
+   range, the range including every layer, and the layers found. */
+function peelFormatLayers(value, start, end) {
+  let s = start;
+  let e = end;
+  const layers = new Set();
+  for (let moved = true; moved;) {
+    moved = false;
+    const open = blockFenceLength(value, s, true, false);
+    const close = open ? blockFenceLength(value, e, false, false) : 0;
+    if (open && close && e - s > open + close) {
+      layers.add('```'); s += open; e -= close; moved = true; continue;
+    }
+    for (const m of FORMAT_PEEL_ORDER) {
+      if (m === '```') continue;
+      const len = m.length;
+      if (e - s > len * 2 && value.startsWith(m, s) && value.startsWith(m, e - len) && formatPairOk(value, s, e - len, m)) {
+        layers.add(m); s += len; e -= len; moved = true; break;
+      }
+    }
+  }
+  let os = start;
+  let oe = end;
+  for (let moved = true; moved;) {
+    moved = false;
+    const open = blockFenceLength(value, os, true, true);
+    const close = open ? blockFenceLength(value, oe, false, true) : 0;
+    if (open && close) {
+      layers.add('```'); os -= open; oe += close; moved = true; continue;
+    }
+    for (const m of FORMAT_PEEL_ORDER) {
+      if (m === '```') continue;
+      const len = m.length;
+      if (os >= len && value.startsWith(m, os - len) && value.startsWith(m, oe) && formatPairOk(value, os - len, oe, m)) {
+        layers.add(m); os -= len; oe += len; moved = true; break;
+      }
+    }
+  }
+  return { start: s, end: e, outerStart: os, outerEnd: oe, layers };
+}
+
+/* The same, looking past a selection that stops inside a word: "ell" in
+   *hello* is in a bold word. With `growPlain` an unformatted part of a word
+   grows to the whole word too, since *, _ and ~ only render on a word edge
+   and "hel" in "hello" can only be made bold as "hello". */
+function analyzeFormatSegment(value, start, end, growPlain) {
+  const peeled = peelFormatLayers(value, start, end);
+  if (peeled.layers.size) return peeled;
+  let s = start;
+  let e = end;
+  while (s > 0 && !FORMAT_WORD_STOP.test(value[s - 1])) s -= 1;
+  while (e < value.length && !FORMAT_WORD_STOP.test(value[e])) e += 1;
+  if (s === start && e === end) return peeled;
+  const grown = peelFormatLayers(value, s, e);
+  return grown.layers.size || growPlain ? grown : peeled;
+}
+
+/* Removes every rendering pair of one marker from a piece of text, so making
+   a range bold that already holds a bold word gives one bold range rather
+   than markers that cancel each other out. */
+function stripMarkerPairs(text, marker) {
+  let out = text;
+  if (marker === '```') return out.replace(/```\n?([\s\S]+?)\n?```/g, '$1');
+  if (marker === '`') return out.replace(/`([^`\n]+)`/g, '$1');
+  if (marker === '||') return out.replace(/\|\|(?=\S)([\s\S]*?\S)\|\|/g, '$1');
+  const m = `\\${marker}`;
+  const edgeBefore = '(^|[\\s([{«;‘“<>"\'&*_~|`])';
+  const edgeAfter = '(?=$|[\\s)\\]}».,;:!?؟،’”<>"\'&*_~|`])';
+  const pattern = new RegExp(`${edgeBefore}${m}(?=\\S)([^\\n]*?\\S)${m}${edgeAfter}`, 'g');
+  for (let i = 0; i < 4; i += 1) {
+    const next = out.replace(pattern, '$1$2');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+function stripAllFormatting(text) {
+  let out = text;
+  for (const marker of FORMAT_PEEL_ORDER) out = stripMarkerPairs(out, marker);
+  return out;
+}
+
+function wrapFormatLayers(inner, layers) {
+  let open = '';
+  let close = '';
+  for (const m of FORMAT_NEST_ORDER) {
+    if (layers.has(m)) { open += m; close = m + close; }
+  }
+  if (layers.has('```')) { open = `\`\`\`\n${open}`; close = `${close}\n\`\`\``; }
+  return { text: open + inner + close, innerOffset: open.length };
+}
+
+/* The pieces of a selection that formatting applies to: the selection itself
+   with its outer spaces trimmed off, or — across lines — each line's own
+   trimmed piece, since *, _ and ~ never span a line break. A code block is
+   the one format that wants the lines whole. */
+function formatSegments(value, start, end, wholeBlock) {
+  const trim = (s, e) => {
+    while (s < e && /\s/.test(value[s])) s += 1;
+    while (e > s && /\s/.test(value[e - 1])) e -= 1;
+    return s < e ? [s, e] : null;
+  };
+  const text = value.slice(start, end);
+  if (wholeBlock || !text.includes('\n')) {
+    const one = trim(start, end);
+    return one ? [one] : [];
+  }
+  const segments = [];
+  let lineStart = start;
+  for (const line of text.split('\n')) {
+    const piece = trim(lineStart, lineStart + line.length);
+    if (piece) segments.push(piece);
+    lineStart += line.length + 1;
+  }
+  return segments;
+}
+
+/* What the bar shows: which formats every piece of the selection carries. */
+function composerFormatState(value, start, end) {
+  const state = { active: new Set(), any: false, multiline: value.slice(start, end).includes('\n') };
+  if (start === end) return state;
+  const block = peelFormatLayers(value, start, end);
+  if (block.layers.has('```')) {
+    state.active.add('`');
+    state.any = true;
+    return state;
+  }
+  const segments = formatSegments(value, start, end, false).map(([s, e]) => analyzeFormatSegment(value, s, e, false));
+  if (!segments.length) return state;
+  for (const m of FORMAT_NEST_ORDER) {
+    if (segments.every((seg) => seg.layers.has(m))) state.active.add(m);
+  }
+  state.any = segments.some((seg) => seg.layers.size > 0 || stripAllFormatting(value.slice(seg.start, seg.end)) !== value.slice(seg.start, seg.end));
+  return state;
+}
+
+/* The edit a format button makes: a single replacement over the whole touched
+   range, so one undo puts it back, and the selection to leave behind. Returns
+   null when there is nothing to do. */
+function composerFormatEdit(value, start, end, marker) {
+  if (start === end) {
+    if (marker === 'clear') return null;
+    return { from: start, to: end, text: marker + marker, selStart: start + marker.length, selEnd: start + marker.length };
+  }
+  const multiline = value.slice(start, end).includes('\n');
+  const effective = marker === '`' && multiline ? '```' : marker;
+  if (effective === '```' || (marker === 'clear' && peelFormatLayers(value, start, end).layers.has('```'))) {
+    const [s0, e0] = formatSegments(value, start, end, true)[0] || [];
+    if (s0 === undefined) return null;
+    const seg = peelFormatLayers(value, s0, e0);
+    const inner = value.slice(seg.start, seg.end);
+    let layers;
+    if (marker === 'clear') layers = new Set();
+    else if (seg.layers.has('```')) layers = new Set([...seg.layers].filter((m) => m !== '```'));
+    else layers = new Set([...seg.layers, '```']);
+    const body = marker === 'clear' ? stripAllFormatting(inner) : inner;
+    const wrapped = wrapFormatLayers(body, layers);
+    return { from: seg.outerStart, to: seg.outerEnd, text: wrapped.text,
+      selStart: seg.outerStart + wrapped.innerOffset, selEnd: seg.outerStart + wrapped.innerOffset + body.length };
+  }
+  const raw = formatSegments(value, start, end, false);
+  if (!raw.length) return null;
+  let segments = raw.map(([s, e]) => analyzeFormatSegment(value, s, e, false));
+  const allHave = marker !== 'clear' && segments.every((seg) => seg.layers.has(marker));
+  const adding = marker !== 'clear' && !allHave;
+  if (adding && FORMAT_BOUNDED.has(marker)) {
+    segments = segments.map((seg, i) => (seg.layers.size ? seg : analyzeFormatSegment(value, raw[i][0], raw[i][1], true)));
+  }
+  const edits = segments.map((seg) => {
+    const inner = value.slice(seg.start, seg.end);
+    const layers = new Set(seg.layers);
+    let body = inner;
+    if (marker === 'clear') { layers.clear(); body = stripAllFormatting(inner); }
+    else if (adding) { layers.add(marker); body = stripMarkerPairs(inner, marker); }
+    else layers.delete(marker);
+    const wrapped = wrapFormatLayers(body, layers);
+    return { from: seg.outerStart, to: seg.outerEnd, wrapped, body };
+  });
+  const from = edits[0].from;
+  const to = edits[edits.length - 1].to;
+  let text = '';
+  let cursor = from;
+  for (const edit of edits) {
+    text += value.slice(cursor, edit.from) + edit.wrapped.text;
+    cursor = edit.to;
+  }
+  text += value.slice(cursor, to);
+  if (text === value.slice(from, to)) return null;
+  if (edits.length === 1) {
+    const only = edits[0];
+    return { from, to, text, selStart: from + only.wrapped.innerOffset, selEnd: from + only.wrapped.innerOffset + only.body.length };
+  }
+  return { from, to, text, selStart: from, selEnd: from + text.length };
+}
+
+/* Puts an edit into the composer through the editing command where there is
+   one, so the phone's and the browser's own undo still work and the input
+   event fires as if typed; plain assignment is the fallback. */
+function applyComposerEdit(box, edit) {
+  const expected = box.value.slice(0, edit.from) + edit.text + box.value.slice(edit.to);
+  box.focus({ preventScroll: true });
+  box.setSelectionRange(edit.from, edit.to);
+  let inserted = false;
+  try { inserted = document.execCommand('insertText', false, edit.text); } catch (_error) { inserted = false; }
+  if (!inserted || box.value !== expected) {
+    box.value = expected;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  box.setSelectionRange(edit.selStart, edit.selEnd);
+}
+
+/* Formats the selection, or toggles the format off when every piece of the
+   selection already carries it. With only a caret, an empty marker pair is
+   put down and the caret goes between its halves. */
+function toggleComposerFormat(marker) {
   const box = document.getElementById('chatComposer');
-  if (!box) return;
+  if (!box || box.disabled || box.readOnly) return false;
   const start = box.selectionStart ?? box.value.length;
   const end = box.selectionEnd ?? start;
-  const value = box.value;
-  const selected = value.slice(start, end);
-  const already = selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2;
-  const replacement = already ? selected.slice(marker.length, selected.length - marker.length) : `${marker}${selected}${marker}`;
-  box.value = value.slice(0, start) + replacement + value.slice(end);
-  if (selected) {
-    box.selectionStart = start;
-    box.selectionEnd = start + replacement.length;
-  } else {
-    box.selectionStart = box.selectionEnd = start + marker.length;
-  }
-  box.dispatchEvent(new Event('input', { bubbles: true }));
-  box.focus();
+  const edit = composerFormatEdit(box.value, start, end, marker);
+  if (!edit) return false;
+  applyComposerEdit(box, edit);
+  syncFormatBar(true);
+  return true;
+}
+/* The name the keyboard shortcuts were wired to before the bar existed. */
+function wrapComposerSelection(marker) {
+  return toggleComposerFormat(marker);
 }
 
 const FORMAT_SHORTCUTS = {
@@ -172,8 +434,147 @@ document.getElementById('chatComposer')?.addEventListener('keydown', (event) => 
   const marker = FORMAT_SHORTCUTS[key];
   if (!marker) return;
   event.preventDefault();
-  wrapComposerSelection(marker);
+  toggleComposerFormat(marker);
 });
+
+/* ---- the formatting bar ---------------------------------------------------- */
+
+/* A phone has no Ctrl key, so the same markers are a tap away whenever text
+   in the composer is selected. The bar sits BELOW the input: the system's
+   own copy-and-paste menu opens above a selection, and a bar there would be
+   underneath it — with a tap meant for Bold landing on Copy. */
+const FORMAT_LABELS = {
+  '*': ['پررنگ', 'Bold', 'B'],
+  _: ['کج', 'Italic', 'I'],
+  '~': ['خط‌خورده', 'Strikethrough', 'Shift+X'],
+  '`': ['کد', 'Code', 'Shift+M'],
+  '||': ['متن پنهان', 'Spoiler', 'Shift+P'],
+  clear: ['حذف قالب', 'Clear formatting', ''],
+};
+const formatBarState = { pointerDown: false, timer: 0, hideTimer: 0, watch: 0, last: null };
+
+function formatShortcutLabel(key) {
+  if (!key) return '';
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+  return `${mac ? '⌘' : 'Ctrl+'}${key.replace('Shift+', mac ? '⇧' : 'Shift+')}`;
+}
+function labelFormatBar(bar) {
+  const touch = window.matchMedia?.('(pointer: coarse)')?.matches;
+  bar.setAttribute('aria-label', t('قالب‌بندی متن', 'Text formatting'));
+  bar.querySelectorAll('[data-format]').forEach((button) => {
+    const [fa, en, key] = FORMAT_LABELS[button.dataset.format] || [];
+    if (!fa) return;
+    const name = t(fa, en);
+    button.setAttribute('aria-label', name);
+    button.title = touch || !key ? name : `${name} (${formatShortcutLabel(key)})`;
+  });
+}
+
+function setFormatBarVisible(bar, show) {
+  if (bar.classList.contains('hidden') === !show) return;
+  bar.classList.toggle('hidden', !show);
+  if (show) labelFormatBar(bar);
+  /* Sending, switching conversation or restoring a draft all rewrite the
+     composer without an event the bar hears, so while it is up it checks the
+     selection it belongs to is still there. */
+  window.clearInterval(formatBarState.watch);
+  formatBarState.watch = show ? window.setInterval(() => syncFormatBar(true), 300) : 0;
+  /* The bar changes the composer's height; on a phone the layout pinned to
+     the keyboard has to hear about it the way it hears about a new line. */
+  if (document.activeElement?.id === 'chatComposer' && typeof syncComposerViewportFocus === 'function') {
+    syncComposerViewportFocus(true, true);
+  }
+}
+
+/* `now` skips the settle delay. Showing waits for the selection to stop
+   moving — a phone's selection handles move it continuously, and a bar that
+   appeared mid-drag would shift the text under the finger. Hiding and
+   relabelling a bar that is already up happen at once. */
+function syncFormatBar(now = false) {
+  const bar = document.getElementById('chatFormatBar');
+  const box = document.getElementById('chatComposer');
+  if (!bar || !box) return;
+  window.clearTimeout(formatBarState.timer);
+  const start = box.selectionStart ?? 0;
+  const end = box.selectionEnd ?? start;
+  const focused = document.activeElement === box;
+  const selected = focused && end > start && /\S/.test(box.value.slice(start, end)) && !box.disabled && !box.readOnly;
+  if (!selected) {
+    setFormatBarVisible(bar, false);
+    return;
+  }
+  formatBarState.last = { start, end, value: box.value };
+  const state = composerFormatState(box.value, start, end);
+  bar.querySelectorAll('[data-format]').forEach((button) => {
+    const marker = button.dataset.format;
+    if (marker === 'clear') {
+      button.disabled = !state.any;
+    } else {
+      button.setAttribute('aria-pressed', state.active.has(marker) ? 'true' : 'false');
+    }
+  });
+  if (!bar.classList.contains('hidden')) return;
+  if (now) {
+    setFormatBarVisible(bar, true);
+    return;
+  }
+  formatBarState.timer = window.setTimeout(() => {
+    if (formatBarState.pointerDown) return;
+    syncFormatBar(true);
+  }, 260);
+}
+
+(() => {
+  const bar = document.getElementById('chatFormatBar');
+  const box = document.getElementById('chatComposer');
+  if (!bar || !box) return;
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement === box) syncFormatBar();
+  });
+  box.addEventListener('select', () => syncFormatBar());
+  box.addEventListener('input', () => syncFormatBar());
+  box.addEventListener('pointerdown', () => { formatBarState.pointerDown = true; });
+  const released = () => {
+    if (!formatBarState.pointerDown) return;
+    formatBarState.pointerDown = false;
+    syncFormatBar();
+  };
+  window.addEventListener('pointerup', released, true);
+  window.addEventListener('pointercancel', released, true);
+  box.addEventListener('focus', () => window.clearTimeout(formatBarState.hideTimer));
+  box.addEventListener('blur', () => {
+    window.clearTimeout(formatBarState.hideTimer);
+    formatBarState.hideTimer = window.setTimeout(() => {
+      if (document.activeElement !== box) setFormatBarVisible(bar, false);
+    }, 150);
+  });
+  /* The footer already cancels pointer-down on its buttons so the input keeps
+     focus and the keys stay up. Should a phone drop the selection anyway, the
+     one the bar was showing for is put back before the format is applied. */
+  bar.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-format]');
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    const last = formatBarState.last;
+    if (last && box.selectionStart === box.selectionEnd && last.value === box.value) {
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(last.start, last.end);
+    }
+    toggleComposerFormat(button.dataset.format);
+  });
+  /* Arrow keys move between the buttons, as in any toolbar. */
+  bar.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Escape') return;
+    if (event.key === 'Escape') { box.focus(); return; }
+    const buttons = [...bar.querySelectorAll('[data-format]:not(:disabled)')];
+    const index = buttons.indexOf(document.activeElement);
+    if (index < 0) return;
+    const rtl = getComputedStyle(bar).direction === 'rtl';
+    const step = (event.key === 'ArrowRight') !== rtl ? 1 : -1;
+    buttons[(index + step + buttons.length) % buttons.length].focus();
+    event.preventDefault();
+  });
+})();
 
 /* ---- reading -------------------------------------------------------------- */
 
@@ -204,3 +605,4 @@ document.getElementById('chatMessages')?.addEventListener('keydown', (event) => 
 
 window.formatMessageHtml = formatMessageHtml;
 window.plainMessageText = plainMessageText;
+window.toggleComposerFormat = toggleComposerFormat;

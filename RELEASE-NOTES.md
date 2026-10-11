@@ -1,3 +1,65 @@
+# P00RIJA Cryptography 2.98.29
+
+Version 2.98.29 · build chat-v122
+
+قالب‌بندی متن حالا روی گوشی هم با یک لمس انجام می‌شود، بدون تایپ علامت‌ها. متن هر
+بخش اول فارسی است و بعد انگلیسی. تغییرات نسخهٔ 2.98.28 پایین‌تر آمده‌اند.
+
+Text formatting now takes one tap on a phone, with no markers to type. Each
+section is Persian first, English after. The changes in 2.98.28 follow below.
+
+---
+
+## نوار قالب‌بندی · The formatting bar
+
+- **با انتخاب متن ظاهر می‌شود** — هر جای کادر پیام که متنی انتخاب کنید، نواری با
+  دکمه‌های پررنگ، کج، خط‌خورده، کد، متن پنهان و حذف قالب زیر کادر باز می‌شود. روی
+  گوشی، PWA، مرورگر و نسخه‌های دسکتاپ یکسان است.
+- **زیر کادر، نه بالای آن** — منوی کپی و چسباندن خود سیستم بالای متن انتخاب‌شده
+  باز می‌شود؛ نوار پایین کادر است تا زیر آن منو نماند و لمسی که برای «پررنگ» بود
+  روی «کپی» ننشیند.
+- **وقتی انتخاب تمام شد** — تا انگشت روی متن است یا دستگیره‌های انتخاب حرکت
+  می‌کنند نوار ظاهر نمی‌شود، تا متن زیر انگشت جابه‌جا نشود. با گذاشتن نشانگر، ارسال
+  پیام یا بیرون رفتن از کادر بسته می‌شود.
+- **کیبورد باز می‌ماند** — لمس دکمه فوکوس کادر را نمی‌گیرد، و همان کلمه انتخاب‌شده
+  می‌ماند تا قالب دوم را هم بزنید.
+- **روشن و خاموش** — دکمهٔ قالبی که روی متن هست روشن نشان داده می‌شود و لمس دوباره
+  آن را برمی‌دارد. قالب‌ها به ترتیبی روی هم می‌نشینند که درست نمایش داده شوند
+  (پررنگِ کج همیشه کار می‌کند).
+- **رفتار دقیق‌تر** — بخشی از یک کلمه برای پررنگ، کج و خط‌خورده کل کلمه می‌شود، چون
+  فقط این‌طور نمایش داده می‌شود؛ متن پنهان و کد می‌توانند بخشی از کلمه باشند. در
+  انتخاب چندخطی هر خط جدا قالب می‌گیرد و «کد» یک بلوک کد می‌سازد. زیرخط‌های
+  `snake_case` کج حساب نمی‌شوند.
+- **واگرد کار می‌کند** — تغییر از راه ویرایشگر خود سیستم وارد می‌شود، پس واگرد گوشی
+  و Ctrl/⌘+Z آن را برمی‌گرداند.
+- روی دسکتاپ هر دکمه میان‌بر خودش را نشان می‌دهد و میان‌برها هم حالا مثل دکمه‌ها
+  روشن و خاموش می‌کنند.
+
+- **It appears when you select text** in the message box: Bold, Italic,
+  Strikethrough, Code, Spoiler, and Clear formatting, in a bar under the box. It
+  is the same on a phone, in the PWA, in a browser, and in the desktop apps.
+- **Under the box, not above it**: the system's own copy-and-paste menu opens
+  above a selection, so the bar sits below where that menu cannot cover it and a
+  tap meant for Bold cannot land on Copy.
+- **Once the selection is made**: while a finger is on the text or the selection
+  handles are moving the bar waits, so the text never shifts under a finger. It
+  closes when the caret is put down, the message is sent, or the box loses focus.
+- **The keyboard stays up**: a tap does not take focus from the box, and the
+  word stays selected for a second format.
+- **On and off**: a format already on the text shows as on, and a second tap
+  takes it off. Formats nest in the order that renders, so bold italic always
+  works.
+- **Sensible edges**: part of a word is made bold, italic, or struck as the whole
+  word, the only way those render; spoilers and code may cover part of a word.
+  Across lines each line is formatted on its own, and Code makes one code
+  block. Underscores in `snake_case` are not taken for italics.
+- **Undo works**: the change goes in through the system's own editing, so the
+  phone's undo and Ctrl/⌘+Z take it back.
+- On a desktop each button names its shortcut, and the shortcuts now toggle
+  exactly as the buttons do.
+
+---
+
 # P00RIJA Cryptography 2.98.28
 
 Version 2.98.28 · build chat-v121

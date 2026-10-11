@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.98.28-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.98.29-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -185,9 +185,11 @@ End-to-end encrypted messaging that keeps working when the other person is not t
   receipt, files not drawn, calls not rung, until you accept or reply.
 - **Backup addresses for a relay**, learnt from the relay itself and proven by its
   key, used automatically while the main domain is blocked.
-- **Formatting and spoilers, Saved Messages, scheduled messages, live location**,
-  and — in the desktop app, off by default — **link previews made by the sender**
-  that the recipient's device never fetches.
+- **Formatting and spoilers** from a bar that appears under the message box when
+  text is selected (a tap on a phone, the same shortcuts on a desktop),
+  **Saved Messages, scheduled messages, live location**, and — in the desktop app,
+  off by default — **link previews made by the sender** that the recipient's
+  device never fetches.
 - **Screen guard and a proxy**: screenshots refused on Android, windows hidden from
   capture on Windows and macOS, and a local v2ray, xray or Tor for the desktop app
   on Windows and Linux.
@@ -365,15 +367,15 @@ The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA Cryptography_2.98.28_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.98.28_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA Cryptography_2.98.29_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.98.29_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.98.28-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.98.29-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
 A native install has no origin to learn a relay from — the web app does, because
@@ -974,8 +976,10 @@ modified relay as a service for other people, they are entitled to your source.
   بدون زنگ تماس تا وقتی بپذیرید یا پاسخ بدهید.
 - **آدرس‌های پشتیبان برای رله** که با کلید خود رله تأیید می‌شوند و هنگام فیلتر شدن دامنهٔ
   اصلی خودکار به کار می‌روند.
-- **قالب‌بندی و متن پنهان، پیام‌های ذخیره‌شده، ارسال زمان‌بندی‌شده، موقعیت زنده**، و در
-  نسخهٔ دسکتاپ **پیش‌نمایش لینک از سمت فرستنده** (پیش‌فرض خاموش).
+- **قالب‌بندی و متن پنهان** با نواری که هنگام انتخاب متن زیر کادر پیام باز می‌شود (روی
+  گوشی با یک لمس، روی دسکتاپ با همان میان‌برها)، **پیام‌های ذخیره‌شده، ارسال
+  زمان‌بندی‌شده، موقعیت زنده**، و در نسخهٔ دسکتاپ **پیش‌نمایش لینک از سمت فرستنده**
+  (پیش‌فرض خاموش).
 - **محافظ صفحه و پراکسی**: جلوگیری از اسکرین‌شات در اندروید، پنهان ماندن پنجره از ضبط در
   ویندوز و مک، و پراکسی v2ray/xray/Tor برای نسخهٔ دسکتاپ ویندوز و لینوکس.
 
@@ -1155,15 +1159,15 @@ sudo bash scripts/setup.sh --quick --domain chat.example.com \
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA Cryptography_2.98.28_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.98.28_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA Cryptography_2.98.29_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.98.29_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.98.28-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.98.29-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
 نصب نیتیو مبدأیی ندارد که از رویش رله را یاد بگیرد — برنامهٔ وب دارد، چون از

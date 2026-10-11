@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.28**
+نسخهٔ این پکیج: **2.98.29**
 
 </div>
 
@@ -422,7 +422,9 @@ writes coordinates into, use physical `left`/`right` only.
 
 **Playwright:** `isMobile: true` / `hasTouch: true` trips the PWA install gate,
 `checkFirstVisit()` returns before setup runs, and `#mainApp` stays at
-`opacity-0` — every screenshot comes out blank. Use a narrow viewport instead.
+`opacity-0` — every screenshot comes out blank. Call
+`continueInBrowserExperience()` first, as `openApp(tag, { context: { isMobile:
+true, ... } })` in `_chat-harness.mjs` does, or use a narrow viewport.
 
 **Message requests change what a test sees (2.98.28).** Somebody this account
 never added, pinned, synced or wrote to is a message request: their
@@ -456,6 +458,14 @@ lib.rs; `create: false` in `tauri.windows.conf.json` and `tauri.linux.conf.json`
 because a webview takes its proxy only as it is created. macOS and the phones
 still create it from `tauri.conf.json`.
 
+**The formatting bar is below the input on purpose** (2.98.29, `#chatFormatBar`,
+row 4 of the composer grid). The phone's own copy/paste menu opens above a
+selection; a bar above the input sat under it and a tap meant for Bold landed
+on Copy. It appears only once the selection stops moving, because a bar that
+appears mid-drag shifts the text under the finger. Its edits go through
+`document.execCommand('insertText')` so the phone's undo keeps working — do not
+replace that with `box.value =`.
+
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted
 profile and reads as empty before unlock (`poorija_screen_guard` is).
@@ -467,7 +477,7 @@ profile and reads as empty before unlock (`poorija_screen_guard` is).
 ```bash
 npm test                     # jest unit tests   (config/jest.config.cjs)
 node tests/e2e/smoke.mjs     # 30 seconds: does this tree boot and wire up
-npm run test:e2e             # 69 browser suites, run-all discovers them itself
+npm run test:e2e             # 141 browser suites, run-all discovers them itself
 npm run test:files           # file transfer, 36 checks (FT_HUGE=1 adds 450 MB)
 npm run test:offline         # delivery to somebody who is not there
 npm run test:retention       # what the relay keeps and for how long

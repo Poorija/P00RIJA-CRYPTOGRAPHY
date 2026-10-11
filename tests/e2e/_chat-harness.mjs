@@ -121,8 +121,10 @@ export function makeSparseFile(name, bytes) {
    browser on each server -- the whole point there is that the two pages are
    served by different origins and talk to different relays, which a
    module-level BASE cannot express. */
-export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, permissions: ['microphone', 'camera'] });
+/* `context` is merged over the desktop defaults, so a suite can open the same
+   app as a phone (viewport, isMobile, hasTouch, userAgent) and keep the rest. */
+export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY, context = {} } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, permissions: ['microphone', 'camera'], ...context });
   /* The chat module wires its console probes only when a page asks for them
      before load — shipping them unconditionally would be a bypass rather than
      a diagnostic. Every suite that reaches this harness drives conversations
@@ -187,6 +189,12 @@ export async function openApp(tag, { duplicateChunk = false, origin = BASE, rela
   page.__errors = errors;
   await page.goto(`${origin}/index.html`, { waitUntil: 'load' });
   await page.waitForTimeout(2000);
+  /* A phone in a browser tab is first asked to install the app; carry on in
+     the tab the way a person who declines would. */
+  if (context.isMobile) {
+    await page.evaluate(() => { if (typeof continueInBrowserExperience === 'function') continueInBrowserExperience(); });
+    await page.waitForTimeout(600);
+  }
   await page.evaluate((pass) => {
     const set = (id, v) => {
       const el = document.getElementById(id);
