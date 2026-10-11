@@ -2,12 +2,12 @@
 
 Version 2.98.27 · build chat-v120
 
-این نسخه حاصل یک ممیزی کامل روی دو رلهٔ واقعی (فنلاند و ایران) است: هر یافته
+این نسخه حاصل یک ممیزی کامل روی دو رلهٔ واقعی (خارج از ایران و ایران) است: هر یافته
 فیکس شد، مسیر تماس و فایل هوشمند شد، گروه‌ها بین دو رله کار می‌کنند، و
 همگام‌سازی چند دستگاهی دستگاه‌به‌دستگاه شد بی‌آنکه سروری چیزی برای دستگاه دیگر
 نگه دارد. متن هر بخش اول فارسی است و بعد انگلیسی.
 
-This release comes from a full audit of the two production relays (Finland and
+This release comes from a full audit of the two production relays (outside Iran and
 Iran): every finding fixed, a measured route for calls and files, groups that
 work across relays, and multi-device sync that runs device to device with no
 server keeping anything for the other device. Each section is Persian first,
@@ -63,7 +63,7 @@ English after.
   (public key + home relay; the key must hash to the fingerprint), so members
   who never swapped cards can seal to each other on either relay.
 - **Invite codes keep the inviter's relay** and carry member cards.
-- **Privacy**: a group's record is no longer pushed at every peer that comes online.
+- **Privacy**: a group's record is no longer pushed to every peer that comes online.
 
 ## ۳. مسیر هوشمند برای تماس و فایل · A measured route for calls and files
 
@@ -88,7 +88,7 @@ English after.
   packets.)
 - **A shared TURN, for that connection only**: a short-lived credential from the
   contact's relay is added to the one call or transfer that needs it.
-- **A live data channel across relays** carries sessions, messages and files.
+- **A live data channel across relays** carries sessions, messages, and files.
 - **TURN REST**: expiring credentials instead of the static coturn pair.
 - **TURNS on the Iran server is back** (coturn could not read its key).
 
@@ -121,7 +121,7 @@ English after.
 
 - The monitor password is stored only as a scrypt hash.
 - The origin a relay repeats to linked relays can no longer be set by a Host header.
-- A presence update no longer clears block, mute, archive and the message timer.
+- A presence update no longer clears block, mute, archive, and the message timer.
 - Forwarding a contact card no longer launders a relay hint into a card.
 
 ## ۶. زیر کاپوت · Under the hood
@@ -142,7 +142,7 @@ English after.
   no longer kills the relay.
 - **Let's Encrypt certificates (free)** are issued automatically and renewed
   when ten days are left; certbot's own window is kept in step. The renewer's
-  script ships with every deploy and reads openssl's date under busybox (it
+  script ships with every deploy and reads OpenSSL's date under busybox (it
   used to call a healthy certificate missing every six hours).
 - nginx routes `/transit-peers` to the relay, and `tools/check-nginx-routes.cjs`
   stops a deploy that would send a relay path to the single-page app.
