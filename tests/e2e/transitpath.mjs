@@ -493,24 +493,80 @@ console.log('\nWhat the client says when the link is down');
   ok(history['conv-far'].every((entry) => entry.status === 'queued'),
     'and marks nothing failed — there was no message to fail');
 
+  /* A message to a contact on another relay is never sent through this one:
+     it would sit in a mailbox they never open. fallBackToDirect leaves it
+     alone, and the outbox (40-route-finder.js) keeps it queued and retries. */
+  const sentDirect = [];
   fall({ type: 'relay', tag: 'msg-1', payload: { id: 'msg-1', type: 'text' } }, farPeer('conv-far'), 'link down');
-  ok(history['conv-far'][0].status === 'failed' && history['conv-far'][0].failureReason === 'transit-down',
-    'a real message that cannot cross is marked failed, with the reason why');
-  ok(warnings.length === 1, 'and the user hears about it once');
+  ok(history['conv-far'][0].status === 'queued' && sentDirect.length === 0,
+    'a real message to a far contact is not pushed through this relay, and stays queued');
+}
 
-  fall({ type: 'relay', tag: 'msg-2', payload: { id: 'msg-2', type: 'text' } }, farPeer('conv-far'), 'link down');
-  ok(history['conv-far'][1].status === 'failed',
-    'a second message that cannot cross is still marked failed');
-  ok(warnings.length === 1,
-    'but the same conversation does not warn twice in one session');
-
-  fall({ type: 'relay', tag: 'msg-3', payload: { id: 'msg-3', type: 'text' } }, farPeer('conv-other-far'), 'link down');
-  ok(history['conv-other-far'][0].status === 'failed' && warnings.length === 2,
-    'a different contact still gets its own warning');
-
-  fall({ type: 'relay', tag: 'msg-1', payload: { id: 'msg-1', type: 'text' } }, farPeer('conv-far'), 'link down');
-  ok(warnings.length === 2,
-    're-failing a message already marked failed stays quiet');
+{
+  const source = readFileSync(join(ROOT, 'js', 'chat', '40-route-finder.js'), 'utf8');
+  const extract = (text, name) => {
+    const start = text.search(new RegExp(`(async )?function ${name}\\(`));
+    if (start < 0) throw new Error(`${name} is gone`);
+    let depth = 0;
+    for (let i = text.indexOf('{', text.indexOf(')', start)); i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') { depth -= 1; if (!depth) return text.slice(start, i + 1); }
+    }
+    throw new Error(`${name} is not closed`);
+  };
+  const constants = source.match(/^const TRANSIT_RETRY_STEPS_MS = .*;$/m)[0] + '\n'
+    + source.match(/^const TRANSIT_RETRY_CEILING_MS = .*;$/m)[0] + '\n'
+    + 'const transitOutbox = new Map(); let transitOutboxTimer = 1; const transitTroubleWarned = new Set();';
+  const warnings = [];
+  const history = {
+    'conv-far': [{ id: 'msg-1', direction: 'out', status: 'queued' }, { id: 'msg-2', direction: 'out', status: 'queued' }],
+    'conv-other': [{ id: 'msg-3', direction: 'out', status: 'queued' }],
+  };
+  const peers = [
+    { peerId: 'peer-far', fingerprint: 'f'.repeat(64), conversationKey: 'conv-far' },
+    { peerId: 'peer-other', fingerprint: 'e'.repeat(64), conversationKey: 'conv-other' },
+  ];
+  const discovered = [];
+  const box = new Function('chatState', 'getConversationKey', 'storeHistory', 'renderMessages', 'notify', 't',
+    'discoverHomeRelay', 'peerRecordsForFingerprint', 'ensureTransitOutboxTimer', `
+    ${constants}
+    ${extract(source, 'trackTransitSend')}
+    ${extract(source, 'transitSendRefused')}
+    ${extract(source, 'markTransitFrameFailed')}
+    ${extract(source, 'noteTransitLinkTroubleOnce')}
+    return { trackTransitSend, transitSendRefused, transitOutbox };
+  `)(
+    { history, peers, activeConversationId: '' },
+    (peer) => peer.conversationKey,
+    () => {}, () => {},
+    (message) => warnings.push(String(message)),
+    (fa) => fa,
+    (peer) => { discovered.push(peer.peerId); return Promise.resolve(null); },
+    () => [],
+    () => {},
+  );
+  const home = { id: 'b'.repeat(64), key: 'k' };
+  const frame = (tag) => ({ type: 'relay', tag, persist: true, payload: { tag, class: 'text' } });
+  box.trackTransitSend('msg-1', frame('msg-1'), peers[0], home);
+  box.transitSendRefused('msg-1', 'transit-unavailable');
+  ok(history['conv-far'][0].status === 'queued' && box.transitOutbox.get('msg-1')?.nextAt > Date.now(),
+    'a refused envelope stays queued and is scheduled to go again');
+  ok(warnings.length === 1, 'and the user is told once that it is a delay, not a loss');
+  box.trackTransitSend('msg-2', frame('msg-2'), peers[0], home);
+  box.transitSendRefused('msg-2', 'transit-busy');
+  ok(warnings.length === 1, 'the same conversation is not told twice in one session');
+  box.trackTransitSend('msg-3', frame('msg-3'), peers[1], home);
+  box.transitSendRefused('msg-3', 'transit-unavailable');
+  ok(warnings.length === 2, 'a different contact still gets its own notice');
+  box.transitSendRefused('msg-1', 'transit-rejected');
+  box.transitSendRefused('msg-1', 'transit-rejected');
+  ok(history['conv-far'][0].status === 'failed' && history['conv-far'][0].failureReason === 'transit-rejected',
+    'an envelope the far relay keeps refusing to open is failed, with the reason why');
+  ok(discovered.includes('peer-far'), 'and where that contact lives is asked again');
+  const old = box.transitOutbox.get('msg-2');
+  old.firstAt = Date.now() - 25 * 60 * 60 * 1000;
+  box.transitSendRefused('msg-2', 'transit-unavailable');
+  ok(history['conv-far'][1].status === 'failed', 'and one still refused after a day of retries is failed too');
 }
 
 console.log(`\n${failures ? 'FAILED' : 'passed'} — ${checks - failures}/${checks} checks`);

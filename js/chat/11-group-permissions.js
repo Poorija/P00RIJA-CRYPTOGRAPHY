@@ -305,6 +305,11 @@ function buildGroupInvite() {
     permissions: spacePermissions(space),
     rev: Number(space.rev || 0),
     inviter: identityPayload(),
+    /* Whoever joins with this code can then reach every member, not only the
+       inviter — on this relay or another. */
+    /* Capped: a code is passed by hand, and the owner's next roster sync
+       carries the rest. */
+    memberCards: typeof memberCardsFor === 'function' ? memberCardsFor(space).slice(0, 16) : [],
   };
   return 'poorija-group-v1:' + utf8_to_b64(JSON.stringify(payload));
 }
@@ -330,14 +335,30 @@ async function redeemGroupInvite(code) {
       chatState.peers.push(normalizePeerRecord({
         peerId: payload.inviter.peerId || '',
         clientId: payload.inviter.clientId || '',
-        username: payload.inviter.username || t('عضو گروه', 'Group member'),
+        username: payload.inviter.username || payload.inviter.name || t('عضو گروه', 'Group member'),
         fingerprint: payload.inviter.fingerprint,
         publicKeyData: payload.inviter.publicKeyData || '',
+        /* The inviter's relay rides in the code, which was handed over by
+           hand exactly like an identity card — so it is filed as one. It was
+           dropped here, and a member who joined from the other relay wrote
+           to the inviter through their own relay, where it sat unread. */
+        homeRelay: payload.inviter.homeRelay || null,
+        homeRelaySource: payload.inviter.homeRelay ? 'card' : '',
         status: 'offline',
         manual: true,
       }));
       saveContacts();
+    } else if (payload.inviter.homeRelay) {
+      const inviterRecord = chatState.peers.find((peer) => peer.fingerprint === payload.inviter.fingerprint);
+      if (inviterRecord) {
+        const next = betterHomeRelay(inviterRecord.homeRelay, { ...payload.inviter.homeRelay, source: 'card' });
+        if (next) { inviterRecord.homeRelay = next; saveContacts(); }
+      }
     }
+  }
+  /* And every other member the code vouches for. */
+  if (Array.isArray(payload.memberCards) && typeof ingestMemberCards === 'function') {
+    await ingestMemberCards(payload.memberCards, null);
   }
   const myKey = chatState.identity?.fingerprint || chatState.peerId || '';
   /* Only the owner broadcasts rosters. A joiner bumping the rev and pushing

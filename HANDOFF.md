@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.26**
+نسخهٔ این پکیج: **2.98.27**
 
 </div>
 
@@ -399,6 +399,22 @@ that embeds the real assets.
 `eval`-ed there runs in a context that is discarded the instant the new
 document commits, so registered timers never fire and every global reads
 `undefined`. To probe the real page, put the probe in the frontend.
+
+**A UDP flow started from inside Iran dies after a few packets.** Measured
+between the two production servers: Finland→Iran, 300 of 300 datagrams;
+Iran→Finland when Iran sends first, 7–9 and then nothing; Iran→Finland after
+Finland spoke first, 283 of 300. It is not a firewall and not DPI of the
+STUN/DTLS shape — both pass. So a TURN-on-each-side candidate pair between
+the two relays never connects, and a direct path from an Iranian client can
+connect and then die. That is why a cross-relay connection borrows the
+contact's relay TURN for itself (`turn-query`, `buildIceConfigFor`) and why a
+direct path that dies is moved to relay-only (`42-path-manager.js`). Test any
+change here with a sustained flow — fifteen packets pass and prove nothing.
+
+**A relay never keeps mail for a sibling device.** Holding acknowledgements
+until every device of an account was back turned the shared mailbox into a
+sync store for weeks. Devices ack at once; a device that was away learns it is
+behind from the encrypted beacons (`44-device-beacon.js`) and asks a sibling.
 
 **RTL:** `inset-inline-end` maps to `left`. Declared after `left`, it silently
 wipes it — and the shorthand `inset-inline` wipes both. For anything a drag

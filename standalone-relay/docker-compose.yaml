@@ -30,6 +30,8 @@ services:
       CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
       CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
       CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      CHAT_TURN_SECRET: ${TURN_SECRET:-}
+      CHAT_PUBLIC_RELAY_ORIGIN: ${CHAT_PUBLIC_RELAY_ORIGIN:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       CHAT_PUSH_STORE_PATH: /data/push-subscriptions.json
@@ -69,8 +71,16 @@ services:
     container_name: Poorija-Standalone-Coturn
     logging: *default-logging
     network_mode: host
+    environment:
+      TURN_USER: ${TURN_USER:?Set TURN_USER in .env}
+      TURN_PASSWORD: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      TURN_SECRET: ${TURN_SECRET:-}
     command:
-      - -n
+      # No `-n`. The image's entrypoint runs every argument through
+      # `eval "echo …"`, and echo takes -n as its own option and prints
+      # nothing — coturn then received an empty argument and logged
+      # "CONFIG: Unknown argument:" on every start. Without a turnserver.conf
+      # in the image, coturn already uses only these arguments.
       - --log-file=stdout
       - --listening-port=3478
       - --tls-listening-port=5349
@@ -79,8 +89,11 @@ services:
       - --cert=/etc/coturn/certs/cert.pem
       - --pkey=/etc/coturn/certs/key.pem
       # Both halves required — see the note in config/docker-compose.yaml.
-      - --user=${TURN_USER:?Set TURN_USER in .env}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
-      - --lt-cred-mech
+      # TURN REST when TURN_SECRET is set (expiring credentials minted by the
+      # relay); the static user otherwise. Evaluated by the image entrypoint
+      # from the environment below, `$$` keeping compose from expanding it.
+      - $$( [ -n "$$TURN_SECRET" ] && echo --use-auth-secret || echo --lt-cred-mech )
+      - $$( [ -n "$$TURN_SECRET" ] && echo --static-auth-secret=$$TURN_SECRET || echo --user=$$TURN_USER:$$TURN_PASSWORD )
       - --fingerprint
       - --no-cli
       - --no-multicast-peers

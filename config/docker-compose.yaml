@@ -58,7 +58,13 @@ services:
       CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
       CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
       CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      # The TURN REST secret shared with coturn. Set: /turn-config mints
+      # credentials that expire. Empty: the static pair above is served.
+      CHAT_TURN_SECRET: ${TURN_SECRET:-}
       CHAT_PUBLIC_RELAY_ORIGIN: ${CHAT_PUBLIC_RELAY_ORIGIN:-}
+      # Which host names are this deployment's own: an origin learned from a
+      # request is only repeated to linked relays when it names one of them.
+      DOMAIN: ${DOMAIN:-}
       CHAT_PUBLIC_PRESENCE_URL: ${CHAT_PUBLIC_PRESENCE_URL:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -121,8 +127,20 @@ services:
     container_name: Poorija-Cryptography_Coturn
     logging: *default-logging
     network_mode: host
+    environment:
+      # Both halves required, and for the same reason. The password already
+      # was; the username fell back to one deployment's own name, so a relay
+      # nobody had configured TURN on started coturn under a stranger's
+      # username and handed that name to every client through /turn-config.
+      TURN_USER: ${TURN_USER:?Set TURN_USER in .env}
+      TURN_PASSWORD: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      TURN_SECRET: ${TURN_SECRET:-}
     command:
-      - -n
+      # No `-n`. The image's entrypoint runs every argument through
+      # `eval "echo …"`, and echo takes -n as its own option and prints
+      # nothing — coturn then received an empty argument and logged
+      # "CONFIG: Unknown argument:" on every start. Without a turnserver.conf
+      # in the image, coturn already uses only these arguments.
       - --log-file=stdout
       - --listening-port=3478
       - --tls-listening-port=5349
@@ -131,14 +149,16 @@ services:
       - --server-name=${DOMAIN:-localhost}
       - --cert=/etc/coturn/certs/cert.pem
       - --pkey=/etc/coturn/certs/key.pem
-      # Both halves required, and for the same reason. The password already
-      # was; the username fell back to one deployment's own name, so a relay
-      # nobody had configured TURN on started coturn under a stranger's
-      # username and handed that name to every client through /turn-config.
-      # Failing here with a readable message beats a credential pair that is
-      # half somebody else's.
-      - --user=${TURN_USER:?Set TURN_USER in .env}:${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
-      - --lt-cred-mech
+      # TURN REST when TURN_SECRET is set: the relay mints credentials that
+      # expire (see turnCredentialsForClient in scripts/server.js) and the
+      # static pair stops being something /turn-config hands to every visitor.
+      # Without a secret the static user keeps working exactly as before.
+      # Each argument is evaluated at start by the image's entrypoint, so the
+      # secret is read from the container environment rather than written
+      # into the command line compose records; `$$` keeps compose itself from
+      # expanding it early.
+      - $$( [ -n "$$TURN_SECRET" ] && echo --use-auth-secret || echo --lt-cred-mech )
+      - $$( [ -n "$$TURN_SECRET" ] && echo --static-auth-secret=$$TURN_SECRET || echo --user=$$TURN_USER:$$TURN_PASSWORD )
       - --fingerprint
       - --no-cli
       - --no-multicast-peers
@@ -161,12 +181,17 @@ services:
       dockerfile: config/Dockerfile.cert-renewer
     container_name: Poorija-Cryptography_CertRenewer
     logging: *default-logging
+    # Run through the shell rather than exec'd directly: the script is mounted
+    # from the tree, and a checkout or an rsync does not always keep its
+    # executable bit — when it did not, the container refused to start.
+    entrypoint: ["/bin/sh", "/usr/local/bin/cert-renewer.sh"]
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
       CERT_DEPLOY_DIR: /deploy-certs
       LETSENCRYPT_DIR: /etc/letsencrypt
-      RENEW_BEFORE_DAYS: ${CERT_RENEW_BEFORE_DAYS:-30}
+      # Let's Encrypt, renewed automatically when ten days are left.
+      RENEW_BEFORE_DAYS: ${CERT_RENEW_BEFORE_DAYS:-10}
       CHECK_INTERVAL_SECONDS: ${CERT_CHECK_INTERVAL_SECONDS:-21600}
       APP_CONTAINER: Poorija-Cryptography_App
       COTURN_CONTAINER: Poorija-Cryptography_Coturn
@@ -176,6 +201,10 @@ services:
       - ${CERTS_DIR:-../certs}:/deploy-certs
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock
+      # The script from this tree rather than the copy baked into the image,
+      # so a fix to it reaches the server with an ordinary deploy instead of
+      # an image rebuild that has to reach PyPI for certbot.
+      - ../scripts/cert-renewer.sh:/usr/local/bin/cert-renewer.sh:ro
       # The one certificate this machine serves, shared by this stack and
       # 3X-UI alike: both read the same pair from /root/cert/ so a renewal
       # is one event, not two divergent ones.

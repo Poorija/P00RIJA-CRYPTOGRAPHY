@@ -147,6 +147,10 @@ pinOrder: Number(peer.pinOrder || 0),
    keeps isStoredContact holding a contact this machine has no history
    with yet. */
 synced: Boolean(peer.synced),
+/* Known because they share a group with this account, from a member card —
+   never written to directly. Kept so group messages, calls and replies can
+   be sealed to them; not shown as a conversation until there is one. */
+groupMember: Boolean(peer.groupMember),
 /* ---- per-contact state that must survive a reload -----------------------
    Blocking, muting, archiving and the conversation timer were kept only on
    the in-memory record, so each one silently reset the moment the app was
@@ -192,6 +196,7 @@ if (peer.manual || peer.pinned || peer.archived) return true;
 /* Arrived from a sibling device: the account engaged with them somewhere,
    so they belong in the book even before this machine has spoken a word. */
 if (peer.synced) return true;
+if (peer.groupMember) return true;
 if (chatState.sessionKeys?.[peer.peerId]) return true;
 if (peer.fingerprint && chatState.sessionKeys?.[peer.fingerprint]) return true;
 return conversationHistory(peer).length > 0;
@@ -411,6 +416,17 @@ members: normalized.members || existing.members,
 manual: existing.manual || normalized.manual,
 pinned: existing.pinned || normalized.pinned,
 pinOrder: existing.pinOrder || normalized.pinOrder,
+/* Decisions this device made about the contact. A presence record, a hello
+   or a card never carries them, so `...normalized` above put false in their
+   place and every presence broadcast quietly unblocked, unmuted and
+   unarchived the contact and switched its message timer off. They are kept
+   from the record that holds them; the toggles change them directly. */
+blocked: peer.blocked !== undefined ? Boolean(peer.blocked) : Boolean(existing.blocked),
+muted: peer.muted !== undefined ? Boolean(peer.muted) : Boolean(existing.muted),
+archived: peer.archived !== undefined ? Boolean(peer.archived) : Boolean(existing.archived),
+timerSeconds: peer.timerSeconds !== undefined ? Number(peer.timerSeconds || 0) : Number(existing.timerSeconds || 0),
+synced: Boolean(existing.synced || normalized.synced),
+groupMember: Boolean(existing.groupMember || normalized.groupMember),
 	/* The relay says three things about a peer — online, away, gone — and the
 	   merge used to hear only two of them: `online: true` flattened an away
 	   peer into an online one, so a frozen or backgrounded device showed a

@@ -849,6 +849,10 @@ callPixelStep: Number(chatState.prefs?.callPixelStep ?? 0),
    this adds how the network behaved and no new fact about the conversation. */
 turnChoices: chatState.prefs?.turnChoices && typeof chatState.prefs.turnChoices === 'object'
 ? chatState.prefs.turnChoices : {},
+/* Which contacts' direct path failed recently (see 42-path-manager.js):
+   timestamps against fingerprints, nothing about what was said. */
+pathChoices: chatState.prefs?.pathChoices && typeof chatState.prefs.pathChoices === 'object'
+? chatState.prefs.pathChoices : {},
 });
 }
 /* The webview's internal origin is never a relay.
@@ -2376,6 +2380,10 @@ chatState.profile.turnUrl = urls;
 chatState.profile.turnUsername = String(turnConfig.username || '');
 chatState.profile.turnCredential = String(turnConfig.credential || '');
 chatState.profile.turnOrigin = String(origin || '');
+/* TURN REST credentials expire; the stamp is what ensureFreshTurnCredentials
+   reads to fetch new ones before a call needs them. 0 means a static pair. */
+chatState.profile.turnExpiresAt = Number.isFinite(Number(turnConfig.expiresAt)) ? Number(turnConfig.expiresAt) : 0;
+chatState.profile.turnCheckedAt = Date.now();
 return true;
 }
 /* Where the TURN inside an imported config file came from, decided by

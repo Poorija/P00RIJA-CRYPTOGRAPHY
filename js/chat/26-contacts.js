@@ -47,6 +47,8 @@ function contactBookRecords() {
   const records = (chatState.peers || []).filter((peer) => (
     peer.peerId && !isSelfPeerRecord(peer) && peer.type !== 'group' && peer.type !== 'space'
     && isStoredContact(peer)
+    /* A fellow group member is not an address-book entry until it becomes one. */
+    && !(peer.groupMember && !peer.manual && !conversationHistory(peer).length)
   ));
   const matched = query
     ? records.filter((peer) => [peer.name, peer.username, peer.peerId, peer.fingerprint]
@@ -67,9 +69,14 @@ function contactShareText(peer = {}) {
     fingerprint: peer.fingerprint || '',
     publicKeyData: peer.publicKeyData || '',
     /* Passed on only when it was established out of band here too. Forwarding
-       a presence hint would launder it into a card, which is the one way the
-       ladder could be climbed by accident. */
-    homeRelay: routableHomeRelay(peer),
+       a presence hint would launder it into a card — the receiver files
+       anything in a card as card-rank — which is the one way the ladder could
+       be climbed by accident. routableHomeRelay routes on a presence-rank
+       route as well (a discovered route is one), so the rank is checked here. */
+    homeRelay: (() => {
+      const route = routableHomeRelay(peer);
+      return route && (route.source === 'card' || route.source === 'session') ? route : null;
+    })(),
   }));
 }
 

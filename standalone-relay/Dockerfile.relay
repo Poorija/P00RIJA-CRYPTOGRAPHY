@@ -1,5 +1,6 @@
 # P00RIJA Standalone Relay
-# This Dockerfile only includes the signaling server.
+# This Dockerfile only includes the signaling server — the same program the
+# full stack runs (scripts/server.js), started through standalone-relay/server.js.
 FROM node:20-alpine
 WORKDIR /app
 COPY standalone-relay/package.json .
@@ -7,14 +8,11 @@ RUN npm install --production
 # Named the same as in the deployed image, so the server looks in one place.
 COPY standalone-relay/package.json ./app-version.json
 COPY standalone-relay/server.js .
-# What a notification is allowed to say, shared with scripts/server.js rather
-# than written twice. The copy that used to live inside this server had drifted
-# to one call verb, no group, no voice-or-video and English only.
-# The whole directory, not one file. Every module the two relays share lives
-# here, and naming them one at a time is how a new one reaches the deployed
-# relay and not this one — which is the drift tools/check-relay-parity.cjs
-# exists because of.
-COPY scripts/lib ./lib
+COPY scripts/server.js ./scripts/server.js
+# The whole directory, not one file. Every module the relay requires lives
+# here, and naming them one at a time is how a new one reaches one image and
+# not the other — which is the drift tools/check-relay-parity.cjs exists for.
+COPY scripts/lib ./scripts/lib
 COPY vendor ./vendor
 EXPOSE 9000 9001
 CMD ["node", "--expose-gc", "server.js"]

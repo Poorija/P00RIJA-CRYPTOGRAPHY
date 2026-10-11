@@ -194,11 +194,24 @@ function onTransferStalled(transferId) {
   for (let index = 0; index < transfer.meta.totalChunks && missing.length < 256; index += 1) {
     if (!transfer.seen.has(index)) missing.push(index);
   }
-  if (transfer.version >= 2 && missing.length && transfer.resendRequests < 3 && transfer.session?.connection?.open) {
-    transfer.resendRequests += 1;
-    safeConnectionSend(transfer.session.connection, { type: 'file-resend', transferId, indices: missing }, 'file-resend');
-    armTransferWatchdog(transferId);
-    return;
+  if (transfer.version >= 2 && missing.length && transfer.resendRequests < 3) {
+    const request = { type: 'file-resend', transferId, indices: missing };
+    let asked = false;
+    if (transfer.session?.connection?.open) {
+      asked = safeConnectionSend(transfer.session.connection, request, 'file-resend');
+    }
+    /* A transfer that came over the relay has no channel to ask on. The
+       question goes back the same way the chunks came — and across relays
+       that is the only way a lost chunk was ever going to be replaced. */
+    if (!asked) {
+      const sender = findPeerBySession(transfer.session);
+      if (sender) asked = relaySessionEvent(sender, { ...request, createdAt: new Date().toISOString() });
+    }
+    if (asked) {
+      transfer.resendRequests += 1;
+      armTransferWatchdog(transferId);
+      return;
+    }
   }
   chatState.incomingFiles.delete(transferId);
   clearTransferBanner(0, `recv:${transferId}`);
@@ -355,6 +368,11 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
     /* Paced, not blasted: the relay socket has a buffer of its own, and the
        browser holds whatever it is handed faster than the network drains. */
     if (!await waitForRelaySocketDrain()) return false;
+    /* Across relays the bottleneck is the link between them, not this
+       socket: only a window of chunks may be unanswered at once, so a slow
+       border paces the upload instead of refusing hundreds of chunks. */
+    const farRelay = transitRouteFor(peerRecord);
+    if (farRelay && typeof awaitTransitWindow === 'function' && !await awaitTransitWindow(farRelay.id)) return false;
     const message = build(false);
     return sendSealedRelay(peerRecord, session, message, {
       createdAt: message.createdAt || createdAt,
@@ -362,6 +380,8 @@ async function sendBlobChunks(blob, { session, peerRecord, transferId, startMess
       /* The start of a transfer rings; its chunks do not. */
       notify: message.type === 'file-start',
       scope,
+      /* Each chunk is named, so a refused one is matched and sent again. */
+      relayTag: message.type === 'file-chunk' ? `${transferId}-c${message.index}` : '',
     });
   };
   const started = await deliver(() => ({ ...startMessage, v: 2, totalChunks, chunkBytes: FILE_CHUNK_BYTES }), () => { startWentLive = true; });
@@ -724,7 +744,7 @@ return false;
    throwaway key wrapped to the recipient, then queues it. Returns false when
    the recipient's public key is unknown, which is the one case where an
    offline send genuinely cannot be made. */
-async function sendSealedRelay(peerRecord, session, message, { createdAt, messageClass = 'text', notify, scope = '' } = {}) {
+async function sendSealedRelay(peerRecord, session, message, { createdAt, messageClass = 'text', notify, scope = '', relayTag: explicitTag = '' } = {}) {
 if (!peerRecord) return false;
 /* The body is already ciphertext — the send paths encrypt with the session
    key before they get here. All this adds is that key, wrapped to the
@@ -845,7 +865,10 @@ createdAt, seal, messageClass, body, kex, notify: wakesTheDevice, scope,
 });
 /* The sealed body hides the message id from the relay, so the tag it echoes
    in queued/error frames has to ride on the envelope itself. */
-const relayTag = sanitizeRemoteId(message?.id || message?.messageId || '');
+/* A file chunk has no message id of its own; its caller names it, so a
+   refusal for one chunk can be matched to that chunk and the chunk sent
+   again instead of leaving a hole in the file. */
+const relayTag = sanitizeRemoteId(explicitTag || message?.id || message?.messageId || '');
 if (relayTag) envelope.tag = relayTag;
 /* The sender's key vouches for the sender's name. Best effort: an old
    receiver ignores the field, and a first contact has no pin to check
@@ -1073,6 +1096,10 @@ function askAboutTheVisibleContacts() {
   for (const peer of peers) {
     if (asked >= PRESENCE_SWEEP_MAX) break;
     if (!peer || peer.type) continue;
+    /* Only conversations the list actually shows: a group member this device
+       has never written to, or an archived chat, is nobody to keep asking
+       a far relay about every twelve seconds. */
+    if (peer.archived || (typeof shouldShowConversation === 'function' && !shouldShowConversation(peer))) continue;
     if (!transitRouteFor(peer)) continue;
     if (askIfPeerIsThere(peer)) asked += 1;
   }
@@ -1161,6 +1188,14 @@ const REMOTE_PRESENCE_STALE_MS = 120000;
 function notePeerPresenceAnswer(fingerprint, up) {
   const peer = chatState.peers.find((record) => record.fingerprint === fingerprint);
   if (!peer) return;
+  /* Somebody on another relay being rung while away has just come back:
+     their relay said so, which is the only way this side can know. Checked
+     before anything else, because an unchanged answer returns early below. */
+  if (up && chatState.offlineRing?.peerId === peer.peerId && typeof offlineRingPeerArrived === 'function') {
+    peer.remotePresence = 'online';
+    peer.remotePresenceAt = Date.now();
+    offlineRingPeerArrived(peer);
+  }
   const next = up ? 'online' : 'offline';
   if (peer.remotePresence === next && peer.remotePresenceAt) {
     peer.remotePresenceAt = Date.now();
@@ -1213,8 +1248,14 @@ const same = (left, right) => Boolean(left) && Boolean(right)
 && left.origin === right.origin && left.id === right.id
 && left.key === right.key && left.source === right.source;
 if (same(next, peer.homeRelay)) return;
+const wasRoutable = typeof routableHomeRelay === 'function' ? Boolean(routableHomeRelay(peer)) : true;
 peer.homeRelay = next;
 saveContacts();
+/* The first route this contact has ever had: whatever was written to them
+   before it was known may be sitting at a relay they never visit. */
+if (!wasRoutable && routableHomeRelay(peer) && typeof noteRouteBecameRoutable === 'function') {
+  noteRouteBecameRoutable(peer);
+}
 }
 /* Signals that only mean something in the moment. Storing them is pointless —
    nobody wants to be told, on returning, that someone was typing an hour ago —
@@ -1236,7 +1277,10 @@ saveContacts();
 const EPHEMERAL_RELAY_TYPES = new Set([
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
-  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted', 'call-path-relay',
+  /* A cross-relay data link negotiates like a relay call (40-relay-link.js):
+     an offer or a candidate is worth nothing a minute later. */
+  'link-relay-offer', 'link-relay-answer', 'link-relay-ice', 'link-relay-end',
   /* The group-call verbs carry the same staleness the 1:1 ones do — a stored
      mute-toggle rings nobody and means nothing minutes later — and a group
      call running for an hour emits them continuously. Every one of them used
@@ -1332,14 +1376,24 @@ while (chatState.pendingTransit.size > 200) {
 chatState.pendingTransit.delete(chatState.pendingTransit.keys().next().value);
 }
 }
-/* Three attempts before giving up on the transit link: the link hiccups
-   (a redial window is a second or two), and a single failure used to
-   send the message down the fallback path immediately — which for a
-   far-relay contact meant a scary "link down" warning on a message that
-   would have gone through on the second try. The retries are short and
-   spaced: 0ms, 800ms, 1600ms. */
+/* Sealing can fail on this device (a key that does not hash to the route's
+   relay id, a socket that is mid-reconnect), so it is tried three times,
+   briefly spaced. What the CARRIER says about an envelope — accepted, busy,
+   unavailable — is a different matter, answered later by tag; the outbox in
+   40-route-finder.js keeps a tagged envelope queued and sends it again until
+   it is accepted, rather than failing it on the first refusal. */
 const TRANSIT_SEND_ATTEMPTS = 3;
-async function sendViaTransit(frame, home, peerRecord) {
+async function sendViaTransit(frame, home, peerRecord, { retry = false } = {}) {
+const chunkTag = frame.tag || frame.payload?.tag || '';
+/* Questions (presence, route, turn) are answered by tag and never retried:
+   a late answer to a question is worth nothing. */
+const isQuestion = String(frame.type || '').endsWith('-query');
+/* Only what the far relay will KEEP is worth carrying again: a call offer, a
+   candidate or a typing flag is marked persist:false and means nothing late. */
+const retryable = !isQuestion && frame.persist !== false && Boolean(chunkTag);
+if (retryable && typeof trackTransitSend === 'function') {
+  trackTransitSend(chunkTag, frame, peerRecord, home);
+}
 for (let attempt = 0; attempt < TRANSIT_SEND_ATTEMPTS; attempt += 1) {
   if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
   try {
@@ -1348,69 +1402,39 @@ for (let attempt = 0; attempt < TRANSIT_SEND_ATTEMPTS; attempt += 1) {
       if (attempt < TRANSIT_SEND_ATTEMPTS - 1) continue;
       throw new Error('the relay went away');
     }
-    const chunkTag = frame.tag || frame.payload?.tag || (frame.type === 'file-chunk' ? `${frame.transferId}:${frame.index}` : '');
-    if (!String(frame.type || '').endsWith('-query')) rememberTransit(chunkTag, frame, peerRecord);
-    chatState.ws.send(JSON.stringify({ ...envelope, ...(frame.tag ? { tag: frame.tag } : {}) }));
-    return; /* sent */
+    chatState.ws.send(JSON.stringify({ ...envelope, ...(chunkTag ? { tag: chunkTag } : {}) }));
+    return true; /* sent */
   } catch (error) {
     if (attempt === TRANSIT_SEND_ATTEMPTS - 1) {
-      console.warn(`[Transit] could not reach the far relay after ${TRANSIT_SEND_ATTEMPTS} attempts:`, error?.message || error);
-      fallBackToDirect(frame, peerRecord, error?.message || '');
-      return;
+      console.warn(`[Transit] could not hand the envelope over after ${TRANSIT_SEND_ATTEMPTS} attempts:`, error?.message || error);
+      /* A tagged envelope stays in the outbox and is tried again later; an
+         untagged one (a typing flag, a candidate) is simply dropped, as it
+         always was worth nothing late. */
+      if (retryable && typeof transitSendRefused === 'function') {
+        transitSendRefused(chunkTag, 'transit-unavailable');
+      }
+      return false;
     }
-    /* transient — the next attempt is already scheduled */
   }
 }
+return false;
 }
 /* Going direct when transit was meant to be used is a real change in who can
    see what, so it is never silent. Once per conversation per session: a note
    on every message would be noise, and noise is how a warning stops being
    read. */
 function fallBackToDirect(frame, peerRecord, reason = '') {
-/* The message goes out through this relay — but ONLY when the contact
-   actually lives on this relay. When their home relay is elsewhere, sending
-   through mine strands the message in a mailbox they will never open:
-   they connect to THEIR relay, not mine. In that case the honest answer
-   is to tell the sender the link is down and mark the message failed,
-   not to pretend it was delivered into a void. */
+/* Only an ordinary relay frame can go through this relay at all; a question
+   meant for another relay (route, presence, TURN) means nothing here. */
+if (!frame || frame.type !== 'relay') return;
+/* A contact whose home relay is elsewhere is never sent through this one: it
+   would sit in a mailbox they never open. The outbox has already kept the
+   envelope queued and will carry it when the link is back. */
 const peerHome = typeof routableHomeRelay === 'function' ? routableHomeRelay(peerRecord) : null;
 const anyHome = peerRecord?.homeRelay?.id ? peerRecord.homeRelay : null;
 const knownFarRelay = (peerHome || anyHome);
 const myPin = typeof relayPinFor === 'function' ? (relayPinFor(chatServerOrigin())?.id || '') : '';
-	if (knownFarRelay && myPin && knownFarRelay.id !== myPin) {
-	/* The contact lives on another relay and the transit link is down. The
-	   message would sit in MY relay's mailbox forever — the recipient never
-	   connects here. Mark it failed with an honest reason — but only a real
-	   message earns the warning. Most of what crosses the link is background:
-	   presence questions, photographs, receipts. Those carry no history entry,
-	   nothing changes when they fail, and a warning per attempt — re-fired by
-	   every presence sweep, every time the app opens — is how a warning
-	   teaches the reader to stop reading it. */
-	const conversationId = peerRecord ? getConversationKey(peerRecord) : '';
-	if (conversationId) {
-	const messageId = String(frame?.payload?.tag || frame?.tag || frame?.payload?.id || frame?.payload?.messageId || '');
-	const history = chatState.history[conversationId] || [];
-	const entry = history.find((item) => item.id === messageId);
-	if (entry && entry.status !== 'failed') {
-	entry.status = 'failed';
-	entry.failureReason = 'transit-down';
-	storeHistory();
-	if (chatState.activeConversationId === conversationId) renderMessages();
-	/* Once per conversation per session: a note on every message would be
-	   noise, and noise is how a warning stops being read. The set lives only
-	   as long as the page does — a fresh session may fairly warn again. */
-	fallBackToDirect.warned = fallBackToDirect.warned || new Set();
-	if (typeof notify === 'function' && !fallBackToDirect.warned.has(conversationId)) {
-	fallBackToDirect.warned.add(conversationId);
-	/* Three transit retries already failed — the link is genuinely down for
-	   this moment. Softer than the first cut: say what happened, offer the
-	   retry, don't shout. */
-	notify(t('پیام به مخاطب بین‌رله‌ای نرسید (لینک موقتاً قطع است) — دوباره بفرستید.', 'Message not delivered (cross-relay link temporarily down) — please retry.'), 'warning');
-	}
-	}
-	}
-	return;
-}
+if (knownFarRelay && myPin && knownFarRelay.id !== myPin) return;
 let sent = false;
 if (chatState.ws?.readyState === WebSocket.OPEN) {
 try { chatState.ws.send(JSON.stringify(frame)); sent = true; } catch (_error) { sent = false; }
@@ -1506,6 +1530,20 @@ async function ensureDirectSession(peerRecord, { silent = false } = {}) {
 if (!peerRecord) return null;
 let session = await ensureStoredSession(peerRecord);
 if (session?.cryptoKey) return session;
+/* A contact on another relay always reads 'offline' in the raw field —
+   presence is per relay. Their own relay's answer is what says whether they
+   are there; when it says so, a live channel is worth trying before falling
+   back to a sealed envelope. */
+const crossRelayAndThere = typeof sessionNeedsRelayLink === 'function' && sessionNeedsRelayLink(peerRecord)
+  && typeof peerLooksOnline === 'function' && peerLooksOnline(peerRecord);
+if (crossRelayAndThere) {
+  await startSecureSession(peerRecord, { silent });
+  session = await waitForSessionReady(peerRecord, 8000);
+  if (session?.cryptoKey) return session;
+  session = await ensureStoredSession(peerRecord);
+  await prepareOfflineSession(session, peerRecord);
+  return session;
+}
 if (peerRecord.status === 'offline') {
 /* This used to return a session with no key, and every caller then bailed
    with "the secure session is not ready" — which is why a message to an
@@ -1559,6 +1597,9 @@ remoteFingerprint: message.fromFingerprint || '',
    plaintext shape — still read so anything already queued keeps working. */
 let innerMessage = payload.message;
 let enclosedSessionKeyRaw = '';
+/* The sender's return route, kept until after the message is handled: on a
+   first contact the record it belongs on does not exist until then. */
+let openedHomeRelay = null;
 if (!innerMessage && payload.body) {
 /* Two ways in: the prekey the sender wrote to, or the older RSA seal. A
    prekey that has expired is gone from this device, and then the envelope
@@ -1626,7 +1667,10 @@ const opened = JSON.parse(new TextDecoder().decode(plain));
 	}
 	innerMessage = opened.message;
 	enclosedSessionKeyRaw = String(opened.sessionKeyRaw || '');
-	if (opened.homeRelay) noteSenderHomeRelay(payload, opened.homeRelay);
+	if (opened.homeRelay) {
+	openedHomeRelay = opened.homeRelay;
+	noteSenderHomeRelay(payload, opened.homeRelay);
+	}
 	} else {
 innerMessage = opened;
 }
@@ -1746,6 +1790,7 @@ session.cryptoKey = previousKey;
 session.keySource = previousSource;
 session.viaRelayMail = false;
 }
+if (openedHomeRelay) noteSenderHomeRelay(payload, openedHomeRelay);
 return true;
 }
 session.viaRelayMail = true;
@@ -1754,6 +1799,7 @@ await handleSessionMessage(session, innerMessage);
 } finally {
 session.viaRelayMail = false;
 }
+if (openedHomeRelay) noteSenderHomeRelay(payload, openedHomeRelay);
 return true;
 } catch (error) {
 console.error('Failed to process offline relay message:', error);
@@ -1944,6 +1990,12 @@ session.connection?.send({ type: 'pong', timestamp: Date.now() });
 return;
 }
 if (message.type === 'pong') {
+return;
+}
+/* A fellow member asking for, or handing over, the cards of a group both are
+   in — sealed and authenticated by this session; see 41-member-cards.js. */
+if (message.type === 'member-cards' || message.type === 'member-cards-request') {
+if (typeof handleMemberCardsMessage === 'function') await handleMemberCardsMessage(session, message);
 return;
 }
 /* The recipient's answer to a gated file-start. Control only — no ciphertext,
@@ -2388,11 +2440,22 @@ if (!Number.isFinite(offset) || offset < 0 || offset >= pending.blob.size) conti
 const slice = pending.blob.slice(offset, offset + FILE_CHUNK_BYTES);
 const iv = app().generateSecureRandomBytes(12);
 const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, pending.session.cryptoKey, await slice.arrayBuffer());
-if (!pending.session.connection?.open) return;
+if (pending.session.connection?.open) {
 await awaitChannelDrain(pending.session.connection);
 safeConnectionSend(pending.session.connection, {
 type: 'file-chunk', transferId: message.transferId, index: Number(index), iv: Array.from(iv), bin: new Uint8Array(cipher),
 }, 'file-resend');
+continue;
+}
+/* No channel: the chunk goes back the way the request came, paced and
+   named like every relayed chunk. */
+if (!pending.peerRecord) return;
+const farRelay = transitRouteFor(pending.peerRecord);
+if (farRelay && typeof awaitTransitWindow === 'function' && !await awaitTransitWindow(farRelay.id)) return;
+if (!await waitForRelaySocketDrain()) return;
+await sendSealedRelay(pending.peerRecord, pending.session, {
+type: 'file-chunk', transferId: message.transferId, index: Number(index), iv: Array.from(iv), chunk: app().arrayBufferToBase64(cipher),
+}, { messageClass: 'media', notify: false, relayTag: `${message.transferId}-c${Number(index)}` });
 }
 return;
 }
@@ -2641,12 +2704,15 @@ saveContacts();
 /* No auto-seeding of a selected conversation here either: an empty pane that
    waits for the person to choose is the behaviour on every layout now, and a
    peer merely appearing online is not a choice anybody made. */
+/* Only the groups this peer is in. Every group used to be pushed at every
+   peer that appeared online, members or not — handing strangers the group's
+   name, picture and roster. The receiver threw the record away, but it had
+   already been read, and by the relay too. */
+const peerKeys = [getConversationKey(peer), peer.peerId, peer.clientId, peer.fingerprint].filter(Boolean);
 chatState.spaces.groups.forEach((space) => {
-sendRelayEnvelope(peer, {
-type: 'space-sync',
-space,
-createdAt: new Date().toISOString(),
-});
+const roster = new Set([...normalizeSpaceMembers(space.members), space.ownerFingerprint, space.ownerPeerId].filter(Boolean));
+if (!peerKeys.some((key) => roster.has(key))) return;
+if (typeof sendSpaceSync === 'function') sendSpaceSync(peer, space);
 });
 renderPeers();
 renderActivePeer();
@@ -2688,27 +2754,21 @@ deviceId: typeof getDeviceId === 'function' ? getDeviceId() : '',
    asks first. This call only refreshes a subscription the user already chose,
    and returns immediately when they did not. */
 registerChatPush(false).catch((error) => console.warn('Web Push refresh skipped:', error));
+/* Groups this device owns hand their members everybody's cards, once per
+   session, so a group made before member cards existed heals by itself. */
+if (typeof healGroupsWithMemberCards === 'function') healGroupsWithMemberCards();
+/* After the identity challenge has had its round trip: the beacon store
+   answers only a proven socket. */
+if (typeof startDeviceBeacon === 'function') window.setTimeout(startDeviceBeacon, 4000);
 }
 function ackRelayMessage(relayId) {
 if (!relayId || chatState.ws?.readyState !== WebSocket.OPEN) return;
-/* One mailbox is shared by every device of this account. An ACK destroys
-   the copy for ALL of them, so a device that has siblings holds its ACK
-   while any sibling is absent from the live table — the copy in the box is
-   that sibling's only guaranteed delivery. The ids are kept and flushed the
-   moment the table says everyone is here again; what never comes back is
-   swept by the relay's retention in the end.
-   An account that never linked devices acks as it always did: there is no
-   second reader the copy could belong to. */
-if (chatState.hasLinkedDevices && (chatState.linkedDevices || []).length < 2) {
-chatState.deferredMailAcks = chatState.deferredMailAcks || [];
-if (!chatState.deferredMailAcks.includes(relayId)) {
-chatState.deferredMailAcks.push(relayId);
-/* Bounded: a mailbox drain past this size acks the overflow — retention
-   holds the rest of the guarantee, and the set must not grow forever. */
-if (chatState.deferredMailAcks.length > 2000) chatState.deferredMailAcks.shift();
-}
-return;
-}
+/* Acknowledged at once, whether or not this account has other devices. A
+   device with siblings used to hold its acknowledgements while any sibling
+   was away, which made the relay keep every message — file chunks included —
+   until the last device came back: the mailbox became a sync store. A sibling
+   that was away now gets these messages from a sibling, device to device
+   (44-device-beacon.js), and the relay keeps nothing for it. */
 chatState.ws.send(JSON.stringify({ type: 'relay-ack', ids: [relayId] }));
 }
 /* The sibling came back: everything held for them can be acked now — they

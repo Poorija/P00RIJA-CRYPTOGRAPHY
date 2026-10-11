@@ -83,9 +83,11 @@ async function sendRichMessage(kind, data) {
 
     appendHistory(conversation.conversationId, entry);
     let delivered = 0;
+    const skippedMembers = [];
     for (const memberId of members) {
       const member = findPeerByAnyKey(memberId);
-      if (!member || isSelfPeerRecord(member)) continue;
+      if (member && isSelfPeerRecord(member)) continue;
+      if (!member || !member.publicKeyData) { skippedMembers.push(member?.fingerprint || memberId); continue; }
       let memberSession = await ensureStoredSession(member);
       if (!memberSession?.cryptoKey) {
         /* `member.status === 'online'` used to guard this, so an offline
@@ -114,6 +116,9 @@ async function sendRichMessage(kind, data) {
       }
     }
     markMessageStatus(conversation.conversationId, messageId, delivered ? 'sent' : 'queued');
+    /* Members whose cards this device lacks: asked for, so the next message
+       reaches them (see 41-member-cards.js). */
+    if (skippedMembers.length && typeof requestMemberCards === 'function') requestMemberCards(conversation, skippedMembers);
     renderMessages();
     return;
   }

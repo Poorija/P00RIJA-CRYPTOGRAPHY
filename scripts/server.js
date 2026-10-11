@@ -119,6 +119,8 @@ const relayPeers = createRelayPeers({
   fetchIdentity: makeIdentityFetcher({ verifyTls: TRANSIT_VERIFY_TLS }),
   verifyTls: TRANSIT_VERIFY_TLS,
   onFrame: (payload, link) => handleTransitFrame(payload, link),
+  /* Function declarations below are hoisted, so this resolves at call time. */
+  onLinkDown: (link) => failTransitWaitsFor(link?.peerId),
 });
 if (relayPeers.enabled()) {
   console.log(`[Transit] enabled for ${TRANSIT_PEERS.length} relay(s)`);
@@ -132,6 +134,13 @@ if (relayPeers.enabled()) {
 
 const OFFLINE_STORE_DIR = process.env.CHAT_OFFLINE_STORE_DIR
   || path.join(path.dirname(OFFLINE_STORE_PATH), 'mailboxes');
+/* Device-sync beacons; see "Device sync beacons" further down. Declared up
+   here because the store is swept at load, before that section runs. */
+const BEACON_DIR = process.env.CHAT_BEACON_DIR || path.join(path.dirname(OFFLINE_STORE_PATH), 'beacons');
+const BEACON_MAX_CHARS = 11000;          /* 8 KB of ciphertext, base64 */
+const BEACON_MAX_DEVICES = 8;
+const BEACON_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const beaconCache = new Map();
 
 const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'server-policy.json');
 const SELF_DESTRUCT_STORE_PATH = process.env.CHAT_SELF_DESTRUCT_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'self-destruct-records.json');
@@ -252,6 +261,19 @@ const TURN_URL = process.env.CHAT_TURN_URL || `turn:${DOMAIN}:3478?transport=udp
  * somewhere the failure reads as "calls do not work". */
 const TURN_USERNAME = process.env.CHAT_TURN_USERNAME || process.env.TURN_USER || '';
 const TURN_CREDENTIAL = process.env.CHAT_TURN_CREDENTIAL || process.env.TURN_PASSWORD || '';
+/* The TURN REST secret coturn shares with this relay (--static-auth-secret).
+ *
+ * With it, /turn-config stops handing every visitor the one static coturn
+ * user — which made both production TURN servers an open relay for anybody
+ * who could fetch a JSON file — and mints a credential that expires instead:
+ * username "<unix expiry>:<random>", credential base64(HMAC-SHA1(secret,
+ * username)), the scheme coturn checks natively. Without a secret the old
+ * static pair is served, so a relay that has not been migrated keeps working. */
+const TURN_SECRET = process.env.CHAT_TURN_SECRET || process.env.TURN_SECRET || '';
+/* Long enough to outlast any call or transfer started near the end of it,
+   short enough that a leaked credential is worth little. The client refetches
+   well before expiry. */
+const TURN_CREDENTIAL_TTL_SECONDS = Math.max(600, Number(process.env.CHAT_TURN_TTL_SECONDS || 12 * 3600));
 const PRESENCE_TTL_MS = Number(process.env.CHAT_PRESENCE_TTL_MS || 90000);
 /* Two different questions, and answering the second with the first is what
    makes a backgrounded phone look reachable when it is not.
@@ -281,28 +303,86 @@ const ALLOWED_ORIGINS = (process.env.CHAT_ALLOWED_ORIGINS || '')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+/* The monitor password is never written to disk in a form that can be read
+ * back. It used to be: server-config.json held the dashboard's rotated
+ * password AND a copy of the .env one, both in plain text, so anything that
+ * could read the data directory — a backup, a shared volume, a support
+ * bundle — held the key to the relay's control panel.
+ *
+ * Now the file holds a scrypt hash of the rotated password and a SHA-256 of
+ * the .env value it was saved against (the stamp only has to answer "did the
+ * .env change since?", which an equality test on digests answers). In memory
+ * the plain password is kept only when it came from the environment; a
+ * rotated one is verified against its hash. */
+let MONITOR_PASSWORD_HASH = '';
+function scryptHashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(password), salt, 32, { N: 16384, r: 8, p: 1 });
+  return `scrypt$16384$${salt.toString('base64')}$${hash.toString('base64')}`;
+}
+function scryptVerify(password, encoded) {
+  const parts = String(encoded || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'scrypt') return false;
+  try {
+    const salt = Buffer.from(parts[2], 'base64');
+    const expected = Buffer.from(parts[3], 'base64');
+    const actual = crypto.scryptSync(String(password ?? ''), salt, expected.length, { N: Number(parts[1]) || 16384, r: 8, p: 1 });
+    return crypto.timingSafeEqual(actual, expected);
+  } catch (_error) {
+    return false;
+  }
+}
+function envPasswordStamp(value) {
+  return value ? crypto.createHash('sha256').update(`poorija-monitor-env|${value}`).digest('hex') : '';
+}
+/* A scrypt check costs tens of milliseconds, and HTTP Basic clients send the
+   password on every request. The last few successes are remembered by a keyed
+   digest for ten minutes, never the password itself. */
+const monitorVerifyCache = new Map();
+const monitorVerifyKey = crypto.randomBytes(32);
+function monitorPasswordMatches(candidate) {
+  if (MONITOR_PASSWORD) return secretsMatch(candidate, MONITOR_PASSWORD);
+  if (!MONITOR_PASSWORD_HASH) return false;
+  const digest = crypto.createHmac('sha256', monitorVerifyKey).update(`${MONITOR_PASSWORD_HASH}|${String(candidate ?? '')}`).digest('hex');
+  const remembered = monitorVerifyCache.get(digest);
+  if (remembered && Date.now() - remembered < 10 * 60 * 1000) return true;
+  const ok = scryptVerify(candidate, MONITOR_PASSWORD_HASH);
+  if (ok) {
+    monitorVerifyCache.set(digest, Date.now());
+    if (monitorVerifyCache.size > 16) monitorVerifyCache.delete(monitorVerifyCache.keys().next().value);
+  }
+  return ok;
+}
+
 function loadServerConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      /* Whose password is newer: the one the dashboard changed to, or the
-         one in the environment? The env used to win ALWAYS, which meant a
-         password rotated from the Monitor silently turned back into the
-         .env original at the next container restart — and the person who
-         changed it was locked out with "old password incorrect".
-         The save records what the env SAID at the time it happened. On
-         boot, the saved rotation wins by default; the env wins when it
-         differs from that stamp — a changed .env is a deliberate override.
-         Config files from before the stamp existed answer null for it, the
-         comparison is then always unequal, and the env wins exactly as it
-         always did for them. */
-      if (config.monitorPassword) {
-        MONITOR_PASSWORD = config.monitorPassword;
-      }
+      /* Whose password is newer: the one the dashboard changed to, or the one
+         in the environment? The saved rotation wins by default; the env wins
+         when it differs from the stamp taken at the save — a changed .env is
+         a deliberate override. */
       const env = process.env.MONITOR_PASSWORD || '';
-      const savedEnv = typeof config.monitorPasswordEnvAtSave === 'string' ? config.monitorPasswordEnvAtSave : null;
-      if (env && env !== savedEnv) {
+      let migrated = false;
+      if (config.monitorPasswordHash) {
+        MONITOR_PASSWORD_HASH = String(config.monitorPasswordHash);
+        MONITOR_PASSWORD = '';
+      } else if (config.monitorPassword) {
+        /* A file from before the hash: adopt it, then rewrite it hashed. */
+        MONITOR_PASSWORD = String(config.monitorPassword);
+        migrated = true;
+      }
+      const savedStamp = typeof config.monitorPasswordEnvStamp === 'string'
+        ? config.monitorPasswordEnvStamp
+        : (typeof config.monitorPasswordEnvAtSave === 'string' ? envPasswordStamp(config.monitorPasswordEnvAtSave) : null);
+      if (env && envPasswordStamp(env) !== savedStamp) {
         MONITOR_PASSWORD = env;
+        MONITOR_PASSWORD_HASH = '';
+        migrated = Boolean(config.monitorPassword || config.monitorPasswordEnvAtSave);
+      }
+      if (migrated || typeof config.monitorPasswordEnvAtSave === 'string') {
+        /* Rewritten at once so no plain copy survives the first boot. */
+        setTimeout(() => saveServerConfig(), 0);
       }
     }
   } catch (error) {
@@ -313,12 +393,14 @@ function loadServerConfig() {
 function saveServerConfig() {
   try {
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    /* The env stamp is what lets the next boot tell "the operator changed
-       nothing, keep the dashboard's rotation" from "the operator edited
-       .env, their value wins" — see loadServerConfig. */
+    const env = process.env.MONITOR_PASSWORD || '';
+    /* A password that is the environment's own needs no hash on disk: the
+       environment already holds it, and the stamp says it was in force. */
+    const fromEnv = Boolean(MONITOR_PASSWORD) && MONITOR_PASSWORD === env;
+    if (MONITOR_PASSWORD && !fromEnv) MONITOR_PASSWORD_HASH = scryptHashPassword(MONITOR_PASSWORD);
     writeJsonAtomic(CONFIG_PATH, {
-      monitorPassword: MONITOR_PASSWORD,
-      monitorPasswordEnvAtSave: process.env.MONITOR_PASSWORD || '',
+      ...(fromEnv ? {} : { monitorPasswordHash: MONITOR_PASSWORD_HASH }),
+      monitorPasswordEnvStamp: envPasswordStamp(env),
     });
   } catch (error) {
     console.error('Failed to save server config:', error);
@@ -369,7 +451,7 @@ try {
  * without a real password this refuses to start, and the escape hatch has to be
  * asked for out loud.
  */
-if (!MONITOR_PASSWORD || MONITOR_PASSWORD.length < 12) {
+if (!MONITOR_PASSWORD_HASH && (!MONITOR_PASSWORD || MONITOR_PASSWORD.length < 12)) {
   if (ALLOW_INSECURE_DEFAULTS) {
     console.warn('WARNING: MONITOR_PASSWORD is short or unset and ALLOW_INSECURE_DEFAULTS=1.');
     console.warn('WARNING: falling back to "admin123456". Do not do this on a reachable host.');
@@ -612,6 +694,28 @@ function hostWithPort(host = '', port = '') {
   return host.replace(/:\d+$/, '') + `:${port}`;
 }
 
+/* The origin clients reach this relay at, as the last real request named it.
+   A transit answer has no request to read it from, and a client that just
+   discovered a contact lives here needs an origin to file the route under. */
+/* The Host header is the requester's to write, so a learned origin is only
+   kept when it names this deployment: its DOMAIN, or one of the origins it is
+   configured to serve. Anything else would let a stranger's request decide
+   the origin this relay hands to the clients of a linked relay. */
+let learnedPublicOrigin = '';
+function rememberPublicOrigin(origin) {
+  const value = String(origin || '');
+  if (!/^https?:\/\/[^/\s]+$/i.test(value)) return;
+  let hostname = '';
+  try { hostname = new URL(value).hostname.toLowerCase(); } catch (_error) { return; }
+  const allowed = hostname === String(DOMAIN || '').toLowerCase()
+    || ALLOWED_ORIGINS.some((entry) => entry.toLowerCase() === value.toLowerCase());
+  if (!allowed) return;
+  learnedPublicOrigin = value;
+}
+function publicOriginForPeers() {
+  return PUBLIC_RELAY_ORIGIN || learnedPublicOrigin || '';
+}
+
 function publicRelayUrls(req) {
   const host = req.get('host') || `${req.hostname}:${PORT}`;
   const protocol = forwardedProtocol(req);
@@ -706,7 +810,8 @@ const EPHEMERAL_PAYLOADS = new Set([
      stored, pushed envelope per reaction per participant, and the offline
      member's mailbox filled with moments that had passed. */
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
-  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted',
+  'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted', 'call-path-relay',
+  'link-relay-offer', 'link-relay-answer', 'link-relay-ice', 'link-relay-end',
   'gcall-here', 'gcall-join', 'gcall-leave', 'gcall-react', 'gcall-state',
   /* A device-sync bundle is a snapshot one machine offers its siblings
      while they are here; it is never stored and never rings anybody. */
@@ -889,7 +994,7 @@ function isValidMonitorAuth(req) {
   const header = String(req.headers.authorization || '');
   if (header.startsWith('Basic ')) {
     const decoded = decodeMonitorAuth(header);
-    return Boolean(decoded && decoded.user === 'admin' && secretsMatch(decoded.pass, MONITOR_PASSWORD));
+    return Boolean(decoded && decoded.user === 'admin' && monitorPasswordMatches(decoded.pass));
   }
   return false;
 }
@@ -1369,7 +1474,7 @@ app.post('/admin/login', (req, res) => {
      keeps every existing bookmark working. */
   const MONITOR_USER = process.env.MONITOR_USER || 'admin';
   const usernameOk = !username || String(username).trim() === MONITOR_USER;
-  if (usernameOk && secretsMatch(password, MONITOR_PASSWORD)) {
+  if (usernameOk && monitorPasswordMatches(password)) {
     monitorLoginFailures.delete(monitorLoginKey(req));
     const token = issueMonitorSession(req);
     res.setHeader('Set-Cookie', `monitor_token_v2=${token}; ${monitorCookieFlags(req)}`);
@@ -1580,7 +1685,7 @@ app.post('/admin/change-password', authMiddleware, (req, res) => {
      used to read `if (oldPassword && ...)`, so omitting the field skipped the
      comparison altogether — a stolen session cookie was enough to take the
      account over without ever learning the password. */
-  if (!secretsMatch(suppliedOld, MONITOR_PASSWORD)) {
+  if (!monitorPasswordMatches(suppliedOld)) {
     return res.status(403).json({ ok: false, reason: 'Old password incorrect' });
   }
 
@@ -1593,8 +1698,11 @@ app.post('/admin/change-password', authMiddleware, (req, res) => {
     return res.status(400).json({ ok: false, reason: 'Password must not contain spaces or $' });
   }
 
-  MONITOR_PASSWORD = newPassword;
+  MONITOR_PASSWORD = String(newPassword);
   saveServerConfig();
+  /* Only the hash stays; the plain value lived long enough to be hashed. */
+  if (MONITOR_PASSWORD !== (process.env.MONITOR_PASSWORD || '')) MONITOR_PASSWORD = '';
+  monitorVerifyCache.clear();
   /* Every existing session dies with the old password. A rotation that leaves
      the previous sessions signed in has not rotated anything. */
   revokeAllMonitorSessions();
@@ -3855,6 +3963,7 @@ app.get('/Monitor_Server', (req, res) => {
 app.get('/chat-health', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   const publicUrls = publicRelayUrls(req);
+  rememberPublicOrigin(publicUrls.relayOrigin);
   res.json({
     ok: true,
     service: 'poorija-chat-signal',
@@ -3925,14 +4034,45 @@ app.get('/relay-identity', (req, res) => {
   res.json({ ok: true, ...publicRelayIdentity(relayIdentity) });
 });
 
+/* One credential for one client, for this relay's own coturn. Shared by the
+   HTTP endpoint and by the transit question a client on another relay asks
+   when a call or transfer needs a TURN both sides can reach. */
+function turnCredentialsForClient() {
+  if (!TURN_URLS.length) return { enabled: false, urls: [] };
+  if (TURN_SECRET) {
+    const expiresAt = Math.floor(Date.now() / 1000) + TURN_CREDENTIAL_TTL_SECONDS;
+    const username = `${expiresAt}:${crypto.randomBytes(6).toString('hex')}`;
+    const credential = crypto.createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+    return {
+      enabled: true, urls: TURN_URLS, username, credential,
+      ttl: TURN_CREDENTIAL_TTL_SECONDS, expiresAt: expiresAt * 1000,
+    };
+  }
+  return { enabled: true, urls: TURN_URLS, username: TURN_USERNAME, credential: TURN_CREDENTIAL };
+}
+
 app.get('/turn-config', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
-  res.json({
-    enabled: TURN_URLS.length > 0,
-    urls: TURN_URLS,
-    username: TURN_USERNAME,
-    credential: TURN_CREDENTIAL,
-  });
+  /* A minted credential is per request; caching one would hand the next
+     visitor somebody else's. */
+  setNoStoreHeaders(res);
+  res.json(turnCredentialsForClient());
+});
+
+/* The relays this one is linked with right now, and the key to seal to each.
+ *
+ * What a client needs to find a contact whose home relay it does not know:
+ * it can ask each of these, sealed, whether that fingerprint lives there. An
+ * operator's links are not a secret — /chat-health already counts them — and
+ * a relay that is not linked is not listed, so nothing here invites a client
+ * to send through a carrier that would refuse it. */
+app.get('/transit-peers', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  const peers = relayPeers.peerEntries()
+    .filter((entry) => entry.linked && entry.key)
+    .map((entry) => ({ id: entry.id, key: entry.key, origin: entry.origin || '' }));
+  res.json({ ok: true, self: relayIdentity.id, peers });
 });
 
 app.get('/cert-status', (_req, res) => {
@@ -4706,13 +4846,50 @@ function loadKnownIdentities() {
 }
 function saveKnownIdentities() {
   try {
-    fs.writeFileSync(KNOWN_IDENTITIES_PATH, JSON.stringify({ fingerprints: Array.from(knownIdentities) }, null, 1), { mode: 0o600 });
+    const cutoff = Date.now() - PROVEN_IDENTITY_TTL_MS;
+    const proven = {};
+    for (const [fp, at] of provenIdentities) if (at > cutoff) proven[fp] = at;
+    fs.writeFileSync(KNOWN_IDENTITIES_PATH, JSON.stringify({ fingerprints: Array.from(knownIdentities), proven }, null, 1), { mode: 0o600 });
   } catch (error) { console.warn('[Monitor] identity registry not saved:', error.message); }
 }
-function noteKnownIdentity(fingerprint) {
+/* Fingerprints that PROVED themselves on this relay, and when they last did.
+ *
+ * knownIdentities is everything the relay ever met, mail addressed to a
+ * stranger included, so it cannot answer "does this person live here?". This
+ * can: only a socket that answered the identity challenge is written into it.
+ * It is what a linked relay is told when a client asks where to deliver — yes
+ * or no for the one fingerprint asked, and nothing else. Entries age out after
+ * ninety days of absence, so a person who moved relays stops being claimed. */
+const PROVEN_IDENTITY_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const provenIdentities = new Map();
+function loadProvenIdentities() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(KNOWN_IDENTITIES_PATH, 'utf8'));
+    const cutoff = Date.now() - PROVEN_IDENTITY_TTL_MS;
+    for (const [fp, at] of Object.entries(raw?.proven || {})) {
+      if (/^[a-f0-9]{64}$/.test(fp) && Number(at) > cutoff) provenIdentities.set(fp, Number(at));
+    }
+  } catch (_error) { /* first run */ }
+}
+function noteProvenIdentity(fingerprint) {
+  const fp = sanitizeFingerprint(String(fingerprint || ''));
+  if (!/^[a-f0-9]{64}$/.test(fp)) return;
+  const previous = provenIdentities.get(fp) || 0;
+  provenIdentities.set(fp, Date.now());
+  if (provenIdentities.size > 20000) provenIdentities.delete(provenIdentities.keys().next().value);
+  /* A daily refresh is plenty for a ninety-day window; writing on every
+     reconnect would be a disk write per page load. */
+  if (Date.now() - previous > 24 * 60 * 60 * 1000) noteKnownIdentity(fp, { force: true });
+}
+function identityLivesHere(fingerprint) {
+  const at = provenIdentities.get(String(fingerprint || ''));
+  return Boolean(at && Date.now() - at < PROVEN_IDENTITY_TTL_MS);
+}
+
+function noteKnownIdentity(fingerprint, { force = false } = {}) {
   const fp = sanitizeFingerprint(String(fingerprint || ''));
   if (!fp || fp.length < 32) return;
-  if (knownIdentities.has(fp)) return;
+  if (knownIdentities.has(fp) && !force) return;
   knownIdentities.add(fp);
   /* Cap the registry so it cannot grow without bound on a hostile relay. */
   if (knownIdentities.size > 20000) knownIdentities.delete(knownIdentities.keys().next().value);
@@ -4726,6 +4903,7 @@ function noteKnownIdentity(fingerprint) {
   if (noteKnownIdentity._timer && typeof noteKnownIdentity._timer.unref === 'function') noteKnownIdentity._timer.unref();
 }
 loadKnownIdentities();
+loadProvenIdentities();
 
 app.post('/Monitor_Server/identities', authMiddleware, (req, res) => {
   const rows = Array.from(knownIdentities).map((fp) => ({
@@ -5578,6 +5756,13 @@ if (BOOTSTRAP_PORT > 0) {
     }
     res.writeHead(404).end('not found');
   });
+  /* An optional helper must never take the relay down with it. A port already
+     held — a second relay on the same host, the standalone distribution next
+     to a full stack — used to surface as an uncaught EADDRINUSE and a dead
+     relay. Now the installer is simply not offered on that host. */
+  bootstrapServer.on('error', (error) => {
+    console.warn(`[Bootstrap] installer not started on ${BOOTSTRAP_PORT}: ${error.code || error.message}`);
+  });
   bootstrapServer.listen(BOOTSTRAP_PORT, '0.0.0.0', () => {
     console.log(`Bootstrap installer available at http://${HOST}:${BOOTSTRAP_PORT}/install`);
   });
@@ -5856,7 +6041,18 @@ function handlePresenceUpgrade(request, socket, head) {
  * socket asked. Not the envelope, not the recipient's relay against the
  * sender, nothing on disk. A relay that stores nothing has nothing to hand
  * over, which is a security property and a legal one at the same time. */
-const TRANSIT_WAIT_MS = 30000;
+/* Sixty seconds. Thirty was shorter than a slow international link can take
+   to drain a burst of file chunks, and an envelope still sitting in the link's
+   buffer was reported lost to a sender who then sent it again. A link that is
+   really gone answers its waits at once (failTransitWaitsFor), so the longer
+   wait only ever applies to a link that is up and slow. */
+const TRANSIT_WAIT_MS = 60000;
+/* How long an envelope may wait for a link that is mid-redial. */
+const TRANSIT_PARK_MS = 10000;
+/* Above this much unsent on a link, new envelopes are refused as busy. Well
+   under the hard ceiling in relay-peers.js, so the refusal is a pacing signal
+   and never the link being torn down. */
+const TRANSIT_LINK_SOFT_LIMIT_BYTES = Number(process.env.CHAT_TRANSIT_LINK_SOFT_LIMIT_BYTES || 16 * 1024 * 1024);
 /* How many envelopes one client may have in the air at once. Each carried
    envelope parks a closure holding the asking socket for the full minute,
    and nothing capped them: a single client could park the closure for every
@@ -5911,79 +6107,112 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     reply({ type: 'error', reason: 'transit-loop', tag });
     return;
   }
-  const link = relayPeers.linkFor(facts.toRelay);
-  if (!link) {
-    /* The link might be mid-redial (a drop-to-redial cycle is under two
-       seconds). Refusing instantly was turning a one-second window into a
-       user-visible error, because the client's three retries all hit the
-       same instant refusal. Park the envelope for up to ten seconds and
-       try again; only if the link is truly gone does the refusal go out. */
-    const parkDeadline = Date.now() + 10000;
-    const parkTimer = setInterval(() => {
-      if (Date.now() > parkDeadline) {
-        clearInterval(parkTimer);
-        reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
-        return;
-      }
-      const revived = relayPeers.linkFor(facts.toRelay);
-      if (revived) {
-        clearInterval(parkTimer);
-        /* Fall through by re-invoking with the live link. */
-        carryWithLink(revived);
-      }
-    }, 500);
-    parkTimer.unref?.();
-    return;
-  }
-  /* The normal path: the link is live, send now. */
-  function carryWithLink(activeLink) {
-  const _link = activeLink || link;
-  /* The outbound twin of the crash that was fixed inbound: a throw from
-     seal or send here rides the WS receive handler into the fatal handler.
-     This whole remainder is one try/catch so a transit failure is a
-     refused envelope, not a dead relay. */
-  try {
-  /* The envelope is a parsed object on this side of the socket; its wire
-     size is the JSON. Buffer.byteLength(object) THROWS — and this sits in
-     the WS receive path, so one cross-relay message killed the whole relay,
-     which restarted, which dropped every connection and every monitor
-     session with it. That was the crash loop behind all three reports. */
-  const wireBytes = Buffer.byteLength(JSON.stringify(envelope));
-  noteTransitTraffic(facts.toRelay, wireBytes);
-  /* The badge in the users table: this sender's traffic just crossed a relay
-     link. What crossed stays sealed — but its SIZE is not private, and the
-     presence probes a same-relay user's app fires at cross-relay contacts
-     are a few hundred bytes. Marking those put the badge on people who never
-     sent anything anywhere; a kilobyte is a message, not a probe. */
-  if (wireBytes >= 1024) noteTransitActivity(clientId);
-  /* The carrier's own correlation id, not the client's tag. The tag belongs
-     to the client and there is no reason for another relay to see it. */
-  const ref = crypto.randomUUID();
+  /* The per-client ceiling is checked before anything is parked, so a client
+     that is already over it is told now rather than after a ten-second park. */
   if ((transitWaitingByClient.get(clientId)?.size || 0) >= TRANSIT_WAIT_PER_CLIENT) {
     reply({ type: 'error', reason: 'transit-busy', toRelay: facts.toRelay, tag });
     return;
   }
-  rememberTransitWait(ref, { clientId, tag, reply, toRelay: facts.toRelay, expiresAt: Date.now() + TRANSIT_WAIT_MS });
-  if (!link.send({ kind: 'transit', ref, envelope })) {
-    forgetTransitWait(ref);
-    reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+  const link = relayPeers.linkFor(facts.toRelay);
+  if (link) {
+    carryOverLink(link, envelope, facts, { clientId, tag, reply });
     return;
   }
-  console.log(`[Transit] carried ${facts.bytes} bytes for ${facts.toRelay.slice(0, 12)}`);
+  /* The link might be mid-redial (a drop-to-redial cycle is under two
+     seconds). Refusing instantly was turning a one-second window into a
+     user-visible error, because the client's retries all hit the same
+     instant refusal. Park the envelope for up to ten seconds and carry it the
+     moment a link stands again; only if the link is truly gone does the
+     refusal go out.
+     The park used to call `link.send` on the variable that had been null when
+     it parked — the revived link was found and then never used — so every
+     envelope sent during a redial ended as "transit-failed" with a TypeError
+     in the log (Finland, 2026-10-06T17:27:52). The revived link is now the
+     one carried on. */
+  const parkDeadline = Date.now() + TRANSIT_PARK_MS;
+  const parkTimer = setInterval(() => {
+    const revived = relayPeers.linkFor(facts.toRelay);
+    if (revived) {
+      clearInterval(parkTimer);
+      carryOverLink(revived, envelope, facts, { clientId, tag, reply });
+      return;
+    }
+    if (Date.now() > parkDeadline) {
+      clearInterval(parkTimer);
+      reply({ type: 'error', reason: 'transit-unavailable', toRelay: facts.toRelay, tag });
+    }
+  }, 250);
+  parkTimer.unref?.();
+}
+
+/* Hands one envelope to one live link and parks the asking socket's reply
+   until the far relay answers. Every failure here is an answer to the sender,
+   never a throw: this runs inside the socket receive handler, and a throw
+   from it used to take the whole relay down. */
+function carryOverLink(activeLink, envelope, facts, { clientId, tag, reply }) {
+  try {
+    /* The envelope is a parsed object on this side of the socket; its wire
+       size is the JSON. Buffer.byteLength(object) THROWS — and this sits in
+       the WS receive path, so one cross-relay message killed the whole relay. */
+    const wireBytes = Buffer.byteLength(JSON.stringify(envelope));
+    /* A link with a backlog is a slow border, not a dead one. Refusing with a
+       retryable "busy" lets the client pace itself; piling more behind the
+       backlog only makes every envelope in it later, until their waits run
+       out and they are all reported lost together. */
+    if (typeof activeLink.bufferedBytes === 'function'
+      && activeLink.bufferedBytes() + wireBytes > TRANSIT_LINK_SOFT_LIMIT_BYTES) {
+      reply({ type: 'error', reason: 'transit-busy', toRelay: facts.toRelay, tag });
+      return;
+    }
+    noteTransitTraffic(facts.toRelay, wireBytes);
+    /* The badge in the users table: this sender's traffic just crossed a relay
+       link. What crossed stays sealed — but its SIZE is not private, and the
+       presence probes a same-relay user's app fires at cross-relay contacts
+       are a few hundred bytes. A kilobyte is a message, not a probe. */
+    if (wireBytes >= 1024) noteTransitActivity(clientId);
+    /* The carrier's own correlation id, not the client's tag. The tag belongs
+       to the client and there is no reason for another relay to see it. */
+    const ref = crypto.randomUUID();
+    rememberTransitWait(ref, {
+      clientId, tag, reply, toRelay: facts.toRelay, expiresAt: Date.now() + TRANSIT_WAIT_MS,
+    });
+    if (!activeLink.send({ kind: 'transit', ref, envelope })) {
+      forgetTransitWait(ref);
+      reply({ type: 'error', reason: activeLink.isOpen() ? 'transit-busy' : 'transit-unavailable', toRelay: facts.toRelay, tag });
+      return;
+    }
+    if (wireBytes >= 1024) console.log(`[Transit] carried ${facts.bytes} bytes for ${facts.toRelay.slice(0, 12)}`);
   } catch (transitError) {
     console.warn('[Transit] carry failed:', transitError.message);
     reply({ type: 'error', reason: 'transit-failed', tag });
   }
+}
+
+/* A link that goes down takes its unanswered envelopes with it: nothing will
+   ever answer them. Saying so at once, rather than when each wait expires,
+   is what lets a client re-send over the redialled link within seconds. Only
+   when no other link to that relay remains — a duplicate link standing means
+   the answers can still come back. */
+function failTransitWaitsFor(relayId) {
+  if (!relayId || relayPeers.linkFor(relayId)) return;
+  for (const [ref, waiting] of transitWaiting) {
+    if (waiting.toRelay !== relayId) continue;
+    forgetTransitWait(ref);
+    try {
+      waiting.reply({ type: 'error', reason: 'transit-unavailable', toRelay: relayId, tag: waiting.tag });
+    } catch (_error) { /* the socket that asked is gone */ }
   }
-  /* If the link was live from the start, carryWithLink runs inline above. */
-  if (link) carryWithLink(link);
 }
 
 /* A frame off a relay link. Two kinds: an envelope to deliver here, and the
    answer to one this relay carried. */
 /* At most this many presence questions from one peer relay in one minute.
    Generous for a person opening conversations, useless for a sweep. */
-const PRESENCE_QUERY_PER_MINUTE = 240;
+/* Shared by every question a linked relay may ask on behalf of its clients —
+   presence, route and TURN. 240 was below what a handful of people with a
+   screenful of cross-relay contacts produce, and an exhausted budget showed
+   real contacts as offline. */
+const PRESENCE_QUERY_PER_MINUTE = Number(process.env.CHAT_TRANSIT_QUERIES_PER_MINUTE || 1200);
 const presenceQueryCounts = new WeakMap();
 function presenceQueryAllowed(link) {
   const now = Date.now();
@@ -6023,16 +6252,38 @@ function handleTransitFrame(payload, link) {
      * The rate limit is per link and per minute, so a peer relay cannot turn
      * this into a sweep even for fingerprints it does somehow hold.
      */
-    if (inner?.type === 'presence-query') {
+    if (inner?.type === 'presence-query' || inner?.type === 'route-query' || inner?.type === 'turn-query') {
       if (!presenceQueryAllowed(link)) {
-        link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-rejected' } });
+        link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'error', reason: 'transit-busy' } });
+        return;
+      }
+      if (inner.type === 'turn-query') {
+        /* A credential for THIS relay's coturn, for somebody on the asking
+           relay whose call or transfer needs a TURN both ends can reach. The
+           question names nobody; the answer is the same thing /turn-config
+           gives any visitor, minted fresh and expiring. */
+        link.send({ kind: 'transit-result', ref: payload.ref, answer: { type: 'turn', ...turnCredentialsForClient() } });
         return;
       }
       const asked = String(inner.toFingerprint || '').slice(0, 128);
+      const up = Boolean(findOpenPresenceByFingerprint(asked));
+      if (inner.type === 'route-query') {
+        /* Does this person live here? Yes when they proved their key on this
+           relay in the last ninety days. The origin goes with a yes so the
+           asking client can file the route; the relay's id and key it
+           already had, because it sealed this question to them. */
+        const home = up || identityLivesHere(asked);
+        link.send({
+          kind: 'transit-result',
+          ref: payload.ref,
+          answer: { type: 'route', toFingerprint: asked, home, up, origin: home ? publicOriginForPeers() : '' },
+        });
+        return;
+      }
       link.send({
         kind: 'transit-result',
         ref: payload.ref,
-        answer: { type: 'presence', toFingerprint: asked, up: Boolean(findOpenPresenceByFingerprint(asked)) },
+        answer: { type: 'presence', toFingerprint: asked, up },
       });
       return;
     }
@@ -6079,6 +6330,9 @@ function transitAnswerForClient(answer) {
       type: 'queued',
       toFingerprint: String(answer.toFingerprint || '').slice(0, 128),
       count: Number.isFinite(answer.count) ? answer.count : 0,
+      /* Whether the far relay knows this recipient. Passed on only as a
+         boolean; absent (older relay) stays absent. */
+      ...(typeof answer.known === 'boolean' ? { known: answer.known } : {}),
     };
   }
   if (type === 'presence') {
@@ -6088,11 +6342,37 @@ function transitAnswerForClient(answer) {
       up: answer.up === true,
     };
   }
+  if (type === 'route') {
+    const origin = String(answer.origin || '');
+    return {
+      type: 'route',
+      toFingerprint: String(answer.toFingerprint || '').slice(0, 128),
+      home: answer.home === true,
+      up: answer.up === true,
+      origin: /^https?:\/\/[^/\s]{1,200}$/i.test(origin) ? origin : '',
+    };
+  }
+  if (type === 'turn') {
+    /* Only TURN urls, only a handful, only plain strings: the client puts
+       these into an RTCPeerConnection, and nothing else may ride along. */
+    const urls = (Array.isArray(answer.urls) ? answer.urls : [])
+      .map((url) => String(url || ''))
+      .filter((url) => /^turns?:[^\s]{1,200}$/i.test(url))
+      .slice(0, 6);
+    return {
+      type: 'turn',
+      enabled: answer.enabled === true && urls.length > 0,
+      urls,
+      username: String(answer.username || '').slice(0, 128),
+      credential: String(answer.credential || '').slice(0, 128),
+      expiresAt: Number.isFinite(answer.expiresAt) ? answer.expiresAt : 0,
+    };
+  }
   if (type === 'error') {
     /* The reason is echoed only when it is one this relay would have sent
        itself, so a peer cannot invent a reason a client has a special path
        for. */
-    const known = new Set(['target-offline', 'target-restricted', 'transit-rejected']);
+    const known = new Set(['target-offline', 'target-restricted', 'transit-rejected', 'transit-busy']);
     const reason = String(answer.reason || '');
     return { type: 'error', reason: known.has(reason) ? reason : 'transit-rejected' };
   }
@@ -6188,7 +6468,11 @@ totalRelays++;
       /* The sweep may have emptied the box entirely, so the count reads
          what is left rather than assuming the queue survived it. */
       const remaining = offlineBoxes.get(toFingerprint);
-      reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag });
+      /* `known` tells the sender whether this recipient has ever proven their
+         key here. False means the message may be waiting at a relay its
+         recipient never visits, and the client goes looking for the right one
+         instead of showing a reassuring tick. */
+      reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag, known: identityLivesHere(toFingerprint) });
       /* A real chat message travels as a sealed 'offline-chat' envelope, so
          the type the relay can see is the envelope's, not the message's —
          gating on the inner names meant no queued message ever rang a
@@ -6245,7 +6529,7 @@ totalRelays++;
     saveOfflineBox(toFingerprint);
     sweepRetention(toFingerprint);
     const remainingLive = offlineBoxes.get(toFingerprint);
-    reply({ type: 'queued', toFingerprint, count: remainingLive ? remainingLive.length : 0, tag });
+    reply({ type: 'queued', toFingerprint, count: remainingLive ? remainingLive.length : 0, tag, known: true });
   }
 
   /* The socket is registered, so this message takes the live path. That
@@ -6400,6 +6684,72 @@ let allowlistEnabled = Boolean(policyStore.allowlistEnabled);
  *
  * The legacy single file is imported once on boot and kept, renamed, so the
  * upgrade is reversible. */
+/* ------------------------------------------------------------------
+ * Device sync beacons — the only thing this relay keeps for multi-device.
+ *
+ * Several devices of one account sync with each other directly, while both
+ * are online; the relay holds no history, no file and no session for them.
+ * What a device that comes back needs is to know THAT it is behind and which
+ * sibling holds what it missed, so it can ask the moment that sibling is
+ * online. That is the beacon: one small blob per device, encrypted on the
+ * device to the account's own key, opaque here, and capped hard so it can
+ * never become a mailbox by the back door.
+ * ------------------------------------------------------------------ */
+function beaconPath(fingerprint) {
+  return path.join(BEACON_DIR, `${fingerprint}.json`);
+}
+function loadBeacons(fingerprint) {
+  if (beaconCache.has(fingerprint)) return beaconCache.get(fingerprint);
+  let entries = {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(beaconPath(fingerprint), 'utf8'));
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) entries = raw;
+  } catch (_error) { /* none yet */ }
+  const cutoff = Date.now() - BEACON_TTL_MS;
+  for (const [deviceId, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry.blob !== 'string' || !(Number(entry.at) > cutoff)) delete entries[deviceId];
+  }
+  beaconCache.set(fingerprint, entries);
+  if (beaconCache.size > 2000) beaconCache.delete(beaconCache.keys().next().value);
+  return entries;
+}
+function storeBeacon(fingerprint, deviceId, blob) {
+  const entries = { ...loadBeacons(fingerprint) };
+  entries[deviceId] = { blob, at: Date.now() };
+  const ids = Object.keys(entries);
+  if (ids.length > BEACON_MAX_DEVICES) {
+    ids.sort((a, b) => entries[a].at - entries[b].at)
+      .slice(0, ids.length - BEACON_MAX_DEVICES)
+      .forEach((id) => { delete entries[id]; });
+  }
+  beaconCache.set(fingerprint, entries);
+  try {
+    writeJsonAtomic(beaconPath(fingerprint), entries);
+  } catch (error) {
+    console.warn('[Beacon] could not be written:', error.message);
+  }
+}
+function dropBeacons(fingerprint) {
+  beaconCache.delete(fingerprint);
+  try { fs.unlinkSync(beaconPath(fingerprint)); } catch (_error) { /* none */ }
+}
+
+/* A write interrupted between the temp file and the rename leaves a
+   `.name.pid.tmp` behind. The real file is whole either way; the leftover is
+   only clutter, and on a long-lived volume clutter that never goes away. */
+function sweepStaleTempFiles(directory) {
+  try {
+    const cutoff = Date.now() - 60 * 1000;
+    for (const name of fs.readdirSync(directory)) {
+      if (!/^\..+\.\d+\.tmp$/.test(name)) continue;
+      const full = path.join(directory, name);
+      try {
+        if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+      } catch (_error) { /* raced with another sweep */ }
+    }
+  } catch (_error) { /* directory not there yet */ }
+}
+
 function mailboxPath(fingerprint) {
   return path.join(OFFLINE_STORE_DIR, `${fingerprint}.json`);
 }
@@ -6426,6 +6776,9 @@ function importLegacyOfflineStore() {
 }
 
 function loadOfflineBoxes() {
+  sweepStaleTempFiles(OFFLINE_STORE_DIR);
+  sweepStaleTempFiles(path.dirname(OFFLINE_STORE_PATH));
+  sweepStaleTempFiles(BEACON_DIR);
   try {
     const imported = importLegacyOfflineStore();
     if (imported) return imported;
@@ -6776,7 +7129,10 @@ function saveOfflineBoxNow(fingerprint) {
    a crash costs is the wait -- and the sweeps and the shutdown path both call
    saveOfflineBoxes(), which flushes everything pending along with the rest. */
 const MAILBOX_SAVE_MIN_MS = 250;
-const MAILBOX_SAVE_MAX_MS = 4000;
+/* A second at most between a message being acknowledged as queued and it
+   being on disk. Four seconds was a window in which a crash lost mail the
+   sender had already been told was safe. */
+const MAILBOX_SAVE_MAX_MS = 1000;
 const MAILBOX_SAVE_FACTOR = 4;
 
 let lastMailboxWriteMs = 0;
@@ -7538,6 +7894,12 @@ function snapshotPeers() {
       prekeyId: client.prekeyId || '',
       prekeyPublic: client.prekeyPublic || '',
       prekeyExpiresAt: client.prekeyExpiresAt || '',
+      /* Which install this socket is. The client reads it to tell its own
+         sibling devices apart (the devices panel, the device-sync beacon), and
+         it was never sent: every sibling arrived with an empty device id, so
+         two devices of one account looked like one. A random per-install
+         string, no more identifying than the peer id beside it. */
+      deviceId: client.deviceId || '',
       /* Registered but frozen is not online. Saying otherwise tells the person
          writing that their message has been seen when it has not even been
          read off the wire. */
@@ -8100,6 +8462,7 @@ wsServer.on('connection', (ws, req) => {
          buffer limit is a hostile-socket kill or a slow-reader backoff. */
       ws.__poorijaVerifiedFingerprint = record.fingerprint || '';
         indexVerified(record);
+        noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
         broadcastPeers();
@@ -8137,6 +8500,7 @@ wsServer.on('connection', (ws, req) => {
         clearIdentityChallenge(record);
         record.identityVerified = true;
         indexVerified(record);
+        noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         console.log(`[Presence] Identity proven for ${record.fingerprint}`);
         deliverHeldMail(record, ws);
@@ -8191,6 +8555,40 @@ wsServer.on('connection', (ws, req) => {
       return;
     }
 
+    /* The account's device-sync beacons. Only the proven owner of the
+       fingerprint may read or write them: they say which devices exist and
+       when each last synced, which is the account's business alone. */
+    if (message.type === 'beacon-put' || message.type === 'beacon-get') {
+      if (!record.identityVerified || !isFingerprintKey(record.fingerprint)) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      if (message.type === 'beacon-get') {
+        const entries = loadBeacons(record.fingerprint);
+        safeSend(ws, {
+          type: 'beacons',
+          items: Object.entries(entries).map(([deviceId, entry]) => ({ deviceId, blob: entry.blob, at: entry.at })),
+        });
+        return;
+      }
+      const deviceId = String(message.deviceId || '').slice(0, 128);
+      const blob = String(message.blob || '');
+      if (!deviceId || !/^[A-Za-z0-9_-]+$/.test(deviceId) || !blob
+        || blob.length > BEACON_MAX_CHARS || !/^[A-Za-z0-9+/=]+$/.test(blob)) {
+        safeSend(ws, { type: 'error', reason: 'beacon-refused' });
+        return;
+      }
+      storeBeacon(record.fingerprint, deviceId, blob);
+      safeSend(ws, { type: 'beacon-stored', deviceId });
+      /* The account's other live devices hear that something changed, so a
+         sibling that is online can come and sync straight away. */
+      for (const candidate of verifiedByFingerprint.get(record.fingerprint) || []) {
+        if (candidate === record || candidate.ws?.readyState !== WebSocket.OPEN) continue;
+        safeSend(candidate.ws, { type: 'beacon-changed', deviceId });
+      }
+      return;
+    }
+
     /* An envelope for somebody on another relay. This relay cannot open it and
        will not try: it looks at the one field it is meant to read, finds the
        link, and passes it on. Nothing about it is written down. */
@@ -8225,6 +8623,35 @@ wsServer.on('connection', (ws, req) => {
         fromFingerprint: record.identityVerified ? record.fingerprint : '',
         reply: (payload) => safeSend(ws, payload),
       });
+      return;
+    }
+
+    /* A sender taking back envelopes it queued here for somebody who will
+       never collect them — a contact who turned out to live on another relay,
+       to whom the same messages have now been sent the right way. Only the
+       proven sender of an envelope may withdraw it, and only by the tag it
+       sent it with; nothing else in anybody's mailbox can be touched. */
+    if (message.type === 'relay-withdraw') {
+      if (!record.identityVerified || !isFingerprintKey(record.fingerprint)) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      const box = sanitizeFingerprint(message.toFingerprint);
+      const tags = new Set((Array.isArray(message.tags) ? message.tags : [])
+        .slice(0, 500).map((tag) => String(tag || '').slice(0, 96)).filter(Boolean));
+      let withdrawn = 0;
+      if (box && isFingerprintKey(box) && tags.size) {
+        const queued = offlineBoxes.get(box) || [];
+        const kept = queued.filter((item) => !(item.fromFingerprint === record.fingerprint
+          && tags.has(String(item.payload?.tag || ''))));
+        withdrawn = queued.length - kept.length;
+        if (withdrawn) {
+          if (kept.length) offlineBoxes.set(box, kept);
+          else offlineBoxes.delete(box);
+          saveOfflineBox(box);
+        }
+      }
+      safeSend(ws, { type: 'withdrawn', toFingerprint: box, count: withdrawn });
       return;
     }
 
@@ -8280,6 +8707,7 @@ for (const [box, queue] of offlineBoxes.entries()) {
         removed += (offlineBoxes.get(target) || []).length;
         offlineBoxes.delete(target);
         saveOfflineBox(target);
+        dropBeacons(target);
         const pushKey = pushIndexKey(target);
         if (pushSubscriptions.has(pushKey)) {
           pushSubscriptions.delete(pushKey);

@@ -392,6 +392,7 @@ SSL_KEY_PATH=$ROOT/certs/key.pem
 MONITOR_PASSWORD=$MONITOR_PASS
 TURN_USER=$turn_user
 TURN_PASSWORD=$TURN_PASS
+TURN_SECRET=${TURN_SECRET:-$(openssl rand -hex 32)}
 CHAT_ALLOWED_ORIGINS=$allowed_origins
 # The relays this one links to, as "<id>@<origin>", comma separated. Empty means
 # transit is off and /relay-link is refused outright -- a relay with no peers

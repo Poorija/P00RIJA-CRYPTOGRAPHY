@@ -348,6 +348,10 @@ space,
 note: note || '',
 createdAt: new Date().toISOString(),
 fromFingerprint: chatState.identity?.fingerprint || '',
+/* A card per member this device can vouch for — see 41-member-cards.js.
+   Outside the signed bytes on purpose: each card proves its own key, and an
+   older receiver that does not know the field still verifies the record. */
+memberCards: typeof memberCardsFor === 'function' ? memberCardsFor(space) : [],
 };
 if (typeof signSpaceSyncPayload === 'function') await signSpaceSyncPayload(payload);
 return payload;

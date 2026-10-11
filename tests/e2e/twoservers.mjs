@@ -245,10 +245,13 @@ try {
   check('and it came with a key, without which nothing can be sealed to it', seenByA?.hasKey === true);
   check('so that route is one the client will actually use', seenByA?.routable === true);
   check('and the send path agrees a message to them needs the carrier', seenByA?.overTransit === true);
-  /* The other side knows nothing yet, and should not: nobody gave it a card. */
+  /* The other side was given no card, so whatever route it holds back came
+     over the relays — the session offer and the profile card both name the
+     sender's relay — and is filed at the bottom of the trust ladder: usable,
+     never a card. */
   const seenByBFirst = await contactRelay(b, fpA);
-  check('while the other side has no routable way back yet', seenByBFirst?.routable !== true,
-    JSON.stringify(seenByBFirst));
+  check('while the other side holds at most a relay-told route back, never a card',
+    seenByBFirst?.homeRelaySource !== 'card', JSON.stringify(seenByBFirst));
 
   section('a message with only one road to travel');
   /* Opened by fingerprint rather than by clicking the first card.

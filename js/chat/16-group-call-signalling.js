@@ -790,18 +790,10 @@ async function renameStickerPack(packId, title) {
   return true;
 }
 
-/** Moves one pack by one place. Returns false at the ends rather than wrapping. */
-async function moveStickerPack(packId, delta) {
-  const from = chatState.stickerPacks.findIndex((pack) => pack.id === packId);
-  if (from < 0) return false;
-  const to = from + delta;
-  if (to < 0 || to >= chatState.stickerPacks.length) return false;
-  const [moved] = chatState.stickerPacks.splice(from, 1);
-  chatState.stickerPacks.splice(to, 0, moved);
-  await persistStickerPackOrder();
-  renderStickerPanel();
-  return true;
-}
+/* Moving a pack one place is moveStickerPack further down, the version that
+   the page has always actually run: two function declarations shared the name
+   and the later one silently replaced this one, so this copy was dead code
+   that a reader would reasonably take for the live one. */
 
 /** Deletes several at once, and answers how many actually went. */
 async function deleteStickerPacks(packIds) {

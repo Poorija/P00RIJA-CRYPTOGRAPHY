@@ -287,6 +287,8 @@ pruneExpiredHistory();
 // process without pagehide, and auto-lock can run before a deferred timer.
 flushHistoryStore();
 scheduleExpirySweep();
+/* The device beacon follows the history, a little behind it. */
+if (typeof scheduleBeaconWrite === 'function') scheduleBeaconWrite();
 }
 /* Ages out stored session keys wherever they are read from disk, so a key
    nobody has touched for a week does not sit in the vault waiting to be
@@ -527,6 +529,8 @@ chatState.prefs.callPixelStep = Math.max(0, Math.min(3, Number(savedPrefs.callPi
 chatState.prefs.sendReceipts = savedPrefs.sendReceipts !== false;
 chatState.prefs.turnChoices = savedPrefs.turnChoices && typeof savedPrefs.turnChoices === 'object'
 ? savedPrefs.turnChoices : {};
+chatState.prefs.pathChoices = savedPrefs.pathChoices && typeof savedPrefs.pathChoices === 'object'
+? savedPrefs.pathChoices : {};
 }
 /* Last step of every unlock: whatever the chat received while the vault was
    shut is sitting in the store cache marked dirty — land it in localStorage

@@ -209,6 +209,36 @@ fi
 # --------------------------------------------------------------------- deploy
 log "Compose project: $PROJECT_NAME"
 
+# TURN REST needs a secret shared by coturn and the relay. An .env written
+# before that existed has none, and without it /turn-config keeps handing the
+# static TURN pair to every visitor. One is generated once and kept; nothing
+# else in the file is touched.
+if [ -f "$ENV_FILE" ] && ! grep -qE '^TURN_SECRET=[0-9a-f]{32,}' "$ENV_FILE"; then
+    sed -i.bak '/^TURN_SECRET=/d' "$ENV_FILE" 2>/dev/null && rm -f "$ENV_FILE.bak"
+    printf '\n# TURN REST secret shared by coturn and the relay (added by sync-to-server.sh)\nTURN_SECRET=%s\n' \
+        "$(openssl rand -hex 32)" >> "$ENV_FILE"
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+    ok "generated TURN_SECRET in $(basename "$ENV_FILE")"
+fi
+
+# coturn runs as nobody (65534) and must be able to read its private key.
+# A key left root-owned 0400 — which is what a certificate issued or copied as
+# root produces — silently cost a server its TURNS listener on 5349: coturn
+# logs a warning, carries on without TLS, and /turn-config keeps advertising
+# turns: anyway. The deploy account has no sudo, but it has docker, and a
+# throwaway container can set the ownership the TURN server needs.
+TURN_KEY_PATH="$(sed -n 's/^SSL_KEY_PATH=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+[ -n "$TURN_KEY_PATH" ] || TURN_KEY_PATH="$ROOT/certs/key.pem"
+case "$TURN_KEY_PATH" in /*) ;; *) TURN_KEY_PATH="$ROOT/config/$TURN_KEY_PATH" ;; esac
+if [ -f "$TURN_KEY_PATH" ] || docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.6-alpine -c "test -f /c/$(basename "$TURN_KEY_PATH")" >/dev/null 2>&1; then
+    if docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.6-alpine \
+        -c "chown 65534:65534 /c/$(basename "$TURN_KEY_PATH") && chmod 400 /c/$(basename "$TURN_KEY_PATH")" >/dev/null 2>&1; then
+        ok "coturn can read its TLS key"
+    else
+        warn "could not set the TLS key's ownership for coturn; TURNS (5349) may stay down"
+    fi
+fi
+
 # Resolve the file before building anything: a missing variable or an
 # unreachable build context shows up here in a second, rather than part-way
 # through a several-minute image build.
@@ -239,6 +269,18 @@ OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION
     fail "Bringing the stack up failed."
     exit 1
 }
+# coturn and the renewer were never part of a deployment, so a change to their
+# definition — the TURN REST secret, a flag — reached a server only when
+# somebody recreated them by hand. Without --force-recreate compose recreates
+# them only when their definition actually changed, so an ordinary deploy
+# does not drop the TURN sessions of calls in progress. The TURN server is
+# always restarted, though, when its key had to be repaired above: coturn
+# reads the key only at start.
+"${COMPOSE_CMD[@]}" up -d coturn cert-renewer || warn "coturn or the certificate renewer did not come up"
+if ! docker exec Poorija-Cryptography_Coturn sh -c 'test -r /etc/coturn/certs/key.pem' 2>/dev/null \
+    || docker logs Poorija-Cryptography_Coturn 2>&1 | head -80 | grep -q 'cannot start TLS and DTLS listeners'; then
+    docker restart Poorija-Cryptography_Coturn >/dev/null 2>&1 && ok "coturn restarted to pick up its key"
+fi
 
 # The nginx config is baked into the image by COPY, not bind-mounted, so a
 # rebuild that quietly reuses an old layer leaves the running container serving

@@ -973,6 +973,7 @@ const stream = await requestCallMedia(wantsVideo ? 'video' : 'voice');
 attachLocalStream(stream);
 /* Answering builds the peer connection too, so the reorder belongs here as
    well — and the caller is known by now, which is what makes it per contact. */
+if (typeof ensureFreshTurnCredentials === 'function') await ensureFreshTurnCredentials();
 prepareIceForContact(activeCallPeerRecord() || findPeerByAnyKey(call.peer));
 call.answer(stream, { sdpTransform: preferCallCodecs });
 appendCall({
@@ -1237,6 +1238,15 @@ if (!isCallSignalFromActivePeer(payload, message)) return;
 const pc = chatState.currentCall?.peerConnection;
 if (!pc || !payload.sdp) return;
 try {
+/* The caller moved the call to a relay path: this side gathers relay
+   candidates only as well, with the same borrowed TURN available, so the two
+   ends can meet on one server. */
+if (payload.forceRelay && typeof buildIceConfigFor === 'function') {
+  try {
+    const fresh = await buildIceConfigFor(activeCallPeerRecord(), { forceRelay: true });
+    pc.setConfiguration({ ...pc.getConfiguration(), iceServers: fresh.iceServers, iceTransportPolicy: fresh.iceTransportPolicy || 'relay' });
+  } catch (error) { console.warn('[Call] the relay configuration could not be applied:', error?.message || error); }
+}
 await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 const answer = await pc.createAnswer();
 answer.sdp = preferCallCodecs(answer.sdp);
@@ -1291,10 +1301,20 @@ if (el) el.textContent = text;
 // is inert here — the new offer would have nowhere to go. We carry the ICE
 // restart over the app's own relay channel instead, which is already
 // authenticated and already used for call-invite/call-state.
-async function sendIceRestartOffer(pc) {
+async function sendIceRestartOffer(pc, { forceRelay = false } = {}) {
 const peerRecord = activeCallPeerRecord();
 if (!peerRecord || !pc) return false;
 try {
+/* A restart onto a relay path is gathered with the contact's relay TURN as
+   well (a connection across relays needs a TURN both ends can reach), and
+   says so to the other side, which restricts its own gathering the same way. */
+if (forceRelay && typeof buildIceConfigFor === 'function') {
+  try {
+    const fresh = await buildIceConfigFor(peerRecord, { forceRelay: true });
+    pc.setConfiguration({ ...pc.getConfiguration(), iceServers: fresh.iceServers, iceTransportPolicy: fresh.iceTransportPolicy || 'relay' });
+  } catch (error) { console.warn('[Call] the relay configuration could not be applied:', error?.message || error); }
+}
+const relayOnly = pc.getConfiguration?.().iceTransportPolicy === 'relay';
 const offer = await pc.createOffer({ iceRestart: true });
 offer.sdp = preferCallCodecs(offer.sdp);
 await pc.setLocalDescription(offer);
@@ -1302,6 +1322,7 @@ return sendRelayEnvelope(peerRecord, {
 type: 'call-renegotiate',
 peerId: chatState.peerId,
 sdp: { type: offer.type, sdp: offer.sdp },
+...(relayOnly ? { forceRelay: true } : {}),
 });
 } catch (error) {
 console.warn('[Call] ICE restart offer failed:', error);
@@ -1333,7 +1354,14 @@ return;
 chatState.iceRestartAttempt += 1;
 console.warn(`[Call] ICE recovery attempt ${chatState.iceRestartAttempt} (${reason})`);
 setCallStatusText(t('در حال بازیابی تماس...', 'Recovering the call...'));
-sendIceRestartOffer(pc);
+/* A direct path that died is the path to give up on: an outbound-started UDP
+   flow from inside Iran is cut after a few packets, and restarting ICE onto
+   the same pair only reproduces that. The restart goes relay-only, and the
+   contact is remembered so the next call starts there. A second failed
+   attempt goes relay-only whatever the first one was. */
+const diedDirect = (typeof lastCallRoute === 'function' && lastCallRoute(pc) === 'direct') || chatState.iceRestartAttempt >= 2;
+if (diedDirect && typeof noteDirectPath === 'function') noteDirectPath(activeCallPeerRecord()?.fingerprint, false);
+sendIceRestartOffer(pc, { forceRelay: diedDirect });
 clearIceRecoveryTimer();
 chatState.iceRecoveryTimer = setTimeout(() => {
 chatState.iceRecoveryTimer = null;
@@ -1766,6 +1794,7 @@ canonical = config.iceServers;
 }
 const ordered = orderIceServersFor(peerRecord?.fingerprint, canonical);
 config.iceServers = ordered;
+if (typeof applyPathPolicyToPeerOptions === 'function') applyPathPolicyToPeerOptions(peerRecord);
 return ordered !== canonical;
 }
 const callRouteState = new WeakMap();
@@ -1775,6 +1804,9 @@ const callRouteState = new WeakMap();
 async function adaptCallRoute(pc, reading) {
 if (!pc || !reading) return;
 const peerRecord = activeCallPeerRecord();
+/* Direct path first: whether the path ICE chose keeps holding is judged here,
+   and a direct path that does not is moved to a relay one. */
+if (typeof watchCallPath === 'function') watchCallPath(pc, reading, peerRecord);
 const fingerprint = peerRecord?.fingerprint || '';
 if (!fingerprint) return;
 const relayed = reading.route === 'local' || reading.route === 'both';

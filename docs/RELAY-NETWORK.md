@@ -2,7 +2,7 @@
 
 # Relays: installing them, and linking them to each other
 
-For v2.91.21 · build chat-v96
+For v2.98.27 · build chat-v120
 
 This is the operational guide for running more than one relay and having them
 carry for each other. It covers what to put on which kind of server, how to
@@ -321,6 +321,42 @@ not from anything a relay told it. So people on different relays have to
 exchange cards once. After the first message each way, the return route travels
 inside the sealed message and the rest is automatic.
 
+### Finding a contact's relay, and TURN across the link (from 2.98.27)
+
+A card is still the best way to learn where somebody lives, but it is no
+longer the only one. When a relay queues a message for somebody who has never
+proven a key there, its `queued` answer says `known: false`. The client then
+asks every relay this one is linked with — listed at `GET /transit-peers`,
+with the key to seal to — a sealed `route-query` for that one fingerprint.
+The relay where they live answers yes with its public origin; the parked
+messages are sent there and the copies left behind are withdrawn
+(`relay-withdraw`, sender-only, by tag). The answer is filed at the lowest
+rank of the trust ladder: it routes, but never displaces a card or a session.
+
+A call or transfer between two relays asks the contact's relay for a
+short-lived TURN credential (`turn-query`) and adds that TURN to the one
+connection that needs it, so both ends can meet on one server. This matters
+between Finland and Iran: a UDP flow started from inside Iran is cut after a
+few packets, so a relayed candidate on each side's own TURN never connects,
+while one TURN reachable by both does. A direct path that dies or stays poor
+is moved to a relay path with an ICE restart, and remembered for a day.
+
+**TURN REST.** Set `TURN_SECRET` (64 hex characters) and coturn checks
+expiring HMAC credentials the relay mints; `/turn-config` stops handing every
+visitor the static pair. `scripts/sync-to-server.sh` generates the secret for
+an `.env` that lacks one and recreates coturn when its definition changes.
+
+### Linked devices and the beacon
+
+A relay keeps nothing for a device of an account that is away: every device
+acknowledges its mail at once. Each device instead leaves a beacon — at most
+8 KB, encrypted on the device to the account's own key, owner-only, kept 30
+days — naming per conversation (by hashed name) the time of its newest entry
+and which relay the device lives on. A device that comes back reads its
+siblings' beacons, sees what it is missing and asks a sibling for exactly that
+while both are online. Files move only when asked, and only between two
+devices that are both online.
+
 ---
 
 ## 6. What each machine sees
@@ -632,6 +668,24 @@ candidate ریلی فقط یک آدرس است، پس چیزی بین دو نص�
 آمده باشد — QR یا کد چسبانده‌شده — نه از چیزی که رله گفته. پس کسانی که روی دو
 رلهٔ مختلف‌اند یک بار باید کارت رد و بدل کنند. بعد از اولین پیام در هر جهت،
 مسیر بازگشت داخل پیام مهرشده سفر می‌کند و بقیه خودکار است.
+
+**پیدا کردن رلهٔ مخاطب و TURN مشترک (از 2.98.27):** اگر رله برای کسی پیام صف کند
+که هرگز کلیدش را آن‌جا ثابت نکرده، در پاسخ `known: false` می‌گوید. برنامه از همهٔ
+رله‌های متصل (فهرست در `GET /transit-peers`) با یک `route-query` مهرشده برای همان
+یک اثرانگشت می‌پرسد او کجاست؛ رلهٔ خانگی او جواب مثبت می‌دهد، پیام‌های پارک‌شده
+از مسیر درست می‌روند و نسخه‌های سرگردان با `relay-withdraw` پس گرفته می‌شوند. برای
+تماس یا انتقال بین دو رله، یک اعتبارنامهٔ کوتاه‌مدت TURN از رلهٔ مخاطب (`turn-query`)
+فقط به همان اتصال اضافه می‌شود تا دو طرف روی یک TURN به هم برسند؛ جریان UDP که از
+داخل ایران شروع شود بعد از چند بسته قطع می‌شود، پس TURN هر طرف به تنهایی کافی نیست.
+مسیر مستقیمی که بمیرد یا ضعیف بماند به مسیر رله منتقل و یک روز به خاطر سپرده می‌شود.
+با `TURN_SECRET` در `.env`، coturn اعتبارنامهٔ منقضی‌شونده می‌پذیرد و رمز ثابت دیگر
+به کسی داده نمی‌شود؛ `sync-to-server.sh` اگر نباشد می‌سازدش.
+
+**دستگاه‌های یک اکانت:** رله برای دستگاه آفلاین چیزی نگه نمی‌دارد. هر دستگاه یک
+beacon رمزنگاری‌شده با کلید خود اکانت (حداکثر ۸ کیلوبایت، فقط صاحب اکانت، ۳۰ روز)
+می‌گذارد که زمان آخرین پیام هر گفتگو (با نام هش‌شده) و رلهٔ خانگی دستگاه را دارد؛
+دستگاه برگشته می‌فهمد عقب است و به‌محض آنلاین بودن هر دو، فقط تغییرات را مستقیم
+می‌گیرد. فایل‌ها فقط به درخواست و فقط وقتی هر دو آنلاین‌اند منتقل می‌شوند.
 
 ### ۶. هر ماشین چه می‌بیند
 

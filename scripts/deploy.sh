@@ -587,7 +587,7 @@ fi
 # cheap to check and none of them fail a browser test loudly — the app just
 # quietly does less than it says.
 log "Running the static audits"
-for tool in audit-dom audit-i18n audit-handlers; do
+for tool in audit-dom audit-i18n audit-handlers check-nginx-routes; do
     if ! node "tools/$tool.cjs"; then
         fail "Deployment stopped: tools/$tool.cjs has findings."
         exit 1

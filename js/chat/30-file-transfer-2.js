@@ -345,6 +345,11 @@ const merged = upsertSharedSpace(payload.space);
 /* Only for a group this device is actually in - a note about a group we are
 not a member of would be a thread appearing out of nowhere. */
 if (merged && payload.note) appendSpaceNote(merged, String(payload.note).slice(0, 300));
+/* The owner's cards for every member: what lets this device seal to members
+   it has never met, on this relay or another. */
+if (merged && Array.isArray(payload.memberCards) && typeof ingestMemberCards === 'function') {
+  await ingestMemberCards(payload.memberCards, merged);
+}
 renderPeers();
 renderActivePeer();
 renderMessages();
@@ -481,40 +486,76 @@ retryQueuedMessages();
 });
 return;
 }
+/* Somebody may be waiting for exactly this answer — a route or TURN
+   question, a presence probe. Handing it to them does not stop the ordinary
+   handling below. */
+if (typeof settleTransitAnswer === 'function') settleTransitAnswer(message);
+if (message.type === 'route' || message.type === 'turn' || message.type === 'withdrawn') return;
+/* The account's device beacons (44-device-beacon.js). */
+if (message.type === 'beacons') {
+if (typeof handleBeacons === 'function') handleBeacons(message.items).catch((error) => console.warn('[Devices] beacons unreadable:', error?.message || error));
+return;
+}
+if (message.type === 'beacon-changed') {
+if (typeof requestBeacons === 'function') window.setTimeout(requestBeacons, 1500);
+return;
+}
+if (message.type === 'beacon-stored') return;
 if (message.type === 'queued') {
 /* The relay stored an envelope we asked it to keep. The tag is the outbound
    message id we sent it with; matching it back moves that message to
    'relayed' — "handed to the server, waiting for the peer" — rather than
    leaving it on the ambiguous ✓ of a blind send. */
-const entry = chatState.pendingRelayTags?.get(String(message.tag || ''));
+const queuedTag = String(message.tag || '');
+const carried = typeof transitTagInFlight === 'function' && transitTagInFlight(queuedTag);
+if (carried) {
+  transitSendSettled(queuedTag);
+  transitLinkAnswered();
+}
+/* Queued for somebody that relay has never met: the message may be waiting
+   where its recipient never comes. It stays "queued" rather than earning the
+   relayed tick, and the right relay is looked for. */
+if (message.known === false && typeof noteQueuedForStranger === 'function') {
+  noteQueuedForStranger(message, { carried });
+  chatState.pendingRelayTags?.delete(queuedTag);
+  return;
+}
+const entry = chatState.pendingRelayTags?.get(queuedTag);
 if (entry) {
 markMessageStatus(entry.conversationKey, entry.messageId, 'relayed');
-chatState.pendingRelayTags.delete(String(message.tag || ''));
+chatState.pendingRelayTags.delete(queuedTag);
 }
-/* A carried message that was accepted needs no fallback copy kept for it. */
-chatState.pendingTransit?.delete(String(message.tag || ''));
+chatState.pendingTransit?.delete(queuedTag);
 return;
 }
 /* The far relay answered a question about one of its own clients. */
 if (message.type === 'presence' && message.toFingerprint) {
 chatState.pendingTransit?.delete(String(message.tag || ''));
+if (typeof transitLinkAnswered === 'function') transitLinkAnswered();
 notePeerPresenceAnswer(String(message.toFingerprint), message.up === true);
 return;
 }
 if (message.type === 'error') {
-/* The carrier could not take it: no link to that relay, or the far relay
-   would not open it. The message is not lost — it goes the ordinary way and
-   the conversation is told, because "this went through your own relay after
-   all" changes who can see that the two of you are talking. */
+/* The carrier could not take it: the link redialling, a backlog, or the far
+   relay refusing to open it. A tagged envelope stays queued in the outbox and
+   goes again by itself; nothing about a message to a contact on another relay
+   is ever sent through this relay instead. */
 if (String(message.reason || '').startsWith('transit-')) {
-const waiting = chatState.pendingTransit?.get(String(message.tag || ''));
+const refusedTag = String(message.tag || '');
+if (typeof transitSendRefused === 'function' && transitSendRefused(refusedTag, String(message.reason))) {
+  chatState.pendingTransit?.delete(refusedTag);
+  return;
+}
+const waiting = chatState.pendingTransit?.get(refusedTag);
 if (waiting) {
-chatState.pendingTransit.delete(String(message.tag || ''));
+chatState.pendingTransit.delete(refusedTag);
 const peerRecord = chatState.peers.find((peer) => peer.peerId === waiting.peerId) || null;
-console.warn(`[Transit] ${message.reason}; falling back to the direct path`);
 fallBackToDirect(waiting.frame, peerRecord, message.reason);
 return;
 }
+/* A refusal for something nobody tracks — a typing flag, a question whose
+   asker already gave up — is not worth a "message failed" toast. */
+return;
 }
 if (message.reason === 'identity-unverified') {
 notify(t(
@@ -802,6 +843,11 @@ handleCallRenegotiateOffer(payload, message).catch(console.error);
 ackRelayMessage(message.relayId);
 return;
 }
+if (payload.type === 'call-path-relay') {
+if (typeof handleCallPathRelayRequest === 'function') handleCallPathRelayRequest(payload, message);
+ackRelayMessage(message.relayId);
+return;
+}
 if (payload.type === 'call-renegotiate-answer') {
 handleCallRenegotiateAnswer(payload, message).catch(console.error);
 ackRelayMessage(message.relayId);
@@ -818,6 +864,16 @@ return;
    anything that could mistake them for chat, and named call-relay-* rather than
    reusing call-ice so a build that predates them ignores them instead of
    feeding a candidate to a negotiation that has none. */
+/* The same, for a live data channel to somebody on another relay
+   (43-relay-link.js). Never stored, never read late. */
+if (String(payload.type || '').startsWith('link-relay-')) {
+const queuedAt = message.queuedAt ? Date.parse(message.queuedAt) : 0;
+if (!queuedAt || Date.now() - queuedAt < 60000) {
+if (typeof handleRelayLinkSignal === 'function') handleRelayLinkSignal(message);
+}
+ackRelayMessage(message.relayId);
+return;
+}
 if (String(payload.type || '').startsWith('call-relay-')) {
 /* An offer that was waiting in a mailbox is not a call, it is a recording of
    one. Three defences stop it being stored at all -- the client marks these
@@ -1315,16 +1371,33 @@ if (!peerRecord) {
   if (!silent) notify(t('اول یک گفتگو را باز کنید.', 'Open a conversation first.'), 'info');
   return null;
 }
-if (!chatState.peer) {
-  if (!silent) notify(t('هنوز به سرور چت وصل نشده‌اید.', 'Not connected to the chat server yet.'), 'warning');
-  return null;
-}
 const existing = chatState.sessions.get(peerRecord.peerId);
 if (existing?.connection?.open) {
 if (!existing.cryptoKey) await ensureSessionKey(existing, peerRecord);
 renderActivePeer();
 return existing;
 }
+/* Somebody on another relay: PeerJS cannot dial them, so the channel is
+   negotiated over the relays instead (43-relay-link.js) and handed to the
+   same session machinery an ordinary connection goes through. */
+if (typeof sessionNeedsRelayLink === 'function' && sessionNeedsRelayLink(peerRecord)) {
+  const link = await openRelayDataLink(peerRecord);
+  if (!link) {
+    if (!silent) notify(t('کانال مستقیم با مخاطب رلهٔ دیگر برقرار نشد؛ پیام‌ها از مسیر رله می‌روند.', 'A direct channel to the contact on the other relay could not be opened; messages go through the relays.'), 'info');
+    return chatState.sessions.get(peerRecord.peerId) || null;
+  }
+  const linked = bindDataConnection(peerRecord, link, true);
+  linked.silent = Boolean(silent);
+  return chatState.sessions.get(peerRecord.peerId) || null;
+}
+if (!chatState.peer) {
+  if (!silent) notify(t('هنوز به سرور چت وصل نشده‌اید.', 'Not connected to the chat server yet.'), 'warning');
+  return null;
+}
+/* A data channel takes the same TURN a call does when the direct path does
+   not open, so its credentials are refreshed and ordered first. */
+if (typeof ensureFreshTurnCredentials === 'function') await ensureFreshTurnCredentials();
+if (typeof prepareIceForContact === 'function') prepareIceForContact(peerRecord);
 const connection = chatState.peer.connect(peerRecord.peerId, {
 reliable: true,
 metadata: {
@@ -1488,16 +1561,21 @@ setDraft(chatState.activeConversationId, '');
 syncComposerHeight(composer);
 clearMessageContext();
 let delivered = 0;
+/* Roster keys this device cannot seal to — no record, or no key on it. They
+   used to be skipped without a word; now the message remembers who it missed
+   and their cards are asked for, so it reaches them when the cards arrive. */
+const skippedMembers = [];
 for (const memberId of members) {
 const member = findPeerByAnyKey(memberId);
-if (!member || isSelfPeerRecord(member)) continue;
+if (member && isSelfPeerRecord(member)) continue;
+if (!member || !member.publicKeyData) { skippedMembers.push(member?.fingerprint || memberId); continue; }
 let memberSession = await ensureStoredSession(member);
 if (!memberSession?.cryptoKey) {
 /* An offline member used to be skipped here, leaving holes in their copy
    of the group. ensureDirectSession mints an offline key instead. */
 memberSession = await ensureDirectSession(member, { silent: true });
 }
-if (!memberSession?.cryptoKey) continue;
+if (!memberSession?.cryptoKey) { skippedMembers.push(member.fingerprint || memberId); continue; }
 const spacePayload = {
 spaceId: peer.conversationId,
 spaceType: 'group',
@@ -1531,7 +1609,12 @@ delivered += 1;
 }
 }
 markMessageStatus(peer.conversationId, messageId, delivered ? 'sent' : 'queued');
-if (!delivered && members.length) {
+if (skippedMembers.length) {
+const sentEntry = (chatState.history[peer.conversationId] || []).find((item) => item.id === messageId);
+if (sentEntry) { sentEntry.skippedMembers = skippedMembers; storeHistory(); }
+if (typeof requestMemberCards === 'function') requestMemberCards(peer, skippedMembers);
+}
+if (!delivered && members.length && !skippedMembers.length) {
 notify(t('پیام گروه ذخیره شد؛ بعد از آماده شدن سشن اعضا دوباره تلاش کنید.', 'Group message was saved; retry after member sessions are ready.'), 'warning');
 }
 return;
@@ -1891,9 +1974,11 @@ const groupMeter = createTransferMeter(file.size * groupTargets);
 const groupOwner = `send:${historyId}`;
 let groupBase = 0;
 setTransferBanner(transferBannerLabel(kind, file.name), 0, { owner: groupOwner });
+const fileSkippedMembers = [];
 for (const memberId of members) {
 const member = findPeerByAnyKey(memberId);
-if (!member || isSelfPeerRecord(member)) continue;
+if (member && isSelfPeerRecord(member)) continue;
+if (!member || !member.publicKeyData) { fileSkippedMembers.push(member?.fingerprint || memberId); continue; }
 let memberSession = await ensureStoredSession(member);
 if (!memberSession?.cryptoKey) {
 /* An offline member used to be skipped here, leaving holes in their copy
@@ -1960,7 +2045,8 @@ notify(t(
 `${oversizedForOffline} member(s) are offline, and files larger than ${app().formatBytes(MAX_OFFLINE_FILE_BYTES)} are not queued for them — send again once they are online.`,
 ), 'warning');
 }
-if (!delivered && members.length) {
+if (fileSkippedMembers.length && typeof requestMemberCards === 'function') requestMemberCards(conversation, fileSkippedMembers);
+if (!delivered && members.length && !fileSkippedMembers.length) {
 notify(t('فایل/صوت گروه ذخیره شد؛ برای تحویل، سشن امن اعضا باید آماده باشد.', 'Group file/voice was saved; member secure sessions must be ready for delivery.'), 'warning');
 }
 return;
@@ -2524,6 +2610,15 @@ renderMessages();
 	if (bundle?.filePart?.messageId) {
 	acceptDeviceFilePart(bundle.filePart);
 	}
+	/* A sibling asking for what it missed, and the end of an answer to us. */
+	if (bundle?.syncRequest && typeof serveDeltaRequest === 'function') {
+	serveDeltaRequest(bundle.syncRequest).catch((error) => console.warn('[Devices] serving a delta failed:', error?.message || error));
+	}
+	if (bundle?.syncDone?.forDeviceId && bundle.syncDone.forDeviceId === getDeviceId()) {
+	chatState.deviceSyncBehind = null;
+	if (typeof renderDeviceSyncHint === 'function') renderDeviceSyncHint();
+	if (typeof scheduleBeaconWrite === 'function') scheduleBeaconWrite(2000);
+	}
 	return changed;
 }
 
@@ -2571,6 +2666,19 @@ for (const [pullId, pull] of deviceFilePulls) {
 if (sweepNow - pull.at > DEVICE_FILE_PULL_TTL_MS) deviceFilePulls.delete(pullId);
 }
 if (!linkedDeviceCount || linkedDeviceCount < 2) return;
+/* A sibling is here: ask it for exactly what this device is missing, and it
+   asks the same of this one. A whole-history dump every ten minutes was the
+   old answer; a delta is small enough to send on every arrival. */
+/* Counted per connection: a device that went away and came back sees the
+   same number of siblings as before it left, and must still ask. */
+const previous = maybeAnnounceDeviceSync.connection === chatState.ws ? (maybeAnnounceDeviceSync.lastCount || 0) : 0;
+maybeAnnounceDeviceSync.connection = chatState.ws;
+maybeAnnounceDeviceSync.lastCount = linkedDeviceCount;
+if (linkedDeviceCount <= previous) return;
+if (typeof requestDeltaFromSiblings === 'function') {
+  setTimeout(() => requestDeltaFromSiblings({ reason: 'sibling arrived', force: true }), 2500);
+  return;
+}
 const now = Date.now();
 if (now - deviceSyncLastSentAt < DEVICE_SYNC_MIN_INTERVAL_MS) return;
 deviceSyncLastSentAt = now;

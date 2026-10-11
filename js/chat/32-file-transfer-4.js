@@ -213,8 +213,10 @@ peerId: chatState.peerId,
 const stream = await requestCallMedia(mode);
 attachLocalStream(stream);
 syncFloatingCallPeerIdentity();
-/* Last thing before dialling: PeerJS reads the server list at this instant
-   and there is no later moment to reorder it. See prepareIceForContact. */
+/* Expiring TURN credentials are refreshed first, then — last thing before
+   dialling, because PeerJS reads the server list at this instant — the list
+   is ordered for this contact. See prepareIceForContact. */
+if (typeof ensureFreshTurnCredentials === 'function') await ensureFreshTurnCredentials();
 prepareIceForContact(peerRecord);
 /* A PeerJS id only means something on the server that issued it, so this line
    cannot reach somebody who loaded the app from the other deployment. When it
@@ -242,6 +244,14 @@ direction: 'out',
 logToChat: false,
 });
 bindMediaCall(call, mode);
+if (overRelay && typeof call?.on === 'function') {
+  call.on('unreachable', () => {
+    if (chatState.currentCall !== call || chatState.currentCallAnsweredAt) return;
+    endCurrentCall({ logCall: false, notifyPeer: false });
+    startOfflineRing(peerRecord, mode);
+    if (typeof keepAskingWhileRinging === 'function') keepAskingWhileRinging(peerRecord);
+  });
+}
 if (chatState.outgoingCallTimer) clearTimeout(chatState.outgoingCallTimer);
 chatState.outgoingCallTimer = setTimeout(() => {
 if (!chatState.currentCall || chatState.currentCallAnsweredAt) return;
@@ -649,6 +659,13 @@ const peer = findPeerByConversationKey(conversationKey);
 if (peer) {
 let session = chatState.sessions.get(peer.peerId) || await ensureStoredSession(peer);
 for (const msg of queuedMessages) {
+/* Already in the hands of the carrier, or waiting in the transit outbox for
+   its next attempt: re-sealing it here would only mint a duplicate envelope
+   that the receiver has to throw away. */
+if (typeof transitTagInFlight === 'function' && transitTagInFlight(msg.id)) continue;
+/* Parked at a relay the recipient never visits: re-sending through the same
+   relay changes nothing. It goes again once the route is known. */
+if (Array.isArray(msg.parkedFor) && msg.parkedFor.length && !transitRouteFor(peer)) continue;
 // If message is older than 24h, mark as failed instead of retrying forever
 if (msg.createdAt && (Date.now() - Date.parse(msg.createdAt) > 86400000)) {
 markMessageStatus(conversationKey, msg.id, 'failed');

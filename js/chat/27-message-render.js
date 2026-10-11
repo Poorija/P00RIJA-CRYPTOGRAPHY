@@ -1668,6 +1668,9 @@ return duplicate;
 }
 }
 chatState.history[conversationId].push(entry);
+/* What this device sends shows up on the account's other online devices now,
+   not at the next sync. */
+if (entry?.direction === 'out' && typeof mirrorToSiblings === 'function') mirrorToSiblings(conversationId, entry);
 /* A hard 300-entry cap deleted the oldest messages outright while the
    on-screen note told the user to "use search" — for data that no longer
    existed. 2000 keeps the store bounded (the blob is size-capped by the

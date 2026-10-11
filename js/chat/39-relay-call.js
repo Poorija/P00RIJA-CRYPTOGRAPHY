@@ -130,9 +130,12 @@ function relayCallId() {
  * property. 31-file-transfer-3.js ASSIGNS pc.oniceconnectionstatechange to take
  * PeerJS's hang-up-on-failure handler away from it, and it would take this
  * file's candidate trickling with it. */
-function makeRelayCall(peerRecord, { callId, metadata = {}, mode = 'voice' }) {
+function makeRelayCall(peerRecord, { callId, metadata = {}, mode = 'voice', config = null }) {
   const listeners = new Map();
-  const pc = new RTCPeerConnection(relayCallConfig(peerRecord));
+  /* The configuration is built before the connection (buildIceConfigFor):
+     this device's TURN plus, for this call only, a TURN on the contact's own
+     relay that both ends can reach. */
+  const pc = new RTCPeerConnection(config || relayCallConfig(peerRecord));
   const remote = new MediaStream();
   /* Candidates routinely arrive before the description they belong to — the
      other side starts gathering the moment it has a local description, and the
@@ -340,20 +343,37 @@ function makeRelayCall(peerRecord, { callId, metadata = {}, mode = 'voice' }) {
    it treats the value of chatState.peer.call(). */
 async function placeRelayCall(peerRecord, stream, { mode = 'voice', metadata = {} } = {}) {
   const callId = relayCallId();
-  const call = makeRelayCall(peerRecord, { callId, mode, metadata });
+  const config = typeof buildIceConfigFor === 'function'
+    ? await buildIceConfigFor(peerRecord).catch(() => null)
+    : null;
+  const call = makeRelayCall(peerRecord, { callId, mode, metadata, config });
+  const relayOnly = config?.iceTransportPolicy === 'relay';
   try {
     for (const track of stream?.getTracks?.() || []) addLocalTrack(call.peerConnection, track, stream);
     const offer = await call.peerConnection.createOffer();
     const sdp = typeof preferCallCodecs === 'function' ? preferCallCodecs(offer.sdp) : offer.sdp;
     await call.peerConnection.setLocalDescription({ type: 'offer', sdp });
+    const offerTag = generateId('relay-call');
+    /* The far relay answers an offer for somebody who is not there with
+       target-offline. That used to be dropped, and the caller rang for the
+       full setup timeout at nobody; now the call turns into the offline ring,
+       whose invitation has already been queued with a push. */
+    if (typeof awaitTransitAnswer === 'function') {
+      awaitTransitAnswer(offerTag, 12000).then((answer) => {
+        if (answer?.type === 'error' && answer.reason === 'target-offline') call.emit('unreachable');
+      });
+    }
     const sent = sendRelayEnvelope(peerRecord, {
-      type: 'call-relay-offer', tag: generateId('relay-call'),
+      type: 'call-relay-offer', tag: offerTag,
       callId,
       sdp,
       mode,
       /* So the person being called can answer even if this is the first thing
          that has ever passed between the two of them. */
       fromHomeRelay: typeof myHomeRelay === 'function' ? myHomeRelay() : null,
+      /* The direct path to this contact failed recently: the answering side
+         gathers relay candidates only as well, so both meet on one TURN. */
+      ...(relayOnly ? { relayOnly: true } : {}),
       name: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
       peerId: chatState.peerId,
       metadata: { mode, username: chatState.profile.name, peerId: chatState.peerId, ...metadata },
@@ -383,14 +403,29 @@ function addLocalTrack(pc, track, stream) {
  * Nothing is answered here and no microphone is opened: the incoming screen is
  * raised with a call object that is ready to be answered, and answering is what
  * acceptIncomingCall already does. */
+const relayOffersBeingBuilt = new Set();
 function relayCallOfferArrived(peerRecord, payload) {
   const callId = String(payload?.callId || '');
   if (!callId || !payload?.sdp) return false;
   /* A second offer for a call already being set up is a retry, not a new call.
      Raising another incoming screen for it is how one caller turns into two. */
-  if (relayCalls().has(callId)) return true;
+  if (relayCalls().has(callId) || relayOffersBeingBuilt.has(callId)) return true;
+  relayOffersBeingBuilt.add(callId);
+  const configReady = typeof buildIceConfigFor === 'function'
+    ? buildIceConfigFor(peerRecord, { forceRelay: payload.relayOnly === true }).catch(() => null)
+    : Promise.resolve(null);
+  configReady.then((config) => {
+    relayOffersBeingBuilt.delete(callId);
+    if (relayCalls().has(callId)) return;
+    buildIncomingRelayCall(peerRecord, payload, callId, config);
+  });
+  return true;
+}
+
+function buildIncomingRelayCall(peerRecord, payload, callId, config) {
   const mode = payload.mode === 'video' ? 'video' : 'voice';
   const call = makeRelayCall(peerRecord, {
+    config,
     callId,
     mode,
     metadata: {

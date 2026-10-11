@@ -119,8 +119,20 @@ function libParityProblems() {
   return problems;
 }
 
+/* The distribution may simply launch the deployed program. Then there is
+   nothing to compare route by route — it IS the deployed relay — and what is
+   left to check is that its image carries that program and its modules. */
+const distributionSource = fs.readFileSync(path.join(ROOT, DISTRIBUTED), 'utf8');
+const delegates = /path\.join\(__dirname,\s*'\.\.',\s*'scripts',\s*'server\.js'\)/.test(distributionSource);
 const deployed = routesOf(DEPLOYED);
-const distributed = routesOf(DISTRIBUTED);
+const distributed = delegates ? new Set(deployed) : routesOf(DISTRIBUTED);
+if (delegates) {
+  const image = fs.readFileSync(path.join(ROOT, 'standalone-relay/Dockerfile.relay'), 'utf8');
+  if (!/^COPY\s+scripts\/server\.js\s+\S+$/m.test(image)) {
+    console.log('\n  standalone-relay/Dockerfile.relay launches scripts/server.js but does not copy it\n');
+    process.exit(1);
+  }
+}
 const libProblems = libParityProblems();
 
 const missingFromDeployed = [...distributed].filter((route) => !deployed.has(route)).sort();

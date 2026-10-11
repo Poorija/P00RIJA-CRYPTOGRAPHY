@@ -168,8 +168,14 @@ console.log('\nWhat may be routed on');
     'an address with nothing to seal to is not one');
   ok(routableHomeRelay({ homeRelay: from(RELAY_IR, ID_IR, 'session') })?.origin === RELAY_IR,
     'so is something said inside a session');
-  ok(routableHomeRelay({ homeRelay: from(RELAY_IR, ID_IR, 'presence') }) === null,
-    'a hello is NOT an address, however convenient that would be');
+  /* A presence-rank route IS routed on: a contact whose relay is known only
+     from their relay's own answer (route discovery) still lives there, and
+     refusing to route strands their mail on a relay they never visit. What
+     keeps a hint honest is the ladder: it can never displace a card or a
+     session (betterHomeRelay, checked above), and it is never passed on as a
+     card (contactShareText, below). */
+  ok(routableHomeRelay({ homeRelay: from(RELAY_IR, ID_IR, 'presence') })?.source === 'presence',
+    'a relay-answered route is routed on, and stays marked as the weakest kind');
   ok(routableHomeRelay({ homeRelay: { origin: RELAY_IR, id: '', source: 'card' } }) === null,
     'and neither is an origin with no relay identity to seal to');
   ok(routableHomeRelay({}) === null, 'a contact with nothing recorded is not routable');

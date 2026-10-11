@@ -483,6 +483,11 @@ function shouldShowConversation(record) {
 if (!record) return false;
 if (record.system || record.type) return true;
 const key = getConversationKey(record);
+/* Somebody known only from a group's member cards is a member of that group,
+   not a conversation: a session key minted to write to them in the group
+   does not make them one. They appear once there is something between them
+   and this account, or the person opens them. */
+if (record.groupMember && !record.manual && !record.pinned && !conversationHistory(record).length && chatState.activeConversationId !== key) return false;
 return Boolean(record.manual || record.pinned || conversationHistory(record).length > 0 || chatState.sessionKeys[record.peerId] || chatState.sessionKeys[record.fingerprint] || chatState.activeConversationId === key);
 }
 function nextPinOrder() {

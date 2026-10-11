@@ -177,7 +177,9 @@ console.log('\n===== nobody answers =====');
    tested. The caller had no timer at all: it rang until somebody pressed the
    button. */
 const ringLimit = await A.evaluate(() => window.__ringTimeoutProbe?.() || 0);
-check('there is a ring timeout, and it is forty seconds', ringLimit === 40000, `${ringLimit}ms`);
+/* Two minutes since 2.98.21 (8b80c4d): long enough for a push to wake a
+   phone and a person to reach it, which forty seconds was not. */
+check('there is a ring timeout, and it is two minutes', ringLimit === 120000, `${ringLimit}ms`);
 await placeCall(A, fpB, 'voice');
 await A.waitForTimeout(2500);
 const started = await state(A);

@@ -34,13 +34,18 @@ const DIAL_TIMEOUT_MS = 15000;
 const HANDSHAKE_TIMEOUT_MS = 10000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 60000;
-const HEARTBEAT_MS = 25000;
+/* Ten seconds, three misses: a dead link is noticed in about thirty seconds.
+   It was twenty-five and two, which let a link black-holed by a NAT table
+   expiring keep answering "up" for up to seventy-five seconds — measured on
+   the Finland↔Iran link on 2026-10-10, where every envelope handed to it in
+   that window sat in a socket nobody was reading until its wait ran out and
+   the sender was told it had failed. A ping is a few bytes; the cost of the
+   shorter beat is nothing next to a minute of silently lost messages. */
+const HEARTBEAT_MS = 10000;
 /* How many heartbeats a link may hear nothing back on before it is declared
-   dead. Two is about a minute of silence — long enough that a busy relay
-   answers the odd ping late, short enough that a link black-holed by a NAT
-   retable or a paused machine is redialled while the envelopes it was asked
-   to carry are still worth delivering. */
-const MISSED_PONGS_LIMIT = 2;
+   dead. Three at ten seconds tolerates a busy relay answering the odd ping
+   late without letting a dead one linger. */
+const MISSED_PONGS_LIMIT = 3;
 /* A frame may be up to 24 MB, so the buffer has to be allowed a few of those
    before it is judged stuck — but it must be allowed to stop somewhere. A far
    end that stopped reading turns an unbounded buffer into an unbounded
@@ -213,18 +218,26 @@ function createRelayPeers({
     return null;
   }
 
-  function wrap(socket, peerId, key, role, hybrid = false) {
+  function wrap(socket, peerId, key, role, hybrid = false, peerKey = '') {
     const cipher = linkCipher(key, role);
     let alive = true;
     const link = {
       peerId,
       role,
+      /* The far relay's public identity key, as proven in the handshake. Kept
+         so this relay can tell its own clients how to seal to a relay it is
+         linked with (GET /transit-peers) without anybody fetching it again. */
+      peerKey: String(peerKey || ''),
       /* Whether the post-quantum half was in play. Reported rather than
          assumed: a link that quietly fell back to classical looks identical
          to one that never had the option. */
       hybrid,
       openedAt: now(),
       isOpen: () => alive && socket.readyState === 1,
+      /* How much this link already has queued and unsent. The carrier reads
+         it to refuse with a retryable "busy" while the far side catches up,
+         rather than piling a file's worth of chunks behind a slow border. */
+      bufferedBytes: () => Number(socket.bufferedAmount || 0),
       send(payload) {
         if (!link.isOpen()) return false;
         /* The client sockets have a buffered-amount guard that cuts a peer
@@ -340,14 +353,17 @@ function createRelayPeers({
             return refuse(1008, 'not allowed');
           }
           state = answered.state;
+          /* answerLink has proven that this key hashes to the id it allowed. */
+          state.peerKeyData = String(message?.fromKey || '');
           socket.send(JSON.stringify({ t: 'proof', ...answered.proof }));
           return;
         }
         if (state && message?.t === 'confirm') {
+          const helloKey = state.peerKeyData || '';
           const { key, hybrid } = confirmLink(state, message);
           clearTimer(timer);
           settled = true;
-          const link = wrap(socket, state.peerId, key, 'answerer', hybrid);
+          const link = wrap(socket, state.peerId, key, 'answerer', hybrid, helloKey);
           log.log?.(`[Transit] link up (inbound) with ${state.peerId.slice(0, 12)}`
             + `${hybrid ? ', hybrid post-quantum' : ', classical only'}`);
           register(link);
@@ -419,7 +435,7 @@ function createRelayPeers({
             clearTimer(giveUp);
             socket.removeAllListeners('close');
             socket.removeAllListeners('error');
-            resolve(wrap(socket, finished.peerId, finished.key, 'dialer', finished.hybrid));
+            resolve(wrap(socket, finished.peerId, finished.key, 'dialer', finished.hybrid, bundle.publicKey));
           } catch (error) { fail(error); }
         });
       });
@@ -487,6 +503,7 @@ function createRelayPeers({
       id,
       origin: dialOrigins.get(id) || '',
       linked: Boolean(linkFor(id)),
+      key: linkFor(id)?.peerKey || '',
       role: outbound.get(id)?.isOpen() ? 'dialer' : (inbound.get(id)?.size ? 'answerer' : 'none'),
     }));
   }
