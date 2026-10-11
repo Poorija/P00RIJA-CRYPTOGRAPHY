@@ -1,3 +1,47 @@
+# P00RIJA Cryptography 2.98.30
+
+Version 2.98.30 · build chat-v123
+
+نوار قالب‌بندی حالا جایی می‌نشیند که منوی کپی و چسباندن خود گوشی رویش نیاید، چه آن
+منو بالای متن انتخاب‌شده باز شود چه پایینش. متن هر بخش اول فارسی است و بعد انگلیسی.
+تغییرات نسخه‌های 2.98.29 و 2.98.28 پایین‌تر آمده‌اند.
+
+The formatting bar now sits where the phone's own copy-and-paste menu cannot
+cover it, whether that menu opens above the selection or below it. Each section
+is Persian first, English after. The changes in 2.98.29 and 2.98.28 follow below.
+
+---
+
+## جای نوار قالب‌بندی · Where the formatting bar sits
+
+- **منوی سیستم دیگر رویش نمی‌آید** — iOS منوی Cut/Copy/Paste را گاهی بالای متن
+  انتخاب‌شده باز می‌کند و گاهی پایینش، حتی برای همان انتخاب. در 2.98.29 نوار زیر کادر
+  بود و منوی پایینی آن را می‌پوشاند. حالا نوار بالای کادر شناور است و به اندازهٔ ارتفاع آن
+  منو بالاتر از خطِ انتخاب‌شده می‌ایستد: منوی بالایی در فاصلهٔ بین کادر و نوار باز
+  می‌شود و منوی پایینی اصلاً به آن نمی‌رسد. جای کافی برای متن بزرگ‌تر سیستم هم در نظر
+  گرفته شده.
+- **فاصله از روی خطِ انتخاب‌شده حساب می‌شود** — وقتی متن چندخطی است و انتخاب در
+  خطوط پایین‌تر است، منو داخل خود کادر باز می‌شود و نوار نزدیک کادر می‌آید. از بالای
+  فهرست پیام‌ها هم بالاتر نمی‌رود.
+- **کادر تکان نمی‌خورد** — نوار روی صفحه شناور است، پس با ظاهر شدنش متنی که در حال
+  انتخاب آن هستید جابه‌جا نمی‌شود.
+- روی دسکتاپ که منوی سیستمی در کار نیست، نوار درست بالای کادر می‌نشیند.
+
+- **The system menu no longer covers it**: iOS opens Cut/Copy/Paste above the
+  selection or below it, even for the same selection. In 2.98.29 the bar sat
+  under the box, where the menu below covered it. The bar now floats above the
+  box and keeps the menu's height clear above the selected line: a menu that
+  opens above lands in the gap between the box and the bar, and one that opens
+  below never reaches it. There is room for a larger system text size too.
+- **Measured from the selected line**: when the text runs over several lines and
+  the selection is on a lower one, the menu opens inside the box and the bar
+  comes down to it. It never rises past the top of the messages.
+- **The box stays still**: the bar floats over the page, so showing it never
+  moves the text being selected.
+- On a desktop, with no system menu to clear, the bar sits just above the box.
+
+---
+
 # P00RIJA Cryptography 2.98.29
 
 Version 2.98.29 · build chat-v122

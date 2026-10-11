@@ -440,9 +440,16 @@ document.getElementById('chatComposer')?.addEventListener('keydown', (event) => 
 /* ---- the formatting bar ---------------------------------------------------- */
 
 /* A phone has no Ctrl key, so the same markers are a tap away whenever text
-   in the composer is selected. The bar sits BELOW the input: the system's
-   own copy-and-paste menu opens above a selection, and a bar there would be
-   underneath it — with a tap meant for Bold landing on Copy. */
+   in the composer is selected. Where the bar goes is decided by the phone's
+   own copy-and-paste menu, which iOS and Android open just above the
+   selection or, when they choose, just below it — never over the selected
+   text itself, and never further than its own height away. Measured on an
+   iPhone: about 44px of menu plus the selection handle, 60px in all; the
+   clearance below adds room for a larger system text size, which makes the
+   menu taller. So the bar floats above the input and keeps that much clear
+   above the first selected line: a menu that opens above lands in the gap,
+   and one that opens below is nowhere near. A bar below the input was covered by the second
+   kind; one right on top of the input, by the first. */
 const FORMAT_LABELS = {
   '*': ['پررنگ', 'Bold', 'B'],
   _: ['کج', 'Italic', 'I'],
@@ -452,6 +459,8 @@ const FORMAT_LABELS = {
   clear: ['حذف قالب', 'Clear formatting', ''],
 };
 const formatBarState = { pointerDown: false, timer: 0, hideTimer: 0, watch: 0, last: null };
+const FORMAT_MENU_CLEARANCE = 76;
+const FORMAT_BAR_GAP = 8;
 
 function formatShortcutLabel(key) {
   if (!key) return '';
@@ -470,26 +479,73 @@ function labelFormatBar(bar) {
   });
 }
 
+/* The top of the line the selection starts on, in viewport pixels. A
+   textarea does not say where its text is, so a hidden copy with the same
+   box and font is laid out up to the selection and measured. */
+function selectionLineTop(box) {
+  const style = getComputedStyle(box);
+  const mirror = document.createElement('div');
+  ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderStyle',
+    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'wordSpacing',
+    'lineHeight', 'textTransform', 'textIndent', 'direction', 'tabSize'].forEach((prop) => { mirror.style[prop] = style[prop]; });
+  Object.assign(mirror.style, {
+    position: 'absolute', visibility: 'hidden', top: '0', left: '-9999px',
+    whiteSpace: 'pre-wrap', overflowWrap: 'break-word', height: 'auto', overflow: 'hidden',
+  });
+  const start = box.selectionStart ?? 0;
+  mirror.textContent = box.value.slice(0, start);
+  const mark = document.createElement('span');
+  mark.textContent = box.value.slice(start, start + 1) || '.';
+  mirror.appendChild(mark);
+  document.body.appendChild(mirror);
+  const offset = mark.offsetTop + (parseFloat(style.borderTopWidth) || 0);
+  mirror.remove();
+  return box.getBoundingClientRect().top + offset - box.scrollTop;
+}
+
+/* Sets how far above the input the bar floats. With a fine pointer there is
+   no system menu to clear and the bar sits just above the input. On a touch
+   screen it keeps FORMAT_MENU_CLEARANCE clear above the selection's first
+   line — less when that line is low in a tall input, since the menu then
+   opens inside the input. It never climbs past the top of the messages. */
+function positionFormatBar(bar, box) {
+  const surface = bar.parentElement;
+  if (!surface) return;
+  const surfaceTop = surface.getBoundingClientRect().top;
+  let lift = FORMAT_BAR_GAP;
+  if (window.matchMedia?.('(pointer: coarse)')?.matches) {
+    const lineTop = selectionLineTop(box);
+    lift = Math.max(FORMAT_BAR_GAP, FORMAT_MENU_CLEARANCE - (lineTop - surfaceTop));
+  }
+  const pane = document.getElementById('chatMessages')?.getBoundingClientRect();
+  const height = bar.getBoundingClientRect().height || 48;
+  if (pane && pane.height > 0) {
+    const room = surfaceTop - pane.top - height - 4;
+    lift = Math.max(FORMAT_BAR_GAP, Math.min(lift, room));
+  }
+  bar.style.setProperty('--format-lift', `${Math.round(lift)}px`);
+}
+
 function setFormatBarVisible(bar, show) {
   if (bar.classList.contains('hidden') === !show) return;
   bar.classList.toggle('hidden', !show);
-  if (show) labelFormatBar(bar);
+  if (show) {
+    labelFormatBar(bar);
+    const box = document.getElementById('chatComposer');
+    if (box) positionFormatBar(bar, box);
+  }
   /* Sending, switching conversation or restoring a draft all rewrite the
      composer without an event the bar hears, so while it is up it checks the
      selection it belongs to is still there. */
   window.clearInterval(formatBarState.watch);
   formatBarState.watch = show ? window.setInterval(() => syncFormatBar(true), 300) : 0;
-  /* The bar changes the composer's height; on a phone the layout pinned to
-     the keyboard has to hear about it the way it hears about a new line. */
-  if (document.activeElement?.id === 'chatComposer' && typeof syncComposerViewportFocus === 'function') {
-    syncComposerViewportFocus(true, true);
-  }
 }
 
 /* `now` skips the settle delay. Showing waits for the selection to stop
-   moving — a phone's selection handles move it continuously, and a bar that
-   appeared mid-drag would shift the text under the finger. Hiding and
-   relabelling a bar that is already up happen at once. */
+   moving — a phone's selection handles move it continuously, and the system
+   menu only settles where it will stay once they stop. Hiding, and following
+   a selection the bar is already up for, happen at once. */
 function syncFormatBar(now = false) {
   const bar = document.getElementById('chatFormatBar');
   const box = document.getElementById('chatComposer');
@@ -513,7 +569,10 @@ function syncFormatBar(now = false) {
       button.setAttribute('aria-pressed', state.active.has(marker) ? 'true' : 'false');
     }
   });
-  if (!bar.classList.contains('hidden')) return;
+  if (!bar.classList.contains('hidden')) {
+    positionFormatBar(bar, box);
+    return;
+  }
   if (now) {
     setFormatBarVisible(bar, true);
     return;

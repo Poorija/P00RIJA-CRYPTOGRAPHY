@@ -27409,29 +27409,26 @@ html.screen-shield body::after {
 html:not(.dark) .chat-link-preview { background: rgb(241 245 249); }
 html:not(.dark) .chat-link-preview-chip { background: rgb(248 250 252); }
 
-/* The formatting bar (45-text-format.js). It takes a row of the composer
-   grid below the input — row 4, so it stays below the input whichever of the
-   pickers has pushed the input down to row 3; an empty row collapses since
-   the grid has no row gap. The bar's own height is let out of the composer's
-   cap the same way the pickers' is. */
-html body #mainApp #content-chat footer.chat-composer-bar > #chatFormatBar {
-  grid-row: 4 !important;
-  grid-column: 1 / -1 !important;
-}
-html body #mainApp #content-chat footer.chat-composer-bar:has(> #chatFormatBar:not(.hidden)) {
-  max-height: none !important;
-  height: auto !important;
+/* The formatting bar (45-text-format.js). It floats above the input, out of
+   the composer's grid, so showing it never moves the text being selected.
+   How high is --format-lift, set from where the selection's first line is:
+   high enough that the phone's own edit menu, when it opens above that line,
+   opens in the gap between the input and the bar rather than over the bar. */
+html body #mainApp #content-chat .chat-composer-surface > #chatFormatBar {
+  position: absolute;
+  bottom: calc(100% + var(--format-lift, 0.5rem));
+  inset-inline: 0;
+  z-index: 58;
 }
 html body #mainApp #content-chat .chat-format-bar {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  margin-top: 0.4rem;
   padding: 0.25rem;
   border-radius: 0.9rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: color-mix(in srgb, var(--app-bg, #0f172a) 92%, #94a3b8);
-  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.28);
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.45);
   animation: chatFormatIn 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 html body #mainApp #content-chat .chat-format-bar.hidden { display: none; }
@@ -27482,6 +27479,6 @@ html:not(.dark) body #mainApp #content-chat .chat-format-btn[aria-pressed="true"
 /* With room to spare the bar is a compact strip at the start of the line
    rather than six buttons spread across a wide composer. */
 @media (min-width: 768px) {
-  html body #mainApp #content-chat .chat-format-bar { justify-self: start; width: max-content; }
+  html body #mainApp #content-chat .chat-composer-surface > #chatFormatBar { inset-inline-end: auto; width: max-content; }
   html body #mainApp #content-chat .chat-format-btn { flex: 0 0 2.6rem; min-width: 2.6rem; }
 }

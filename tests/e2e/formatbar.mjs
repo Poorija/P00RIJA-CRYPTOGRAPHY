@@ -10,8 +10,11 @@
 
 /* The formatting bar, on a phone first and then on a desktop.
  *
- *   - it appears below the input while text is selected, and only once the
- *     selection stops moving, so the text never jumps under a finger;
+ *   - it appears while text is selected, once the selection stops moving,
+ *     floating above the input without moving it, and high enough that the
+ *     phone's own edit menu fits between them when it opens above the
+ *     selection (it opens below just as often, which is why the bar is not
+ *     under the input);
  *   - a tap formats the selection without taking the keyboard away, a second
  *     tap takes the format off, formats stack in an order that renders, and
  *     the phone's own undo still works;
@@ -67,6 +70,7 @@ try {
   await sleep(600);
   await write(P, 'Hello there friend');
   check('no bar while nothing is selected', (await barShown(P)) === false);
+  const inputBefore = await P.evaluate(() => JSON.stringify(document.querySelector('.chat-composer-surface').getBoundingClientRect()));
 
   /* A finger still down on the input is a selection still being made. */
   await P.evaluate(() => {
@@ -79,13 +83,23 @@ try {
   await P.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' })));
   check('the bar appears once the selection is made', await waitFor(P, () => !document.getElementById('chatFormatBar').classList.contains('hidden'), { timeoutMs: 3000 }));
 
-  const place = await P.evaluate(() => {
+  const geometry = () => P.evaluate(() => {
     const bar = document.getElementById('chatFormatBar').getBoundingClientRect();
     const input = document.querySelector('.chat-composer-surface').getBoundingClientRect();
-    return { below: bar.top >= input.bottom - 1, inside: bar.left >= 0 && bar.right <= window.innerWidth, scroll: document.documentElement.scrollWidth <= window.innerWidth, tall: bar.height };
+    const pane = document.getElementById('chatMessages').getBoundingClientRect();
+    const line = selectionLineTop(document.getElementById('chatComposer'));
+    return {
+      barTop: Math.round(bar.top), barBottom: Math.round(bar.bottom), inputTop: Math.round(input.top), line: Math.round(line), paneTop: Math.round(pane.top),
+      inside: bar.left >= 0 && bar.right <= window.innerWidth, scroll: document.documentElement.scrollWidth <= window.innerWidth,
+    };
   });
-  check('it sits below the input, where the system copy menu does not open', place.below, JSON.stringify(place));
+  let place = await geometry();
+  check('showing it does not move the input', inputBefore === await P.evaluate(() => JSON.stringify(document.querySelector('.chat-composer-surface').getBoundingClientRect())));
+  check('it floats above the input, so a system menu opening below the selection cannot reach it', place.barBottom <= place.inputTop, JSON.stringify(place));
+  check('with room above the selected line for a system menu opening there (60px on an iPhone)', place.line - place.barBottom >= 70, JSON.stringify(place));
+  check('and stays inside the messages area', place.barTop >= place.paneTop, JSON.stringify(place));
   check('and fits a narrow phone without scrolling sideways', place.inside && place.scroll, JSON.stringify(place));
+  const oneLineGap = place.inputTop - place.barBottom;
   const sizes = await P.evaluate(() => [...document.querySelectorAll('#chatFormatBar [data-format]')].map((b) => Math.round(Math.min(b.getBoundingClientRect().width, b.getBoundingClientRect().height))));
   check('every button is big enough for a thumb', sizes.every((s) => s >= 36), sizes.join(','));
   const touchTitle = await P.evaluate(() => document.querySelector('#chatFormatBar [data-format="*"]').title);
@@ -126,6 +140,11 @@ try {
   state = await composer(P);
   check('part of a word is made bold as the whole word, the only way it renders', state.value === 'Hello *there* friend', state.value);
 
+  await write(P, 'first line\nsecond line\nthird line');
+  await P.evaluate(() => document.getElementById('chatComposer').setSelectionRange(23, 28));
+  await waitFor(P, () => !document.getElementById('chatFormatBar').classList.contains('hidden'), { timeoutMs: 3000 });
+  place = await geometry();
+  check('when the selected line is low in a tall input, the menu opens inside the input and the bar comes down to it', place.inputTop - place.barBottom < oneLineGap / 2 && place.line - place.barBottom >= 70, JSON.stringify(place));
   await write(P, 'first line\nsecond line');
   await P.evaluate(() => document.getElementById('chatComposer').setSelectionRange(0, 22));
   await waitFor(P, () => !document.getElementById('chatFormatBar').classList.contains('hidden'), { timeoutMs: 3000 });
@@ -178,6 +197,12 @@ try {
   await write(D, 'ship it today');
   await select(D, 'it');
   check('the bar comes up for a mouse selection too', await waitFor(D, () => !document.getElementById('chatFormatBar').classList.contains('hidden'), { timeoutMs: 3000 }));
+  const deskPlace = await D.evaluate(() => {
+    const bar = document.getElementById('chatFormatBar').getBoundingClientRect();
+    const input = document.querySelector('.chat-composer-surface').getBoundingClientRect();
+    return Math.round(input.top - bar.bottom);
+  });
+  check('with a mouse there is no system menu to clear, and the bar sits just above the input', deskPlace >= 4 && deskPlace <= 12, String(deskPlace));
   const deskTitle = await D.evaluate(() => document.querySelector('#chatFormatBar [data-format="*"]').title);
   check('and each button names its shortcut', /Bold \((Ctrl\+B|⌘B)\)/.test(deskTitle), deskTitle);
   await D.keyboard.press('Control+b');

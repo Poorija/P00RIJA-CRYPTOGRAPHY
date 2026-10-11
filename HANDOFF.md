@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.29**
+نسخهٔ این پکیج: **2.98.30**
 
 </div>
 
@@ -458,13 +458,16 @@ lib.rs; `create: false` in `tauri.windows.conf.json` and `tauri.linux.conf.json`
 because a webview takes its proxy only as it is created. macOS and the phones
 still create it from `tauri.conf.json`.
 
-**The formatting bar is below the input on purpose** (2.98.29, `#chatFormatBar`,
-row 4 of the composer grid). The phone's own copy/paste menu opens above a
-selection; a bar above the input sat under it and a tap meant for Bold landed
-on Copy. It appears only once the selection stops moving, because a bar that
-appears mid-drag shifts the text under the finger. Its edits go through
-`document.execCommand('insertText')` so the phone's undo keeps working — do not
-replace that with `box.value =`.
+**Where the formatting bar floats is measured, not chosen** (2.98.30,
+`#chatFormatBar`, `positionFormatBar`). The phone's own copy/paste menu opens
+just above a selection or just below it — iOS picks either, for the same
+selection — so a bar under the input (2.98.29) was covered by the second kind
+and a bar right on top of the input by the first. The bar floats above the
+input, keeping `FORMAT_MENU_CLEARANCE` clear above the selection's first line
+(`selectionLineTop` lays out a hidden copy of the textarea to find it). It is
+absolutely positioned so showing it never moves the text being selected. Its
+edits go through `document.execCommand('insertText')` so the phone's undo keeps
+working — do not replace that with `box.value =`.
 
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted
