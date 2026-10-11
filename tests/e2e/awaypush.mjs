@@ -67,7 +67,7 @@ const openPeer = (name) => new Promise((resolve, reject) => {
   ws.on('open', () => {
     ws.send(JSON.stringify({ type: 'hello', username: name, peerId, fingerprint, publicKeyData }));
     const waitForProof = (tries = 0) => {
-      if (verified || tries > 40) return resolve({ ws, inbox, fingerprint, peerId, name });
+      if (verified || tries > 40) return resolve({ ws, inbox, fingerprint, peerId, name, publicKeyData, privateKey });
       setTimeout(() => waitForProof(tries + 1), 100);
     };
     waitForProof();
@@ -116,9 +116,19 @@ const pushed = [];
 const fakeVendor = net.createServer((socket) => { pushed.push(Date.now()); socket.on('error', () => {}); socket.destroy(); });
 await new Promise((resolve) => fakeVendor.listen(0, resolve));
 const vendorPort = fakeVendor.address().port;
+/* A subscription has to prove the key it names, the way the app does it:
+   the relay seals a nonce to the key and only the holder can hand it back. */
+const challenge = await (await fetch(`${RELAY}/push/challenge`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ fingerprint: B.fingerprint, publicKeyData: B.publicKeyData }),
+})).json();
+const proofNonce = crypto.privateDecrypt(
+  { key: B.privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+  Buffer.from(String(challenge.cipher || ''), 'base64'),
+).toString('base64');
 await fetch(`${RELAY}/push/subscribe`, {
   method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ fingerprint: B.fingerprint, ttlDays: 30, lang: 'en', subscription: {
+  body: JSON.stringify({ fingerprint: B.fingerprint, challengeId: challenge.challengeId, nonce: proofNonce, ttlDays: 30, lang: 'en', subscription: {
     endpoint: `http://localhost:${vendorPort}/send/awayprobe`,
     keys: { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM=', auth: 'tBHItJI5svbpez7KI4CCXg==' } } }),
 });

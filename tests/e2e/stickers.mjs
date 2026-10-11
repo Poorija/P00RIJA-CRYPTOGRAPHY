@@ -94,6 +94,10 @@ await B.waitForTimeout(3500);
 await B.fill('#chatComposer', 'hello-for-pairing');
 await B.click('#chatSendMessageBtn');
 await A.waitForTimeout(5000);
+/* A never added B, so B's first message is a message request: A accepts it,
+   the way a person would, before it shows in the list (49-message-requests.js). */
+await A.evaluate(() => { allConversationRecords().filter((r) => isMessageRequest(r)).forEach((r) => acceptMessageRequest(r)); });
+await A.waitForTimeout(800);
 await A.evaluate(() => document.querySelector('.chat-peer-card, [data-conversation-key]')?.click());
 await A.waitForTimeout(3000);
 check('peers paired', (await A.evaluate(() => [...document.querySelectorAll('.chat-message-text')].map(e=>e.textContent.trim()))).some(t=>t.includes('hello-for-pairing')));

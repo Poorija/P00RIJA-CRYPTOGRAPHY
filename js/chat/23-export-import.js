@@ -573,6 +573,7 @@ return allConversationRecords().filter((record) => record.archived && shouldShow
 }
 function toggleArchivedView() {
 chatState.showArchived = !chatState.showArchived;
+if (chatState.showArchived) chatState.showRequests = false;
 renderPeers();
 }
 
@@ -602,7 +603,7 @@ entry.type === 'rich' ? richEntryLabel(entry) : '',
 ].filter(Boolean).join(' ');
 }
 function notificationMessageLabel(entry = {}) {
-if (entry.type === 'text') return entry.text || t('پیام جدید', 'New message');
+if (entry.type === 'text') return (typeof plainMessageText === 'function' ? plainMessageText(entry.text) : entry.text) || t('پیام جدید', 'New message');
 if (entry.type === 'voice') return t('پیام صوتی جدید', 'New voice message');
 if (entry.type === 'sticker') return mediaEntryLabel(entry);
 if (entry.type === 'file') return entry.name || t('فایل جدید', 'New file');

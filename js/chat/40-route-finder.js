@@ -292,8 +292,13 @@ async function resendParkedMessages(peerRecord) {
      frees the recipient's mailbox there and keeps the relay from holding
      anything it no longer needs to. */
   if (withdrawTags.length && chatState.ws?.readyState === WebSocket.OPEN) {
+    /* A sealed envelope is not filed under its sender, so it is taken back by
+       a secret only the sender can derive for that message (51-envelope-privacy.js). */
+    const secrets = typeof withdrawSecretFor === 'function'
+      ? await Promise.all(withdrawTags.map((tag) => withdrawSecretFor(tag)))
+      : [];
     try {
-      chatState.ws.send(JSON.stringify({ type: 'relay-withdraw', toFingerprint: peerRecord.fingerprint, tags: withdrawTags }));
+      chatState.ws.send(JSON.stringify({ type: 'relay-withdraw', toFingerprint: peerRecord.fingerprint, tags: withdrawTags, secrets }));
     } catch (_error) { /* retention sweeps them in the end */ }
   }
   if (resent) console.log(`[Route] re-sent ${resent} parked message(s) to ${String(peerRecord.fingerprint).slice(0, 12)} over the relay link`);

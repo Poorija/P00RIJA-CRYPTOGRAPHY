@@ -144,8 +144,14 @@ async function buildIceConfigFor(peerRecord, { forceRelay = false } = {}) {
   config.iceServers = typeof orderIceServersFor === 'function'
     ? orderIceServersFor(peerRecord?.fingerprint, servers)
     : servers;
+  /* Behind a proxy, media must not take a direct UDP path the proxy cannot
+     carry (53-native-proxy.js). */
   const relayOnly = forceRelay || directRecentlyFailed(peerRecord?.fingerprint);
   if (relayOnly && configHasTurn(config)) config.iceTransportPolicy = 'relay';
+  /* Behind a proxy it is relay-only whether or not there is a TURN to relay
+     through: without one the connection fails, which is better than a
+     direct path that shows this device's address (53-native-proxy.js). */
+  if (chatState.nativeProxyActive) config.iceTransportPolicy = 'relay';
   return config;
 }
 
@@ -155,7 +161,8 @@ async function buildIceConfigFor(peerRecord, { forceRelay = false } = {}) {
 function applyPathPolicyToPeerOptions(peerRecord) {
   const config = chatState.peer?.options?.config;
   if (!config) return;
-  const relayOnly = directRecentlyFailed(peerRecord?.fingerprint) && configHasTurn(config);
+  const relayOnly = (directRecentlyFailed(peerRecord?.fingerprint) && configHasTurn(config))
+    || Boolean(chatState.nativeProxyActive);
   if (relayOnly) config.iceTransportPolicy = 'relay';
   else delete config.iceTransportPolicy;
 }

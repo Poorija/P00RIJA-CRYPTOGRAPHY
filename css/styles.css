@@ -27193,3 +27193,218 @@ html body #mainApp #content-chat .chat-space-member-avatar.is-tappable { cursor:
   background: rgb(12 74 110 / 0.35);
   border: 1px solid rgb(56 189 248 / 0.35);
 }
+
+/* ============================================================================
+   Formatted message text (45-text-format.js): code, links and spoilers.
+   ============================================================================ */
+.chat-message-text strong { font-weight: 800; }
+.chat-message-text s { opacity: 0.75; }
+.chat-msg-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: rgb(15 23 42 / 0.45);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.chat-msg-pre {
+  margin: 0.3rem 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  background: rgb(15 23 42 / 0.55);
+  overflow-x: auto;
+  max-width: 100%;
+  direction: ltr;
+  text-align: left;
+  white-space: pre;
+}
+.chat-msg-pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+}
+.chat-msg-link {
+  color: rgb(125 211 252);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.chat-spoiler {
+  border-radius: 0.3rem;
+  background: currentColor;
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.chat-spoiler * { color: transparent !important; background: transparent !important; }
+.chat-spoiler.is-revealed {
+  background: rgb(148 163 184 / 0.18);
+  color: inherit;
+  cursor: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.chat-spoiler.is-revealed * { color: inherit !important; }
+
+/* Saved Messages (46-saved-messages.js): a bookmark where a face would be. */
+.chat-peer-avatar.is-saved,
+.chat-saved-avatar {
+  background: linear-gradient(135deg, rgb(14 165 233), rgb(99 102 241)) !important;
+  color: white !important;
+}
+.chat-peer-presence-dot.is-saved { display: none !important; }
+.chat-peer-avatar.is-saved::after { display: none !important; }
+.chat-peer-status-badge.chat-saved-badge {
+  color: rgb(125 211 252);
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Scheduled messages (47-scheduled-send.js). */
+.chat-scheduled-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgb(253 224 71);
+  background: rgb(113 63 18 / 0.35);
+  border: 1px solid rgb(250 204 21 / 0.35);
+  cursor: pointer;
+}
+.chat-scheduled-chip.is-elsewhere { color: rgb(203 213 225); background: rgb(51 65 85 / 0.4); border-color: rgb(148 163 184 / 0.35); }
+.chat-msg-status.is-scheduled { opacity: 0.85; }
+.chat-schedule-modal { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.chat-schedule-backdrop { position: absolute; inset: 0; background: rgb(2 6 23 / 0.6); }
+.chat-schedule-card {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgb(15 23 42);
+  color: rgb(226 232 240);
+  border: 1px solid rgb(51 65 85);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+}
+.chat-schedule-card header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.chat-schedule-card h4 { font-weight: 800; font-size: 1rem; }
+.chat-schedule-preview { font-size: 0.8rem; opacity: 0.75; margin-bottom: 0.7rem; overflow-wrap: anywhere; }
+.chat-schedule-quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; margin-bottom: 0.7rem; }
+.chat-schedule-quick button {
+  padding: 0.5rem; border-radius: 0.6rem; font-size: 0.8rem; font-weight: 700;
+  background: rgb(30 41 59); border: 1px solid rgb(71 85 105 / 0.7);
+}
+.chat-schedule-quick button:hover { border-color: rgb(56 189 248); }
+.chat-schedule-custom { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; }
+.chat-schedule-custom input {
+  padding: 0.45rem 0.55rem; border-radius: 0.55rem; background: rgb(2 6 23); color: inherit;
+  border: 1px solid rgb(71 85 105); color-scheme: dark;
+}
+.chat-schedule-note { font-size: 0.72rem; line-height: 1.7; opacity: 0.7; margin: 0.7rem 0; }
+.chat-schedule-card footer { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.chat-schedule-confirm { padding: 0.45rem 1rem; border-radius: 0.6rem; font-weight: 800; background: rgb(14 165 233); color: white; }
+html:not(.dark) .chat-schedule-card { background: white; color: rgb(15 23 42); border-color: rgb(226 232 240); }
+html:not(.dark) .chat-schedule-quick button { background: rgb(241 245 249); border-color: rgb(203 213 225); }
+html:not(.dark) .chat-schedule-custom input { background: white; color-scheme: light; border-color: rgb(203 213 225); }
+.chat-forwarded-from { font-size: 0.7rem; font-weight: 700; opacity: 0.7; margin-bottom: 0.2rem; }
+.chat-forwarded-from i { font-size: 0.65rem; margin-inline-end: 0.2rem; }
+
+/* Scan-to-verify (48-key-verify.js). */
+.chat-verified-badge { color: rgb(52 211 153); font-size: 0.75rem; }
+.chat-key-alert-strict { font-weight: 700; color: rgb(254 202 202); }
+.chat-safety-qr { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid rgb(71 85 105 / 0.5); display: flex; flex-direction: column; align-items: center; gap: 0.55rem; }
+.chat-safety-qr-box { background: white; padding: 0.5rem; border-radius: 0.6rem; line-height: 0; }
+.chat-safety-qr-box canvas, .chat-safety-qr-box img, .chat-safety-qr-box svg { max-width: min(220px, 70vw); height: auto; }
+.chat-safety-qr-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
+.chat-safety-btn.is-quiet { background: transparent; border: 1px solid rgb(100 116 139 / 0.6); }
+.chat-safety-video { width: min(280px, 80vw); aspect-ratio: 1 / 1; object-fit: cover; border-radius: 0.8rem; background: black; }
+.chat-safety-scan-result { font-size: 0.78rem; line-height: 1.7; text-align: center; min-height: 1em; }
+.chat-safety-scan-result.is-bad { color: rgb(252 165 165); font-weight: 700; }
+.chat-safety-scan-result.is-warn { color: rgb(253 224 71); }
+
+/* Message requests (49-message-requests.js). */
+.chat-request-bar {
+  margin: 0.4rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.75rem;
+  background: rgb(30 41 59 / 0.9);
+  border: 1px solid rgb(250 204 21 / 0.35);
+  color: rgb(226 232 240);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+.chat-request-bar.hidden { display: none; }
+.chat-request-bar p i { color: rgb(250 204 21); margin-inline-end: 0.3rem; }
+.chat-request-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.chat-request-btn {
+  padding: 0.35rem 0.8rem; border-radius: 0.55rem; font-weight: 700; font-size: 0.78rem;
+  background: rgb(51 65 85); border: 1px solid rgb(71 85 105);
+}
+.chat-request-btn.is-accept { background: rgb(5 150 105); border-color: rgb(16 185 129); color: white; }
+.chat-request-btn.is-block { color: rgb(252 165 165); }
+.chat-request-masked { font-size: 0.78rem; opacity: 0.75; display: flex; gap: 0.4rem; align-items: center; }
+.chat-list-filter-requests i { margin-inline-end: 0.25rem; }
+html:not(.dark) .chat-request-bar { background: rgb(255 251 235); color: rgb(30 41 59); border-color: rgb(250 204 21 / 0.6); }
+html:not(.dark) .chat-request-btn { background: white; border-color: rgb(203 213 225); }
+
+/* Live location (50-live-location.js). */
+.chat-live-dot {
+  display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 999px;
+  background: rgb(239 68 68); box-shadow: 0 0 0 0 rgb(239 68 68 / 0.6);
+  animation: chat-live-pulse 1.6s ease-out infinite; margin-inline-end: 0.2rem; vertical-align: middle;
+}
+@keyframes chat-live-pulse { 0% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.6); } 100% { box-shadow: 0 0 0 0.6rem rgb(239 68 68 / 0); } }
+@media (prefers-reduced-motion: reduce) { .chat-live-dot { animation: none; } }
+.chat-live-location.is-ended .chat-location-map { filter: grayscale(1); opacity: 0.6; }
+.chat-location-btn.is-stop { color: rgb(252 165 165); border-color: rgb(248 113 113 / 0.5); }
+
+/* Screen guard (js/screen-guard.js): the whole app covered while hidden or
+   unfocused. Above everything, including modals and the call screen. */
+html.screen-shield body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgb(2 6 23 / 0.82);
+  -webkit-backdrop-filter: blur(28px);
+  backdrop-filter: blur(28px);
+  pointer-events: none;
+}
+
+/* The native proxy row (53-native-proxy.js). */
+.chat-proxy-row { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.6rem; }
+.chat-proxy-row.hidden { display: none; }
+.chat-proxy-input { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.chat-proxy-input.hidden { display: none; }
+.chat-proxy-input input { flex: 1 1 14rem; min-width: 0; }
+
+/* Link previews (54-link-preview.js). */
+.chat-link-preview {
+  display: flex; gap: 0.6rem; align-items: stretch; margin-top: 0.4rem;
+  padding: 0.45rem; border-radius: 0.65rem; text-decoration: none; color: inherit;
+  background: rgb(15 23 42 / 0.35); border-inline-start: 3px solid rgb(56 189 248);
+  max-width: 100%; overflow: hidden;
+}
+.chat-link-preview img { width: 4.5rem; height: 4.5rem; object-fit: cover; border-radius: 0.45rem; flex-shrink: 0; }
+.chat-link-preview-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.chat-link-preview-site { font-size: 0.68rem; font-weight: 700; color: rgb(125 211 252); }
+.chat-link-preview-body strong { font-size: 0.8rem; line-height: 1.4; overflow-wrap: anywhere; }
+.chat-link-preview-desc { font-size: 0.72rem; opacity: 0.75; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.chat-link-preview-chip {
+  display: flex; align-items: center; gap: 0.5rem; margin: 0 0.5rem 0.35rem;
+  padding: 0.35rem 0.5rem; border-radius: 0.6rem; font-size: 0.75rem;
+  background: rgb(30 41 59 / 0.9); border: 1px solid rgb(56 189 248 / 0.35);
+}
+.chat-link-preview-chip img { width: 2.4rem; height: 2.4rem; object-fit: cover; border-radius: 0.35rem; }
+.chat-link-preview-chip-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chat-link-preview-chip-text strong, .chat-link-preview-chip-text span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-link-preview-chip-text span { opacity: 0.7; }
+html:not(.dark) .chat-link-preview { background: rgb(241 245 249); }
+html:not(.dark) .chat-link-preview-chip { background: rgb(248 250 252); }

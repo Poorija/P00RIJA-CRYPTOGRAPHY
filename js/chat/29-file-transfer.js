@@ -266,10 +266,15 @@ function notePeerAwaitingKeyAccept(session) {
   const meta = record.meta;
   const quota = chatAutoDownloadLimitBytes();
   const isLarge = size >= LARGE_FILE_CONFIRM_BYTES;
-  let accepted = !isLarge && quota > 0 && size <= quota;
+  /* A message request is always asked about, whatever the quota. */
+  const fromRequest = typeof isMessageRequest === 'function' && isMessageRequest(findPeerBySession(session));
+  let accepted = !fromRequest && !isLarge && quota > 0 && size <= quota;
   if (!accepted) {
     const sizeText = app().formatBytes?.(size) || `${size} B`;
-    accepted = await PoorijaDialogs.confirm(t(
+    accepted = await PoorijaDialogs.confirm(fromRequest ? t(
+      `کسی که در مخاطبان شما نیست می‌خواهد فایل «${meta.name || 'فایل'}» (${sizeText}) را بفرستد. دریافت شود؟`,
+      `Someone who is not in your contacts wants to send "${meta.name || 'a file'}" (${sizeText}). Receive it?`,
+    ) : t(
       isLarge
         ? `دریافت فایل «${meta.name || 'فایل'}» (${sizeText})؟\nفایل‌های حجیم فقط وقتی هر دو نفر آنلاین باشند جابه‌جا می‌شوند.`
         : `دریافت فایل «${meta.name || 'فایل'}» (${sizeText})؟ این فایل از سهمیهٔ دانلود خودکار شما بزرگ‌تر است.`,
@@ -653,6 +658,9 @@ if (typeof chatLockEnabled === 'function' && chatLockEnabled() && !chatState.cha
 const peer = getActiveConversation();
 if (!peer?.peerId) return;
 if (typeof conversationLocked === 'function' && conversationLocked(peer.conversationId || getConversationKey(peer))) return;
+/* A message request gets no read receipt until it is accepted; the receipts
+   stay pending and go out then. */
+if (typeof isMessageRequest === 'function' && isMessageRequest(peer)) return;
 // renderMessages() runs on almost every state change; without this the same
 // pass could fire repeatedly within a frame.
 const now = Date.now();
@@ -733,7 +741,9 @@ return put();
 function safeConnectionSend(connection, payload, context = 'data') {
 if (!connection?.open) return false;
 try {
-connection.send(payload);
+/* Small frames are rounded to fixed sizes (51-envelope-privacy.js), so a
+   TURN server or anybody on the path sees a few sizes instead of lengths. */
+connection.send(typeof padLiveFrame === 'function' ? padLiveFrame(payload) : payload);
 return true;
 } catch (error) {
 console.warn(`Chat ${context} send failed:`, error);
@@ -825,7 +835,10 @@ const iv = app().generateSecureRandomBytes(12);
 /* What the return route cannot do is prove who sent it; see the trust
    ladder in 18-file-manager-2.js for what that means and why a card wins. */
 const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, envelopeKey,
-new TextEncoder().encode(JSON.stringify({ message, sessionKeyRaw, homeRelay: returnRoute })));
+/* Padded to a fixed size and carrying what this build can read
+   (51-envelope-privacy.js): the length says nothing, and the capability
+   arrives under the sender's own signature. */
+new TextEncoder().encode(paddedEnvelopeJson({ message, sessionKeyRaw, homeRelay: returnRoute, caps: localEnvelopeCaps() })));
 body = { iv: Array.from(iv), cipher: app().arrayBufferToBase64(cipher), v: 2 };
 } catch (error) {
 console.warn('[Chat] could not encrypt under the envelope key; falling back', error);
@@ -843,13 +856,14 @@ try {
    encrypted with the session key itself; enclosing it would be telling
    somebody who already has it. */
 body = await encryptForSession(session,
-new TextEncoder().encode(JSON.stringify({
+new TextEncoder().encode(paddedEnvelopeJson({
 message,
 homeRelay: returnRoute,
 /* A per-sender counter, inside the authenticated body: a relay that
    replays an envelope it once carried hands back a number the receiver
    has already seen, and ordering games become visible instead of free. */
 seq: session.sendSeq = (session.sendSeq || 0) + 1,
+caps: localEnvelopeCaps(),
 })));
 body.v = 2;
 } catch (error) {
@@ -870,11 +884,33 @@ createdAt, seal, messageClass, body, kex, notify: wakesTheDevice, scope,
    again instead of leaving a hole in the file. */
 const relayTag = sanitizeRemoteId(explicitTag || message?.id || message?.messageId || '');
 if (relayTag) envelope.tag = relayTag;
+/* Sealed sender (51-envelope-privacy.js): only with a sealed body to borrow
+   the key from, and only toward a build that reads it. The recipient is
+   named in what gets signed, so this envelope cannot be re-sealed to anybody
+   else and pass as written to them. */
+const sealSender = Boolean(body) && Boolean(peerRecord.fingerprint)
+&& typeof sealEnvelopeSender === 'function' && peerSupports(peerRecord, 'ss1');
+if (sealSender) envelope.to = peerRecord.fingerprint;
 /* The sender's key vouches for the sender's name. Best effort: an old
    receiver ignores the field, and a first contact has no pin to check
    against yet. */
 await signOfflineEnvelope(envelope);
+if (sealSender) {
+try {
+await sealEnvelopeSender(envelope, kex ? envelopeKey : session.cryptoKey, {
+ephemeral: EPHEMERAL_RELAY_TYPES.has(String(message?.type || '')),
+});
+} catch (error) {
+console.warn('[Chat] could not seal the sender; it travels named:', error);
+}
+}
 return sendRelayEnvelope(peerRecord, envelope);
+}
+function paddedEnvelopeJson(object) {
+return typeof paddedJson === 'function' ? paddedJson(object) : JSON.stringify(object);
+}
+function localEnvelopeCaps() {
+return typeof LOCAL_CAPS !== 'undefined' ? LOCAL_CAPS.slice() : [];
 }
 /* Everything the hello frame carries, sent to somebody the hello frame cannot
    reach.
@@ -1306,7 +1342,9 @@ if (!peerRecord.fingerprint && !peerRecord.clientId) return false;
    can be tied to the history entry it belongs to. Ephemeral events (receipts,
    typing) are never persisted, so there is nothing for an echo to report and
    they are left out. Old servers never echo the tag — harmless either way. */
-const persist = !EPHEMERAL_RELAY_TYPES.has(String(payload?.inner || payload?.type || ''));
+/* A sealed-sender envelope keeps its inner type in the box and says only
+   whether it is worth keeping (eph). */
+const persist = payload?.eph !== 1 && !EPHEMERAL_RELAY_TYPES.has(String(payload?.inner || payload?.type || ''));
 const tag = persist ? sanitizeRemoteId(payload?.tag || payload?.id || payload?.messageId || '') : '';
 if (tag) {
 chatState.pendingRelayTags.set(tag, { conversationKey: getConversationKey(peerRecord), messageId: tag });
@@ -1462,11 +1500,31 @@ const session = chatState.sessions.get(peerRecord.peerId);
 if (session?.connection?.open) {
 return safeConnectionSend(session.connection, message, 'session-event');
 }
-/* Session events carry no ciphertext of their own, so they need no seal —
-   but they must still reach someone who is offline. */
-return sendRelayEnvelope(peerRecord, offlineEnvelope(message, {
+/* Sealed when it can be: a receipt, an edit or a reaction said in the clear
+   told the relay what kind of thing passed and from whom. The prekey gives an
+   envelope key of its own, and anything that carries ciphertext travels with
+   the session key it was written under, so the far side opens it as before.
+   Without a prekey — an old contact — it goes the way it always went. */
+if (peerRecord.prekeyPublic && (session?.cryptoKey || !message.payload)) {
+sendSealedRelay(peerRecord, session || null, message, {
 createdAt: message.createdAt || new Date().toISOString(),
-}));
+notify: false,
+}).catch((error) => console.warn('[Chat] a sealed session event could not be sent:', error));
+return true;
+}
+return sendSignedPlainEnvelope(peerRecord, message);
+}
+/* An envelope with no seal, signed even so: one naming a pinned contact is
+   accepted unsigned only for receipts and typing, so anything else has to
+   carry the key's word. */
+function sendSignedPlainEnvelope(peerRecord, message) {
+const plainEnvelope = offlineEnvelope(message, {
+createdAt: message.createdAt || new Date().toISOString(),
+});
+signOfflineEnvelope(plainEnvelope)
+.then(() => sendRelayEnvelope(peerRecord, plainEnvelope))
+.catch(() => sendRelayEnvelope(peerRecord, plainEnvelope));
+return Boolean(chatState.ws && chatState.ws.readyState === WebSocket.OPEN);
 }
 function waitForSessionReady(peerRecord, timeoutMs = SESSION_READY_TIMEOUT_MS) {
 return new Promise((resolve) => {
@@ -1553,8 +1611,15 @@ if (peerRecord.status === 'offline') {
 await prepareOfflineSession(session, peerRecord);
 return session;
 }
-if (!chatState.peer || !chatState.connected) {
+/* Not when somebody pressed Disconnect: a session being warmed up in the
+   background is not a reason to go back online behind their back, which is
+   exactly what this did a few seconds after every Disconnect. */
+if ((!chatState.peer || !chatState.connected) && !chatState.manualOffline) {
 await connectChatTransport();
+}
+if (chatState.manualOffline) {
+await prepareOfflineSession(session, peerRecord);
+return session;
 }
 session = await ensureStoredSession(peerRecord);
 if (session?.cryptoKey) return session;
@@ -1563,14 +1628,32 @@ session = await waitForSessionReady(peerRecord);
 return session;
 }
 async function handleOfflineRelayMessage(message) {
-const payload = message.payload || {};
+let payload = message.payload || {};
 try {
+/* A sealed-sender envelope names nobody on the outside. The box opens with
+   the key that opens the body; what is inside goes back where it always was,
+   and everything below reads the envelope it always read. A box that will not
+   open is treated exactly like a body that will not open. */
+if (payload.ss === 1) {
+const opened = typeof openSealedSender === 'function' ? await openSealedSender(payload) : null;
+if (!opened) {
+const ageMs = Date.now() - Date.parse(message.queuedAt || '');
+if (payload.kex && ageMs > 24 * 60 * 60 * 1000) return true;
+chatState.unopenedEnvelopes = (chatState.unopenedEnvelopes || 0) + 1;
+return false;
+}
+payload = opened;
+message = { ...message, payload };
+}
 const fromId = payload.fromPeerId || message.fromFingerprint || message.fromClientId;
 let session = chatState.sessions.get(fromId);
 if (!session) {
 session = {
 peerId: fromId,
-remoteFingerprint: message.fromFingerprint || '',
+/* The relay's word when it has one; for a sealed sender only the signed
+   claim inside the box exists, and the signature check below is what it
+   rests on. */
+remoteFingerprint: message.fromFingerprint || (payload.ss === 1 ? String(payload.fromFingerprint || '') : ''),
 };
 	chatState.sessions.set(fromId, session);
 	}
@@ -1580,7 +1663,7 @@ remoteFingerprint: message.fromFingerprint || '',
 	   verdict of forged means a pinned key disagrees with what arrived, and
 	   the envelope is acknowledged away rather than rendered: it can never
 	   become genuine by being redelivered. */
-	const senderVerdict = await verifyOfflineEnvelopeSender(payload, fromId);
+	const senderVerdict = await verifyOfflineEnvelopeSender(payload, fromId, { relayFingerprint: String(message.fromFingerprint || '') });
 	if (senderVerdict === 'forged') {
 	chatState.forgedEnvelopes = (chatState.forgedEnvelopes || 0) + 1;
 	console.warn(`[Chat] an envelope arrived claiming to be ${fromId} whose signature the pinned key refuses`);
@@ -1667,6 +1750,10 @@ const opened = JSON.parse(new TextDecoder().decode(plain));
 	}
 	innerMessage = opened.message;
 	enclosedSessionKeyRaw = String(opened.sessionKeyRaw || '');
+	/* What the sender's build reads, under the sender's own signature. */
+	if (Array.isArray(opened.caps) && typeof noteSenderCaps === 'function') {
+	noteSenderCaps(String(payload.fromFingerprint || message.fromFingerprint || ''), opened.caps);
+	}
 	if (opened.homeRelay) {
 	openedHomeRelay = opened.homeRelay;
 	noteSenderHomeRelay(payload, opened.homeRelay);
@@ -1705,6 +1792,13 @@ innerMessage = opened;
 }
 	if (!innerMessage) return;
 	const innerType = innerMessage.type;
+	/* A pinned contact's name on an envelope nobody signed: a receipt or a
+	   typing flag is let through (an older build sent those unsigned), and
+	   nothing that could put words, files or calls in their mouth is. */
+	if (senderVerdict === 'unsigned-pinned' && !['receipt', 'typing', 'ping', 'pong'].includes(String(innerType || ''))) {
+	console.warn(`[Chat] an unsigned ${innerType || 'envelope'} named a pinned contact; refused`);
+	return true;
+	}
 	/* A group-call invite that sat in the mailbox past the ring window is a
 	   missed call, not a ring — the 1:1 path already treats its stale invites
 	   this way, and a group invite ringing minutes after the caller gave up is
@@ -1805,6 +1899,15 @@ return true;
 console.error('Failed to process offline relay message:', error);
 return false;
 }
+}
+/* The sender a session stands for, as this device knows it: the record the
+   session resolves to, or the fingerprint the key exchange or the envelope
+   signature established. Never a field the far side filled in. */
+function authenticatedSenderOf(session) {
+const fingerprint = String(findPeerBySession(session)?.fingerprint || session?.remoteFingerprint || '');
+/* Never this account itself: a session does not stand for its own owner,
+   and a name that says so is somebody borrowing it. */
+return fingerprint && fingerprint === chatState.identity?.fingerprint ? '' : fingerprint;
 }
 function clearSessionKeyFallback(session) {
 if (session?.keyFallbackTimer) {
@@ -2180,6 +2283,14 @@ if (message.type === 'text') {
 const decrypted = await decryptForSession(session, message.payload);
 const text = new TextDecoder().decode(decrypted);
 const timerSeconds = Number(message.timerSeconds || 0);
+/* The sender's link preview, under the same key (54-link-preview.js). A
+   preview that will not open or does not check out is simply not shown. */
+let preview = null;
+if (message.previewPayload && typeof sanitizeLinkPreview === 'function') {
+try {
+preview = sanitizeLinkPreview(JSON.parse(new TextDecoder().decode(await decryptForSession(session, message.previewPayload))));
+} catch (_error) { preview = null; }
+}
 /* The countdown starts when it is read, not when it lands. A message that sat
    three days in the relay queue used to arrive with most of its life already
    spent — sometimes all of it, so it vanished before it could be opened.
@@ -2190,6 +2301,7 @@ id: sanitizeRemoteId(message.id) || generateId('msg'),
 direction: 'in',
 type: 'text',
 text,
+...(preview ? { preview } : {}),
 status: 'delivered',
 expiresAt,
 hidden: Boolean(message.hidden),
@@ -2204,7 +2316,7 @@ return;
    as the group ones, so it has to be let through this gate too. Routing by
    prefix alone is what would have quietly dropped it. */
 if (String(message.type || '').startsWith('gcall-') || message.type === 'call-accepted') {
-if (handleGroupCallSignal(message)) return;
+if (handleGroupCallSignal(message, { provenFingerprint: authenticatedSenderOf(session) })) return;
 }
 if (message.type === 'call-reaction') {
 /* Only while a call is up: a reaction with nowhere to float is noise. */
@@ -2229,6 +2341,7 @@ const decrypted = await decryptForSession(session, message.payload);
 const body = safeJsonParse(new TextDecoder().decode(decrypted));
 if (!body) return;
 let historyKey = getPeerHistoryKey(findPeerBySession(session), session);
+if (isReservedConversationKey(message.spaceId)) return;
 if (message.spaceId) {
 const space = upsertSharedSpace({
 type: message.spaceType || 'group',
@@ -2236,11 +2349,16 @@ name: message.spaceName || t('فضای مشترک', 'Shared space'),
 conversationId: message.spaceId,
 members: Array.isArray(message.members) ? message.members : [],
 createdAt: message.createdAt || new Date().toISOString(),
-});
+}, { addedBy: authenticatedSenderOf(session) });
 historyKey = space?.conversationId || message.spaceId || historyKey;
 }
 if (body.kind === 'poll-vote') {
 applyIncomingVote(historyKey, body);
+return;
+}
+/* A live location's pin moving: applied to its card, never an entry. */
+if (body.kind === 'live-location-update') {
+if (typeof applyLiveLocationUpdate === 'function') applyLiveLocationUpdate(historyKey, body, session);
 return;
 }
 if (!RICH_KINDS.has(body.kind)) return;
@@ -2280,9 +2398,9 @@ ownerPeerId: payload.ownerPeerId || '',
 ownerClientId: payload.ownerClientId || '',
 ownerFingerprint: payload.ownerFingerprint || '',
 createdAt: payload.createdAt || message.createdAt || new Date().toISOString(),
-});
+}, { addedBy: authenticatedSenderOf(session) });
 const conversationId = space?.conversationId || payload.spaceId || message.spaceId;
-if (!conversationId) return;
+if (!conversationId || isReservedConversationKey(conversationId)) return;
 const timerSeconds = Number(payload.timerSeconds || 0);
 // Started on read, not on arrival — see markConversationRead().
 const expiresAt = payload.expiresAt || '';
@@ -2291,6 +2409,7 @@ const expiresAt = payload.expiresAt || '';
 	direction: 'in',
 	type: 'text',
 	text: payload.text || '',
+	...((typeof sanitizeLinkPreview === 'function' && sanitizeLinkPreview(payload.preview)) ? { preview: sanitizeLinkPreview(payload.preview) } : {}),
 senderName: payload.senderName || '',
 senderPeerId: payload.senderPeerId || '',
 senderFingerprint: payload.senderFingerprint || '',
@@ -2309,13 +2428,15 @@ return;
 	/* A group edit names the conversation it belongs to (1:1 edits do not).
 	   Only a conversation that already exists locally is accepted, so a
 	   fabricated id cannot point an edit at a thread of the sender's choosing. */
-	const key = (message.conversationId && Array.isArray(chatState.history[message.conversationId]))
+	const key = (message.conversationId && !isReservedConversationKey(message.conversationId) && Array.isArray(chatState.history[message.conversationId]))
 	? message.conversationId
 	: getPeerHistoryKey(findPeerBySession(session), session);
 	const entry = (chatState.history[key] || []).find((item) => item.id === message.messageId);
 if (entry) {
 entry.text = text;
 entry.edited = true;
+/* A preview for a link the edit took out is a preview of nothing. */
+if (entry.preview && !text.includes(new URL(entry.preview.url).host)) delete entry.preview;
 storeHistory();
 renderPeers();
 renderMessages();
@@ -2518,6 +2639,7 @@ setTransferBanner(t('دریافت شد', 'Received'), 100, { owner: `recv:${mess
 clearTransferBanner(700, `recv:${message.transferId}`);
 const url = URL.createObjectURL(blob);
 let historyKey = getPeerHistoryKey(findPeerBySession(session), session);
+if (isReservedConversationKey(transfer.meta.spaceId)) transfer.meta.spaceId = '';
 if (transfer.meta.spaceId) {
 const space = upsertSharedSpace({
 type: transfer.meta.spaceType || 'group',
@@ -2528,7 +2650,7 @@ ownerPeerId: transfer.meta.ownerPeerId || '',
 ownerClientId: transfer.meta.ownerClientId || '',
 ownerFingerprint: transfer.meta.ownerFingerprint || '',
 createdAt: transfer.meta.createdAt || new Date().toISOString(),
-});
+}, { addedBy: authenticatedSenderOf(session) });
 historyKey = space?.conversationId || transfer.meta.spaceId || historyKey;
 }
 /* A remote message id is only kept when it looks like an id; anything else
@@ -2737,6 +2859,9 @@ mood: String(chatState.profile.mood || '').slice(0, 40),
 prekeyId: prekey?.id || '',
 prekeyPublic: prekey?.publicKeyData || '',
 prekeyExpiresAt: prekey?.expiresAt || '',
+/* What this build reads (51-envelope-privacy.js): a contact's device uses it
+   to decide whether to seal the sender of what it queues here. */
+caps: typeof LOCAL_CAPS !== 'undefined' ? LOCAL_CAPS.slice() : [],
 /* A hint, and marked as one at the other end. A hello is not signed, so the
    relay forwarding it can write whatever it likes here -- which is exactly
    why the receiving side files it under the lowest rank and will not route
@@ -2760,6 +2885,8 @@ if (typeof healGroupsWithMemberCards === 'function') healGroupsWithMemberCards()
 /* After the identity challenge has had its round trip: the beacon store
    answers only a proven socket. */
 if (typeof startDeviceBeacon === 'function') window.setTimeout(startDeviceBeacon, 4000);
+/* The relay's other addresses, learnt while this one works (52-relay-mirrors.js). */
+if (typeof learnRelayMirrors === 'function') window.setTimeout(() => { learnRelayMirrors().catch(() => {}); }, 7000);
 }
 function ackRelayMessage(relayId) {
 if (!relayId || chatState.ws?.readyState !== WebSocket.OPEN) return;

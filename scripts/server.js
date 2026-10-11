@@ -298,10 +298,26 @@ const PUBLIC_PRESENCE_URL = process.env.CHAT_PUBLIC_PRESENCE_URL || '';
 const CONFIG_PATH = path.join(path.dirname(OFFLINE_STORE_PATH), 'server-config.json');
 let MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || '';
 const ALLOW_INSECURE_DEFAULTS = process.env.ALLOW_INSECURE_DEFAULTS === '1';
+/* Other addresses that reach this same relay — a second domain, a CDN in
+   front of it — for a client whose way to the main domain is blocked. The
+   client never takes one on trust: it asks the mirror to prove it holds this
+   relay's key (POST /relay-prove) before it switches. Listed as origins,
+   separated by commas or spaces. A page served from a mirror is a page of
+   this deployment, so mirrors are allowed origins too. */
+const MIRROR_ORIGINS = Array.from(new Set(String(process.env.CHAT_MIRROR_ORIGINS || '')
+  .split(/[\s,]+/)
+  .map((entry) => {
+    try {
+      const url = new URL(entry.trim());
+      return (url.protocol === 'https:' || url.protocol === 'http:') ? url.origin : '';
+    } catch (_error) { return ''; }
+  })
+  .filter(Boolean))).slice(0, 8);
 const ALLOWED_ORIGINS = (process.env.CHAT_ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .concat(MIRROR_ORIGINS);
 
 /* The monitor password is never written to disk in a form that can be read
  * back. It used to be: server-config.json held the dashboard's rotated
@@ -636,6 +652,9 @@ app.use('/admin/login', rateLimit('login'));
 app.use('/admin', rateLimit('write'));
 app.use('/push', rateLimit('write'));
 app.use('/self-destruct', rateLimit('write'));
+/* Each proof costs a key agreement; a flood of them is a flood of work. */
+app.use('/relay-prove', rateLimit('write'));
+app.use('/relay-mirrors', rateLimit('write'));
 app.use(rateLimit('default'));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -4066,12 +4085,81 @@ app.get('/turn-config', (req, res) => {
  * operator's links are not a secret — /chat-health already counts them — and
  * a relay that is not linked is not listed, so nothing here invites a client
  * to send through a carrier that would refuse it. */
+/* The other addresses of this relay (CHAT_MIRROR_ORIGINS). Unsigned on
+   purpose: a list naming a wrong address costs a client one failed proof,
+   because every mirror is checked against this relay's key before use. */
+app.get('/relay-mirrors', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  res.json({ ok: true, relayId: relayIdentity.id, origins: MIRROR_ORIGINS });
+});
+
+/* Proof that whoever answers at this address holds this relay's private key.
+ *
+ * The client seals a fresh nonce to the relay key it pinned (the same sealing
+ * transit uses) and posts it here; only the holder of the private key can
+ * open it and hand the nonce back. That is what lets a client trust a mirror
+ * — a different hostname, a CDN, a new certificate — as the relay it already
+ * knows, without the relay needing a signing key.
+ *
+ * The envelope must say it is a proof and carry nothing but a nonce, so this
+ * can never be used to open an intercepted transit envelope: anything else is
+ * refused without saying what was inside. */
+/* The same list, authenticated by this relay's key. The client seals a nonce
+   and a one-off secret to the key it pinned; only the key's holder can read
+   the secret, and the answer carries an HMAC under it over the list. Whoever
+   sits on the path to the main address cannot slip an address of their own
+   into what the client keeps. */
+app.post('/relay-mirrors', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  let inner;
+  try {
+    inner = openTransit(relayPrivate, relayIdentity.id, req.body?.envelope);
+  } catch (_error) {
+    res.status(400).json({ ok: false, reason: 'unreadable' });
+    return;
+  }
+  const nonce = String(inner?.nonce || '');
+  const secret = String(inner?.k || '');
+  if (inner?.purpose !== 'mirrors' || !/^[a-f0-9]{32,64}$/.test(nonce) || !/^[a-f0-9]{64}$/.test(secret)
+    || Object.keys(inner).length !== 3) {
+    res.status(400).json({ ok: false, reason: 'not-a-request' });
+    return;
+  }
+  const origins = MIRROR_ORIGINS.slice();
+  const mac = crypto.createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update(`poorija-mirrors-v1|${relayIdentity.id}|${nonce}|${JSON.stringify(origins)}`)
+    .digest('hex');
+  res.json({ ok: true, relayId: relayIdentity.id, nonce, origins, mac });
+});
+
+app.post('/relay-prove', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  let inner;
+  try {
+    inner = openTransit(relayPrivate, relayIdentity.id, req.body?.envelope);
+  } catch (_error) {
+    res.status(400).json({ ok: false, reason: 'unreadable' });
+    return;
+  }
+  const nonce = String(inner?.nonce || '');
+  if (inner?.purpose !== 'prove' || !/^[a-f0-9]{32,64}$/.test(nonce) || Object.keys(inner).length !== 2) {
+    res.status(400).json({ ok: false, reason: 'not-a-proof' });
+    return;
+  }
+  res.json({ ok: true, relayId: relayIdentity.id, nonce });
+});
+
 app.get('/transit-peers', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   setNoStoreHeaders(res);
   const peers = relayPeers.peerEntries()
     .filter((entry) => entry.linked && entry.key)
-    .map((entry) => ({ id: entry.id, key: entry.key, origin: entry.origin || '' }));
+    /* The first of a "|"-separated list: clients route by id and key, and an
+       operator's alternates for the link are the link's business. */
+    .map((entry) => ({ id: entry.id, key: entry.key, origin: String(entry.origin || '').split('|')[0] }));
   res.json({ ok: true, self: relayIdentity.id, peers });
 });
 
@@ -6411,6 +6499,10 @@ totalRelays++;
   }
 
   const payloadType = String(message.payload?.type || 'unknown');
+  /* Sealed sender (js/chat/51-envelope-privacy.js): the sender's name is in an
+     encrypted box, and this relay neither files the item under the sender nor
+     hands the sender's name to the recipient's socket. */
+  const sealedSender = payloadType === 'offline-chat' && message.payload?.ss === 1;
   /* Call signaling the relay already sees; the live-calls report keys on it. */
   if (payloadType.startsWith('call') || payloadType.startsWith('gcall')) {
     noteCallFrame(clientId || message.fromClientId, payloadType, message.toClientId || toFingerprint);
@@ -6435,7 +6527,9 @@ totalRelays++;
        this is the server half, so an out-of-date client cannot fill a
        mailbox with them either. */
     const innerType = String(message.payload?.inner || '');
-    if (EPHEMERAL_PAYLOADS.has(payloadType) || EPHEMERAL_PAYLOADS.has(innerType)) {
+    /* A sealed envelope keeps its inner type in the box and states only the
+       one bit the relay needs: whether to keep it at all. */
+    if (EPHEMERAL_PAYLOADS.has(payloadType) || EPHEMERAL_PAYLOADS.has(innerType) || message.payload?.eph === 1) {
       reply({ type: 'error', reason: 'target-offline', toClientId: message.toClientId || '', tag });
       return;
     }
@@ -6445,8 +6539,10 @@ totalRelays++;
       queued.push({
         type: 'relay',
         relayId: crypto.randomUUID(),
-        fromClientId: clientId,
-        fromFingerprint: fromFingerprint,
+        /* A sealed-sender envelope is filed without a sender: who wrote it
+           is inside the box, and the mailbox on disk does not learn it. */
+        fromClientId: sealedSender ? '' : clientId,
+        fromFingerprint: sealedSender ? '' : fromFingerprint,
         payload: message.payload || null,
         queuedAt: new Date().toISOString(),
       });
@@ -6518,8 +6614,8 @@ totalRelays++;
     const queuedItem = {
       type: 'relay',
       relayId: crypto.randomUUID(),
-      fromClientId: clientId,
-      fromFingerprint: fromFingerprint,
+      fromClientId: sealedSender ? '' : clientId,
+      fromFingerprint: sealedSender ? '' : fromFingerprint,
       payload: message.payload || null,
       queuedAt: new Date().toISOString(),
     };
@@ -6557,8 +6653,8 @@ totalRelays++;
     safeSend(recipient.ws, {
       type: 'relay',
       relayId: liveRelayId || undefined,
-      fromClientId: clientId,
-      fromFingerprint: fromFingerprint,
+      fromClientId: sealedSender ? '' : clientId,
+      fromFingerprint: sealedSender ? '' : fromFingerprint,
       payload: message.payload || null,
     });
   }
@@ -7894,6 +7990,7 @@ function snapshotPeers() {
       prekeyId: client.prekeyId || '',
       prekeyPublic: client.prekeyPublic || '',
       prekeyExpiresAt: client.prekeyExpiresAt || '',
+      caps: Array.isArray(client.caps) ? client.caps : [],
       /* Which install this socket is. The client reads it to tell its own
          sibling devices apart (the devices panel, the device-sync beacon), and
          it was never sent: every sibling arrived with an empty device id, so
@@ -8412,6 +8509,12 @@ wsServer.on('connection', (ws, req) => {
       record.prekeyId = String(message.prekeyId || '').slice(0, 64);
       record.prekeyPublic = String(message.prekeyPublic || '').slice(0, 512);
       record.prekeyExpiresAt = String(message.prekeyExpiresAt || '').slice(0, 40);
+      /* What the client's build reads — short tokens, forwarded as they are.
+         A contact's device reads 'ss1' to decide whether to seal the sender
+         of what it queues here. */
+      record.caps = Array.isArray(message.caps)
+        ? Array.from(new Set(message.caps.map((cap) => String(cap || '')).filter((cap) => /^[a-z0-9-]{1,16}$/.test(cap)))).slice(0, 8)
+        : [];
       record.updatedAt = new Date().toISOString();
       if (!hasUsableIdentity(record)) {
         console.warn(`[Presence] Rejecting unidentified peer from ${record.ip}`);
@@ -8639,11 +8742,21 @@ wsServer.on('connection', (ws, req) => {
       const box = sanitizeFingerprint(message.toFingerprint);
       const tags = new Set((Array.isArray(message.tags) ? message.tags : [])
         .slice(0, 500).map((tag) => String(tag || '').slice(0, 96)).filter(Boolean));
+      /* A sealed-sender envelope carries no sender to match, only the hash of
+         a secret its sender alone can derive for it (wd). Presenting the
+         secret is the proof; the relay never learns which envelopes are whose
+         until they are taken back. */
+      const secretHashes = new Set((Array.isArray(message.secrets) ? message.secrets : [])
+        .slice(0, 500).map((secret) => String(secret || ''))
+        .filter((secret) => /^[a-f0-9]{64}$/.test(secret))
+        .map((secret) => crypto.createHash('sha256').update(secret).digest('hex')));
       let withdrawn = 0;
-      if (box && isFingerprintKey(box) && tags.size) {
+      if (box && isFingerprintKey(box) && (tags.size || secretHashes.size)) {
         const queued = offlineBoxes.get(box) || [];
-        const kept = queued.filter((item) => !(item.fromFingerprint === record.fingerprint
-          && tags.has(String(item.payload?.tag || ''))));
+        const kept = queued.filter((item) => !(
+          (item.fromFingerprint === record.fingerprint && tags.has(String(item.payload?.tag || '')))
+          || (item.payload?.wd && secretHashes.has(String(item.payload.wd)))
+        ));
         withdrawn = queued.length - kept.length;
         if (withdrawn) {
           if (kept.length) offlineBoxes.set(box, kept);

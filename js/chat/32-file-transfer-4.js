@@ -562,6 +562,10 @@ function disconnectChat() {
  * makes the Reconnect button — disconnectChat() then connect — still work. */
 chatState.shouldReconnect = false;
 chatState.manualOffline = true;
+/* Anything already on its way to connecting stands down (buildChatTransport
+   compares this), and nothing queued behind it runs. */
+chatState.disconnectEpoch = (chatState.disconnectEpoch || 0) + 1;
+chatState.transportConnectQueued = false;
 clearReconnectTimer();
 if (chatState.heartbeatTimer) {
 clearInterval(chatState.heartbeatTimer);

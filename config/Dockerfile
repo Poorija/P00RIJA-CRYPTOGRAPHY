@@ -7,6 +7,9 @@ RUN rm /etc/nginx/conf.d/default.conf
 # envsubst only replaces names that are actually set in the environment, so
 # nginx's own $host, $scheme and $http_upgrade pass through untouched.
 COPY config/nginx.conf /etc/nginx/templates/default.conf.template
+# The relay's mirror addresses go into the CSP before the template renders.
+COPY --chmod=755 config/nginx-mirror-csp.sh /docker-entrypoint.d/15-mirror-csp.sh
+ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/rendered-templates
 COPY index.html /usr/share/nginx/html/
 COPY manifest.webmanifest /usr/share/nginx/html/
 COPY sw.js /usr/share/nginx/html/

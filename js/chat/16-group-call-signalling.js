@@ -17,11 +17,27 @@
 */
 
 /* ---------------- signalling ----------------------------------------- */
-function handleGroupCallSignal(message) {
+function handleGroupCallSignal(message, { provenFingerprint = '' } = {}) {
   if (!message?.callId) return false;
   if (message.type === 'gcall-invite') {
     if (groupCallActive()) return true;
     if (message.fromFingerprint === myCallIdentity()) return true;
+    /* A group this account has not accepted, or a caller nobody here chose,
+       does not ring (49-message-requests.js). */
+    if (!message.upgrade && typeof groupCallFromRequest === 'function'
+      /* The caller as this device authenticated them — passed alongside the
+         message, never read from it. */
+      && groupCallFromRequest({ spaceId: message.spaceId, provenFingerprint })) {
+      appendCall({
+        name: message.groupName || message.callerName || t('تماس گروهی', 'Group call'),
+        conversationId: message.callId,
+        mode: message.mode === 'video' ? 'video' : 'voice',
+        status: 'missed',
+        direction: 'in',
+        createdAt: new Date().toISOString(),
+      });
+      return true;
+    }
     /* A relay-queued invite sits in the mailbox for as long as the mailbox
        does; ringing hours later for a call that ended long ago — and
        dropping the joiner alone into a dead room — is worse than a quiet
@@ -258,6 +274,7 @@ function richEntryLabel(entry = {}) {
   if (!rich) return '';
   if (rich.kind === 'poll') return `📊 ${t('نظرسنجی', 'Poll')}: ${rich.question || ''}`.trim();
   if (rich.kind === 'location') return `📍 ${t('موقعیت مکانی', 'Location')}`;
+  if (rich.kind === 'live-location') return `📍 ${t('موقعیت زنده', 'Live location')}`;
   if (rich.kind === 'contact') return `👤 ${t('کارت مخاطب', 'Contact card')}: ${rich.name || ''}`.trim();
   return '';
 }

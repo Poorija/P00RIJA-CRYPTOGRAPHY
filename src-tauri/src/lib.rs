@@ -57,6 +57,17 @@ mod mobile_secure_store;
    answer honestly rather than not existing. */
 mod mobile_unifiedpush;
 
+/* FLAG_SECURE on Android, through the Activity MainActivity hands over; on
+   iOS it answers "not enforced". The desktop's own content protection is
+   below, in this file. */
+#[cfg(mobile)]
+mod mobile_screen_guard;
+
+/* Link previews, fetched by the sender's own device (desktop only: the HTTP
+   client it uses is a desktop dependency). */
+#[cfg(desktop)]
+mod link_preview;
+
 #[cfg(mobile)]
 fn desktop_only<T>(what: &str) -> Result<T, NativeError> {
     Err(NativeError::Message(format!(
@@ -184,6 +195,17 @@ struct ShellSettings {
     /// Register the app with the OS login-items mechanism.
     #[serde(default)]
     autostart: bool,
+    /// Keep the window out of screenshots, screen recording and screen
+    /// sharing (content protection on Windows and macOS, FLAG_SECURE on
+    /// Android). Applied when the window is created, so the first frame is
+    /// already covered.
+    #[serde(default)]
+    screen_guard: bool,
+    /// An HTTP or SOCKS5 proxy for everything the window and the shell send,
+    /// e.g. a local v2ray, xray or Tor. Empty for a direct connection. Takes
+    /// effect when the window is created, which is why changing it restarts.
+    #[serde(default)]
+    proxy_url: String,
 }
 
 fn default_close_behavior() -> String {
@@ -196,6 +218,8 @@ impl Default for ShellSettings {
             close_behavior: default_close_behavior(),
             start_minimized: false,
             autostart: false,
+            screen_guard: false,
+            proxy_url: String::new(),
         }
     }
 }
@@ -303,10 +327,171 @@ fn desktop_set_shell_settings<R: Runtime>(
     app: AppHandle<R>,
     settings: ShellSettings,
 ) -> Result<ShellSettings, NativeError> {
-    let settings = settings.normalized();
+    let mut settings = settings.normalized();
+    /* The window and tray switches arrive from one panel; the screen guard
+       and the proxy have panels and commands of their own, and a caller that
+       does not know about them must not reset them to their defaults. */
+    let current = read_shell_settings(&app);
+    settings.screen_guard = current.screen_guard;
+    settings.proxy_url = current.proxy_url;
     apply_autostart(&app, settings.autostart)?;
     write_shell_settings(&app, &settings)?;
     Ok(settings)
+}
+
+// ==================== screen guard ====================
+
+/// Turns the screen guard on or off and remembers it. Answers whether the
+/// platform now enforces it: Linux has no content protection to switch, and
+/// iOS cannot refuse a screenshot at all, so both answer false and the page
+/// says so instead of claiming protection it does not have.
+#[tauri::command]
+fn desktop_set_screen_guard<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<bool, NativeError> {
+    let mut settings = read_shell_settings(&app);
+    settings.screen_guard = enabled;
+    write_shell_settings(&app, &settings)?;
+    apply_screen_guard(&app, enabled)
+}
+
+// ==================== proxy ====================
+
+/// The proxy URL a user typed, checked: `http://` or `socks5://`, a host and
+/// an explicit port, nothing else. Returns the normalised form, or None for
+/// an empty or unusable value.
+fn checked_proxy_url(raw: &str) -> Result<Option<url::Url>, NativeError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let parsed = url::Url::parse(trimmed).map_err(|error| NativeError::msg(error.to_string()))?;
+    if !matches!(parsed.scheme(), "http" | "socks5") {
+        return Err(NativeError::msg("the proxy must be an http:// or socks5:// address"));
+    }
+    if parsed.host_str().unwrap_or_default().is_empty() || parsed.port().is_none() {
+        return Err(NativeError::msg("the proxy needs a host and a port, e.g. socks5://127.0.0.1:10808"));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(NativeError::msg("a proxy with a username or password is not supported"));
+    }
+    let mut clean = parsed.clone();
+    clean.set_path("");
+    clean.set_query(None);
+    clean.set_fragment(None);
+    Ok(Some(clean))
+}
+
+/// Saves the proxy for the next start. The webview takes its proxy when it
+/// is created, so a change means a restart — the page asks for one.
+#[tauri::command]
+fn desktop_set_proxy<R: Runtime>(app: AppHandle<R>, url: String) -> Result<String, NativeError> {
+    let checked = checked_proxy_url(&url)?;
+    let mut settings = read_shell_settings(&app);
+    settings.proxy_url = checked
+        .as_ref()
+        .map(|value| value.as_str().trim_end_matches('/').to_string())
+        .unwrap_or_default();
+    write_shell_settings(&app, &settings)?;
+    Ok(settings.proxy_url)
+}
+
+#[tauri::command]
+fn desktop_restart<R: Runtime>(app: AppHandle<R>) {
+    app.restart();
+}
+
+/// A preview of a link the person pasted, fetched from this device and
+/// through the proxy when one is set. See link_preview.rs for what is
+/// refused. None when the page offers nothing worth showing.
+#[cfg(desktop)]
+#[tauri::command]
+async fn desktop_link_preview<R: Runtime>(
+    app: AppHandle<R>,
+    url: String,
+) -> Result<Option<link_preview::LinkPreview>, NativeError> {
+    let proxy = checked_proxy_url(&read_shell_settings(&app).proxy_url).ok().flatten();
+    link_preview::preview(&url, proxy, base64_encode).await.map_err(NativeError::msg)
+}
+
+/// Phones have no preview fetcher; the page does not offer the switch there.
+#[cfg(mobile)]
+#[tauri::command]
+async fn desktop_link_preview(url: String) -> Result<Option<()>, NativeError> {
+    let _ = url;
+    Ok(None)
+}
+
+/// The same proxy, in the form the shell's HTTP client needs: a SOCKS5 proxy
+/// as `socks5h`, so names are resolved by the proxy and no DNS question
+/// leaves this machine on its own. (`socks5` in reqwest resolves locally.)
+#[cfg(desktop)]
+pub(crate) fn reqwest_proxy_target(proxy: &url::Url) -> String {
+    let text = proxy.as_str();
+    match text.strip_prefix("socks5://") {
+        Some(rest) => format!("socks5h://{rest}"),
+        None => text.to_string(),
+    }
+}
+
+/// The proxy for the shell's own requests (the relay probe, link previews),
+/// the same one the window uses.
+#[cfg(desktop)]
+fn shell_http_client<R: Runtime>(
+    app: &AppHandle<R>,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Client, NativeError> {
+    let mut builder = reqwest::Client::builder().timeout(timeout);
+    if let Ok(Some(proxy)) = checked_proxy_url(&read_shell_settings(app).proxy_url) {
+        let proxy = reqwest::Proxy::all(reqwest_proxy_target(&proxy)).map_err(|error| NativeError::msg(error.to_string()))?;
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|error| NativeError::msg(error.to_string()))
+}
+
+/// The main window, built here rather than from the configuration on Windows
+/// and Linux — the only platforms whose webview takes a proxy — because a
+/// proxy can only be given to a webview as it is created.
+/// tauri.windows.conf.json and tauri.linux.conf.json mark it `create: false`.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn create_main_window<R: Runtime>(app: &AppHandle<R>, settings: &ShellSettings) -> Result<(), NativeError> {
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or_else(|| NativeError::msg("the configuration has no main window"))?;
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|error| NativeError::msg(error.to_string()))?;
+    match checked_proxy_url(&settings.proxy_url) {
+        Ok(Some(proxy)) => builder = builder.proxy_url(proxy),
+        Ok(None) => {}
+        Err(error) => eprintln!("proxy ignored: {error}"),
+    }
+    builder.build().map_err(|error| NativeError::msg(error.to_string()))?;
+    Ok(())
+}
+
+fn apply_screen_guard<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Result<bool, NativeError> {
+    #[cfg(desktop)]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            window
+                .set_content_protected(enabled)
+                .map_err(|error| NativeError::msg(error.to_string()))?;
+        }
+        Ok(enabled && !cfg!(target_os = "linux"))
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        mobile_screen_guard::apply(enabled)
+            .map(|enforced| enforced && enabled)
+            .map_err(NativeError::msg)
+    }
 }
 
 #[cfg(mobile)]
@@ -1213,16 +1398,16 @@ async fn desktop_probe_relay_origin(
 
 #[cfg(desktop)]
 #[tauri::command]
-async fn desktop_probe_relay_origin(
+async fn desktop_probe_relay_origin<R: Runtime>(
+    app: AppHandle<R>,
     origin: String,
 ) -> Result<Option<RelayProbeResult>, NativeError> {
     let origin = normalize_relay_origin(&origin)?;
     // Async client on purpose: `reqwest::blocking` builds its own runtime and
     // panics when constructed inside the one Tauri commands already run on.
-    let client = reqwest::Client::builder()
-        .timeout(RELAY_PROBE_TIMEOUT)
-        .build()
-        .map_err(|error| NativeError::msg(error.to_string()))?;
+    // Through the proxy, when one is set: the probe must take the same road
+    // the window does.
+    let client = shell_http_client(&app, RELAY_PROBE_TIMEOUT)?;
 
     let health_url = url::Url::parse(&origin)
         .and_then(|url| url.join("/chat-health"))
@@ -1984,7 +2169,11 @@ pub fn run() {
             desktop_ssh_read_file,
             desktop_ssh_write_file,
             desktop_ssh_delete_file,
-            desktop_ssh_append_authorized_key
+            desktop_ssh_append_authorized_key,
+            desktop_set_screen_guard,
+            desktop_set_proxy,
+            desktop_restart,
+            desktop_link_preview
         ])
         .setup(|app| {
             #[allow(unused_variables)]
@@ -2008,6 +2197,19 @@ pub fn run() {
             handle.manage(TrayState { available: tray_available });
 
             let settings = read_shell_settings(&handle);
+            // Windows and Linux build the main window here, with the proxy if
+            // one is set (see create_main_window).
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if let Err(error) = create_main_window(&handle, &settings) {
+                eprintln!("main window: {error}");
+            }
+            // Before the window is shown: a guard chosen last time covers the
+            // first frame too.
+            if settings.screen_guard {
+                if let Err(error) = apply_screen_guard(&handle, true) {
+                    eprintln!("screen guard: {error}");
+                }
+            }
             // The OS registration is the thing that actually runs at login;
             // re-assert it so a stale login item cannot outlive the setting.
             if let Err(error) = apply_autostart(&handle, settings.autostart) {
@@ -2076,6 +2278,35 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn socks_proxies_resolve_names_at_the_proxy() {
+        let socks = checked_proxy_url("socks5://127.0.0.1:9050").unwrap().unwrap();
+        assert!(reqwest_proxy_target(&socks).starts_with("socks5h://127.0.0.1:9050"));
+        let http = checked_proxy_url("http://127.0.0.1:8080").unwrap().unwrap();
+        assert!(reqwest_proxy_target(&http).starts_with("http://"));
+    }
+
+    #[test]
+    fn proxy_urls_are_checked_before_they_reach_the_webview() {
+        assert!(checked_proxy_url("").unwrap().is_none());
+        assert!(checked_proxy_url("   ").unwrap().is_none());
+        assert_eq!(
+            checked_proxy_url("socks5://127.0.0.1:10808").unwrap().unwrap().as_str(),
+            "socks5://127.0.0.1:10808"
+        );
+        // Path and query are dropped; an http URL always serialises with "/",
+        // which desktop_set_proxy trims before storing.
+        assert_eq!(
+            checked_proxy_url(" http://localhost:8080/some/path?x=1 ").unwrap().unwrap().as_str().trim_end_matches('/'),
+            "http://localhost:8080"
+        );
+        // A scheme the webview cannot take, no port, a password: refused.
+        assert!(checked_proxy_url("https://proxy.example:443").is_err());
+        assert!(checked_proxy_url("socks5://127.0.0.1").is_err());
+        assert!(checked_proxy_url("socks5://user:pass@127.0.0.1:1080").is_err());
+        assert!(checked_proxy_url("file:///etc/passwd").is_err());
+    }
 
     #[test]
     fn base64_round_trips_every_padding_length() {

@@ -121,6 +121,8 @@ publicKeyData: String(peer.publicKeyData || ''),
    here used to ride into the safety-number comparison and the render paths
    verbatim. */
 fingerprint: /^[a-f0-9]{16,128}$/i.test(String(peer.fingerprint || '')) ? String(peer.fingerprint) : '',
+/* What their build reads (51-envelope-privacy.js). */
+caps: typeof sanitizeCaps === 'function' ? sanitizeCaps(peer.caps) : [],
 /* Their current prekey, for writing to them while they are away. */
 prekeyId: String(peer.prekeyId || ''),
 prekeyPublic: String(peer.prekeyPublic || ''),
@@ -131,7 +133,7 @@ status: String(peer.status || 'offline'),
 avatarData: sanitizeAvatarData(peer.avatarData),
 /* What they say they are doing, in their own words, from their hello. */
 mood: String(peer.mood || '').slice(0, 40),
-conversationId: peer.conversationId || '',
+conversationId: isReservedConversationKey(peer.conversationId) ? '' : (peer.conversationId || ''),
 /* Kept with its provenance rather than flattened to an address: the merge
    below has to know which channel it came on to decide whether it may
    replace what is already there. */
@@ -141,6 +143,8 @@ type: peer.type || '',
 members: Array.isArray(peer.members) ? [...peer.members] : undefined,
 ownerFingerprint: String(peer.ownerFingerprint || ''),
 manual: Boolean(peer.manual),
+/* Said yes to as a message request (49-message-requests.js). */
+accepted: Boolean(peer.accepted),
 pinned: Boolean(peer.pinned),
 pinOrder: Number(peer.pinOrder || 0),
 /* Arrived from a sibling device rather than earned here — the flag that
@@ -175,6 +179,9 @@ verifiedAt: peer.verifiedAt || '',
 keyChangedAt: peer.keyChangedAt || '',
 pendingKey: String(peer.pendingKey || ''),
 pendingFingerprint: String(peer.pendingFingerprint || ''),
+/* The key that changed had been verified by a person. Sending stops until the
+   new one is checked (48-key-verify.js), so the flag has to outlive a reload. */
+keyChangeWasVerified: Boolean(peer.keyChangeWasVerified),
 };
 }
 /* What the address book is allowed to keep.
@@ -297,6 +304,7 @@ function resolveKeyChange(peerRecord, accept) {
   peerRecord.pendingKey = '';
   peerRecord.pendingFingerprint = '';
   peerRecord.keyChangedAt = '';
+  peerRecord.keyChangeWasVerified = false;
   /* The session key was minted against the old key; it cannot survive either
      answer. Dropping it forces a fresh negotiation. */
   clearSessionKeysFor(peerRecord);
@@ -340,6 +348,9 @@ function clearSessionKeysFor(peerRecord) {
 function mergePeerRecord(peer = {}, options = {}) {
 const normalized = normalizePeerRecord(peer);
 if (!normalized.peerId || isSelfPeerRecord(normalized)) return null;
+/* A peer id is whatever the far side registered with the signalling server;
+   one named after a conversation of this device's own would be filed there. */
+if (isReservedConversationKey(normalized.peerId) || isReservedConversationKey(normalized.clientId)) return null;
 const existing = chatState.peers.find((item) => (
 (normalized.peerId && item.peerId === normalized.peerId)
 || (normalized.clientId && item.clientId === normalized.clientId)
@@ -367,7 +378,10 @@ if (!existing.keyChangedAt) {
 existing.keyChangedAt = new Date().toISOString();
 /* A key that changed is a key nobody has compared yet. Whatever was
    verified before referred to the old one. */
-if (existing.trustedFingerprint) setPeerVerified(existing.trustedFingerprint, false);
+if (existing.trustedFingerprint) {
+if (isPeerVerified(existing.trustedFingerprint)) existing.keyChangeWasVerified = true;
+setPeerVerified(existing.trustedFingerprint, false);
+}
 noteKeyChangeInThread(existing);
 }
 }
@@ -404,6 +418,9 @@ verifiedAt: keyConflict ? '' : (existing.verifiedAt || ''),
 keyChangedAt: keyConflict ? (existing.keyChangedAt || new Date().toISOString()) : existing.keyChangedAt || '',
 pendingKey: keyConflict ? offered : (existing.pendingKey || ''),
 pendingFingerprint: keyConflict ? (normalized.fingerprint || '') : (existing.pendingFingerprint || ''),
+/* Never set by a record arriving from outside — only by the conflict above,
+   and cleared only by resolveKeyChange. */
+keyChangeWasVerified: Boolean(existing.keyChangeWasVerified),
 avatarData: normalized.avatarData || existing.avatarData,
 /* Ranked, not overwritten. A record arriving without one -- an identity card
    pasted by hand, a hello from an older build -- must not blank what a card
@@ -414,6 +431,10 @@ username: normalized.username || existing.username,
 name: normalized.name || existing.name,
 members: normalized.members || existing.members,
 manual: existing.manual || normalized.manual,
+accepted: Boolean(existing.accepted),
+/* A record that says nothing about capabilities (a pasted card, an older
+   relay) does not erase what was learnt. */
+caps: normalized.caps?.length ? normalized.caps : (existing.caps || []),
 pinned: existing.pinned || normalized.pinned,
 pinOrder: existing.pinOrder || normalized.pinOrder,
 /* Decisions this device made about the contact. A presence record, a hello
@@ -470,6 +491,7 @@ verifiedAt: '',
 pendingKey: normalized.publicKeyData,
 pendingFingerprint: normalized.fingerprint || '',
 keyChangedAt: new Date().toISOString(),
+keyChangeWasVerified: false,
 };
 chatState.peers.push(record);
 noteKeyChangeInThread(record);
@@ -482,6 +504,11 @@ lastSeenAt,
 trustedKey: normalized.trustedKey || normalized.publicKeyData || '',
 trustedFingerprint: normalized.trustedFingerprint || normalized.fingerprint || '',
 trustedAt: normalized.trustedAt || (normalized.publicKeyData ? new Date().toISOString() : ''),
+/* Only this device's own conflict branch above ever sets it. A record that
+   arrives from outside — a card, a presence entry — does not get to. */
+keyChangeWasVerified: false,
+/* Nor does it arrive already accepted: that is this person's answer to give. */
+accepted: false,
 };
 chatState.peers.push(record);
 /* The same key meeting us again after its contact was deleted is the real
@@ -782,7 +809,8 @@ notify(t('اعضای فضا ذخیره شدند.', 'Members saved.'), 'success')
 }
 function notifyTyping() {
 const peer = activePeer();
-if (!peer || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;
+/* Saved Messages has nobody on the other end to tell. */
+if (!peer || peer.type === 'saved' || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;
 const now = Date.now();
 if (chatState.lastTypingSentAt && now - chatState.lastTypingSentAt < 3000) return;
 chatState.lastTypingSentAt = now;
@@ -1023,6 +1051,8 @@ case 'queued':
 return { label: '🕐', cls: 'is-queued', title: t('در انتظار ارسال', 'Waiting to send') };
 case 'failed':
 return { label: '!', cls: 'is-failed', title: t('ارسال نشد', 'Not sent') };
+case 'scheduled':
+return { label: '⏰', cls: 'is-scheduled', title: t('زمان‌بندی‌شده؛ هنوز فرستاده نشده', 'Scheduled; not sent yet') };
 default:
 return { label: '🕐', cls: 'is-pending', title: t('در حال ارسال', 'Sending') };
 }

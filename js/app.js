@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.98.27';
+const APP_VERSION_SEMVER = '2.98.28';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v120';
+  return 'chat-v121';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -495,6 +495,16 @@ changeCompanion: 'همدم بعدی',
 worldClocks: 'ساعت‌های جهانی',
 profileSettings: 'تنظیمات پروفایل چت',
 exportChats: 'برون‌ریزی گفتگوها',
+savedMessages: 'پیام‌های ذخیره‌شده',
+scheduleMessage: 'زمان‌بندی ارسال',
+linkPreviews: 'پیش‌نمایش لینک',
+linkPreviewsHint: 'روشن: وقتی لینکی می‌نویسید، همین دستگاه صفحه را باز می‌کند و عنوان و تصویر کوچکش رمزنگاری‌شده همراه پیام می‌رود؛ دستگاه گیرنده هرگز به آن سایت وصل نمی‌شود. سایت می‌بیند که از آدرس شما (یا پراکسی شما) باز شده. خاموش: هیچ صفحه‌ای باز نمی‌شود.',
+nativeProxy: 'پراکسی (v2ray، xray، Tor)',
+saveAndRestart: 'ذخیره و راه‌اندازی دوباره',
+screenGuard: 'محافظ صفحه',
+screenGuardDesc: 'جلوگیری از اسکرین‌شات، ضبط و اشتراک صفحه تا جایی که سیستم اجازه می‌دهد، و پوشاندن صفحه وقتی برنامه پنهان است',
+shareLiveLocation: 'موقعیت زنده',
+keyChangedStrict: 'این مخاطب را قبلاً تأیید کرده بودید؛ برای همین تا کلید تازه را بررسی نکنید، چیزی برایش فرستاده نمی‌شود. کد او را اسکن کنید یا شمارهٔ امنیتی را با خودش بسنجید.',
 importChats: 'درون‌ریزی گفتگوها',
 clearAllHistory: 'پاک‌سازی کل تاریخچه',
 chatRailResize: 'تغییر عرض ستون گفتگوها',
@@ -1553,6 +1563,16 @@ changeCompanion: 'Next companion',
 worldClocks: 'World clocks',
 profileSettings: 'Chat profile settings',
 exportChats: 'Export conversations',
+savedMessages: 'Saved Messages',
+scheduleMessage: 'Schedule message',
+linkPreviews: 'Link previews',
+linkPreviewsHint: 'On: when you type a link, this device opens the page and its title and a small picture travel encrypted with the message; the recipient\'s device never contacts the site. The site sees it opened from your address (or your proxy). Off: no page is opened.',
+nativeProxy: 'Proxy (v2ray, xray, Tor)',
+saveAndRestart: 'Save and restart',
+screenGuard: 'Screen guard',
+screenGuardDesc: 'Blocks screenshots, recording and screen sharing as far as the system allows, and covers the screen while the app is hidden',
+shareLiveLocation: 'Live location',
+keyChangedStrict: 'You had verified this contact, so nothing is sent to them until the new key is checked. Scan their code or compare the safety number with them.',
 importChats: 'Import conversations',
 clearAllHistory: 'Clear all history',
 chatRailResize: 'Resize the conversation column',
@@ -6574,7 +6594,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.27-chat-v120';
+const reloadKey = 'poorija-sw-reload-2.98.28-chat-v121';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6587,7 +6607,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.27-chat-v120', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.28-chat-v121', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();

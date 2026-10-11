@@ -58,7 +58,7 @@ check('the editor canvas is big enough to be worth downloading',
    the list is to be read at a glance, often over a shoulder. */
 const listJs = read('js/chat/24-settings-panels.js');
 check('the conversation list labels a hidden message instead of quoting it',
-  listJs.includes("last?.hidden ? t('پیام مخفی', 'Hidden message')") && listJs.includes('(last?.hidden ? \'\' : last?.text)'), '');
+  listJs.includes("last?.hidden ? t('پیام مخفی', 'Hidden message')") && listJs.includes("(last?.hidden ? '' : (typeof plainMessageText === 'function' ? plainMessageText(last?.text) : last?.text))"), '');
 
 /* Telegram semantics for the reveal: it lasts exactly as long as the reader
    stays in that thread. */
@@ -266,6 +266,9 @@ try {
   /* 4. The hidden message and the list that must not quote it. */
   const hidden = await page.evaluate(() => {
     const peer = chatState.peers.find((record) => record.peerId === 'same-relay-friend');
+    /* A contact this account chose — not a message request, which waits under
+       its own chip (49-message-requests.js). */
+    peer.accepted = true;
     const key = getConversationKey(peer);
     chatState.history[key] = [{
       id: 'hidden-1', direction: 'in', type: 'text', hidden: true,

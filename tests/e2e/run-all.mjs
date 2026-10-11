@@ -99,11 +99,19 @@ const runSuite = (name) => new Promise((resolve) => {
     const counted = [...output.matchAll(/=====\s*(\d+)\s+fail(?:ed|ing)\s+of\s+(\d+)\b[^=]*=====/g)].pop();
     const passed = [...output.matchAll(/^\s*(\d+)\/(\d+)\s+passed\s*$/gm)].pop();
     const checkCount = [...output.matchAll(/^\s*(\d+) checks passed\s*$/gm)].pop();
+    /* Two more spellings the source-level suites print, which used to land as
+       CRASHED: "passed — 16/16 checks" and "27 of 27 checks passed". */
+    const dashed = [...output.matchAll(/^\s*passed\s+—\s+(\d+)\/(\d+)\s+checks\s*$/gm)].pop();
+    const ofChecks = [...output.matchAll(/^\s*(\d+)\s+of\s+(\d+)\s+checks\s+passed\s*$/gm)].pop();
     const tally = counted
       ? { failed: Number(counted[1]), total: Number(counted[2]) }
       : passed
         ? { failed: Number(passed[2]) - Number(passed[1]), total: Number(passed[2]) }
-        : checkCount ? { failed: 0, total: Number(checkCount[1]) } : null;
+        : dashed
+          ? { failed: Number(dashed[2]) - Number(dashed[1]), total: Number(dashed[2]) }
+          : ofChecks
+            ? { failed: Number(ofChecks[2]) - Number(ofChecks[1]), total: Number(ofChecks[2]) }
+            : checkCount ? { failed: 0, total: Number(checkCount[1]) } : null;
     resolve({
       name,
       failed: tally ? tally.failed : null,

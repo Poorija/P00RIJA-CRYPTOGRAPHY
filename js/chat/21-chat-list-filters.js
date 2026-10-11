@@ -56,7 +56,8 @@ function chatListFilterChipsHtml(visibleRecords) {
   const pool = allConversationRecords()
     .filter((peer) => peer.type !== 'group')
     .filter((peer) => shouldShowConversation(peer))
-    .filter((peer) => Boolean(peer.archived) === Boolean(chatState.showArchived));
+    .filter((peer) => Boolean(peer.archived) === Boolean(chatState.showArchived))
+    .filter((peer) => !(typeof isMessageRequest === 'function' && isMessageRequest(peer)));
   const chips = CHAT_LIST_FILTERS.map((entry) => {
     const total = entry.id === 'all' ? pool.length : pool.filter(chatListFilterPredicate(entry.id)).length;
     if (entry.id !== 'all' && !total) return '';
@@ -70,7 +71,8 @@ function chatListFilterChipsHtml(visibleRecords) {
   const archiveChip = (archivedCount || showArchived)
     ? `<button type="button" role="tab" aria-selected="${showArchived}" data-chat-archive-shelf class="chat-list-filter chat-list-filter-archive ${showArchived ? 'is-on' : ''}" title="${app().escapeHTML(showArchived ? t('بازگشت به چت‌ها', 'Back to chats') : t('چت‌های آرشیو شده', 'Archived chats'))}"><i class="fas fa-box-archive"></i>${app().escapeHTML(t('آرشیو', 'Archived'))}${archivedCount ? `<span>${archivedCount > 99 ? '99+' : archivedCount}</span>` : ''}</button>`
     : '';
-  return `<div class="chat-list-filters" role="tablist">${chips}${archiveChip}</div>`;
+  const requestsChip = typeof messageRequestsChipHtml === 'function' ? messageRequestsChipHtml() : '';
+  return `<div class="chat-list-filters" role="tablist">${chips}${requestsChip}${archiveChip}</div>`;
 }
 function setChatListFilter(id) {
   chatState.chatListFilter = CHAT_LIST_FILTERS.some((entry) => entry.id === id) ? id : 'all';

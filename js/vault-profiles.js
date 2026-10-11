@@ -832,6 +832,10 @@
        and biometric unlock dies right after the fingerprint succeeds. */
     'poorija_passkey_local_wrap',
     'poorija_desktop_biometric_prompted',
+    /* The screen guard (js/screen-guard.js) covers the lock screen too, so the
+       lock screen has to be able to read it. It says only that the switch is
+       on, the same for every profile of the device. */
+    'poorija_screen_guard',
 
     /* Push belongs to the INSTALLATION, not to a profile: there is one service
        worker, one endpoint and one subscription for the whole browser. Two

@@ -14,7 +14,8 @@
         "decorations": true,
         "visible": false,
         "backgroundColor": "#0f172a",
-        "useHttpsScheme": true
+        "useHttpsScheme": true,
+        "create": false
       }
     ]
   }

@@ -137,6 +137,14 @@ const CHAT_RENDER_WINDOW_SIZE = 80;
 /* Returns the id only when it is made of identifier-safe characters. Anything
    else (markup, quotes, spaces) becomes '' and the caller regenerates a local
    id. Local ids are `prefix-<digits>-<base36>`, which always pass. */
+/* Conversation keys this device gives to conversations of its own: the
+   relay's announcements and Saved Messages (46-saved-messages.js). A key
+   that arrives from somebody else — a group id, a peer id, an edit's target
+   — never gets to be one of these, or a stranger could write into them. */
+const RESERVED_CONVERSATION_KEYS = new Set(['saved', 'system']);
+function isReservedConversationKey(value) {
+  return RESERVED_CONVERSATION_KEYS.has(String(value || ''));
+}
 function sanitizeRemoteId(value) {
   const text = String(value || '');
   return /^[A-Za-z0-9_-]{1,96}$/.test(text) ? text : '';

@@ -255,36 +255,59 @@ function offlineEnvelopeSignBytes(envelope) {
 const body = envelope?.body
 ? `${(envelope.body.iv || []).join(',')}|${envelope.body.cipher || ''}`
 : `msg:${JSON.stringify(envelope?.message || null)}`;
-return new TextEncoder().encode([
+const parts = [
 envelope?.fromFingerprint || '',
 envelope?.fromPeerId || '',
 envelope?.createdAt || '',
 body,
-].join('\n'));
+];
+/* v2 names the recipient too (sealed sender, 51-envelope-privacy.js): the
+   same envelope re-sealed to somebody else no longer verifies for them. */
+if (envelope?.to) parts.push(`to:${envelope.to}`);
+return new TextEncoder().encode(parts.join('\n'));
 }
 async function signOfflineEnvelope(envelope) {
 try {
 const key = await importIdentitySigningKey();
 const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, offlineEnvelopeSignBytes(envelope));
 envelope.sig = app().arrayBufferToBase64(signature);
-envelope.sigv = 1;
+envelope.sigv = envelope.to ? 2 : 1;
 } catch (error) {
 /* An envelope that cannot be signed still travels — an old receiver would
    ignore the field anyway, and silence is worse than an unverified seal. */
 console.warn('[Chat] could not sign the offline envelope:', error);
 }
 }
-/* 'verified' — the pinned key signed it. 'forged' — a key was pinned for this
-   name and what arrived does not match it. 'unsigned' — nothing to check, the
-   pre-signature world. 'unknown' — no pin yet: first contact, trust on first
-   use as every hello already is. */
-async function verifyOfflineEnvelopeSender(payload, fromId) {
+/* 'verified' — the pinned key signed it. 'forged' — a key is pinned for the
+   name it claims (by peer id or by fingerprint, this account's own included)
+   and what arrived does not match it. 'unsigned-pinned' — a contact with a
+   pinned key, but no signature: only the harmless kinds of message may pass
+   on that (see handleOfflineRelayMessage). 'unknown' — nobody is pinned under
+   either name yet: a first contact, trusted on first use as every hello is.
+   'unsigned' — no pin and no signature, the pre-signature world.
+
+   Both names an envelope gives are checked, not just the peer id: a sealed
+   sender's fingerprint is otherwise only a claim, and an envelope that named
+   a contact's fingerprint under an unknown peer id used to be taken at its
+   word. The relay's own proven fingerprint, where it has one, must agree with
+   the claim too. Any failure to check is a refusal, never a pass. */
+async function verifyOfflineEnvelopeSender(payload, fromId, { relayFingerprint = '' } = {}) {
+const myFingerprint = chatState.identity?.fingerprint || '';
+const claimed = String(payload?.fromFingerprint || '');
+/* Written to somebody else and re-sealed to this device. */
+if (payload?.to && payload.to !== myFingerprint) return 'forged';
+if (relayFingerprint && claimed && relayFingerprint !== claimed) return 'forged';
+const byId = typeof findPeerRecordByPeerId === 'function' ? findPeerRecordByPeerId(fromId) : null;
+const byFingerprint = claimed ? (chatState.peers || []).find((peer) => peer.fingerprint === claimed) || null : null;
+if (byId && byFingerprint && byId !== byFingerprint) return 'forged';
+const record = byId || byFingerprint;
+if (record?.fingerprint && claimed && record.fingerprint !== claimed) return 'forged';
+/* This account's own name: only this account's own key can have signed it. */
+const claimsSelf = Boolean(myFingerprint) && (claimed === myFingerprint || (fromId && fromId === chatState.peerId));
+const publicKeyData = claimsSelf ? String(chatState.identity?.publicKeyData || '') : String(record?.publicKeyData || '');
+if (!publicKeyData) return payload?.sig ? 'unknown' : 'unsigned';
+if (!payload?.sig) return claimsSelf ? 'forged' : 'unsigned-pinned';
 try {
-if (!payload?.sig) return 'unsigned';
-const record = typeof findPeerRecordByPeerId === 'function' ? findPeerRecordByPeerId(fromId) : null;
-const publicKeyData = record?.publicKeyData || '';
-if (!publicKeyData) return 'unknown';
-if (record.fingerprint && payload.fromFingerprint && record.fingerprint !== payload.fromFingerprint) return 'forged';
 const good = await verifyIdentitySignature(
 publicKeyData,
 app().base64ToArrayBuffer(payload.sig),
@@ -292,7 +315,7 @@ offlineEnvelopeSignBytes(payload),
 );
 return good ? 'verified' : 'forged';
 } catch (_error) {
-return 'unsigned';
+return 'forged';
 }
 }
 

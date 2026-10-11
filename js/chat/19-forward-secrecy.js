@@ -273,8 +273,13 @@ groups: chatState.spaces.groups,
 channels: [],
 });
 }
-function upsertSharedSpace(space) {
-if (!space?.conversationId || !space?.type) return null;
+function upsertSharedSpace(incoming, { addedBy = '' } = {}) {
+if (!incoming?.conversationId || !incoming?.type) return null;
+if (isReservedConversationKey(incoming.conversationId)) return null;
+/* Whether this account said yes to the group is its own answer, and who put
+   it there is what this device authenticated — neither is something a
+   record from outside gets to carry (49-message-requests.js). */
+const { accepted: _theirAnswer, addedBy: _theirClaim, ...space } = incoming;
 if (space.type !== 'group') return null;
 if (!spaceIncludesLocalUser(space)) return null;
 const collection = chatState.spaces.groups;
@@ -323,12 +328,16 @@ ownerPeerId: space.ownerPeerId || existing.ownerPeerId || '',
 ownerClientId: space.ownerClientId || existing.ownerClientId || '',
 ownerFingerprint: space.ownerFingerprint || existing.ownerFingerprint || '',
 members: mergedMembers.length || authoritative ? mergedMembers : normalizeSpaceMembers(existing.members),
+accepted: Boolean(existing.accepted),
+addedBy: existing.addedBy || '',
 });
 saveSpaces();
 return existing;
 }
 collection.unshift({
 ...space,
+/* The authenticated sender of the record that created it here. */
+addedBy: /^[a-f0-9]{16,128}$/i.test(String(addedBy || '')) ? String(addedBy) : '',
 type: 'group',
 ownerPeerId: space.ownerPeerId || '',
 ownerClientId: space.ownerClientId || '',

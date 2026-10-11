@@ -239,7 +239,7 @@ return `${modeLabel} - ${formatCallStatus(status)}`;
 function appendCallHistory(entry = {}) {
 const peer = entry.peerId ? findPeerRecordByPeerId(entry.peerId) : null;
 const conversationId = entry.conversationId || getConversationKey(peer) || entry.peerId || entry.fingerprint || '';
-if (!conversationId) return;
+if (!conversationId || isReservedConversationKey(conversationId)) return;
 // Use a stable ID for call logs to prevent duplicates (peerId + status + time-truncated)
 // We truncate to minute precision to avoid double logs from near-simultaneous end-call events
 const timeBucket = Math.floor(Date.parse(entry.createdAt || new Date()) / 60000);
@@ -531,7 +531,16 @@ chatState.prefs.turnChoices = savedPrefs.turnChoices && typeof savedPrefs.turnCh
 ? savedPrefs.turnChoices : {};
 chatState.prefs.pathChoices = savedPrefs.pathChoices && typeof savedPrefs.pathChoices === 'object'
 ? savedPrefs.pathChoices : {};
+chatState.prefs.linkPreviews = savedPrefs.linkPreviews === true;
 }
+/* Everybody already talked to is accepted once, so message requests
+   (49-message-requests.js) start with strangers and nobody else. */
+/* Readable, not merely non-empty: a fresh install has an empty book and is
+   seeded with nobody, so a stranger who writes later is a request and not
+   swept up by a seeding pass on some later boot. */
+const contactsUnreadable = typeof unreadableChatStores !== 'undefined' && typeof chatStorageAddress === 'function'
+&& unreadableChatStores.has(chatStorageAddress(CHAT_CONTACTS_STORAGE_KEY));
+if (Array.isArray(savedContacts) && !contactsUnreadable && typeof seedAcceptedConversations === 'function') seedAcceptedConversations(savedPrefs);
 /* Last step of every unlock: whatever the chat received while the vault was
    shut is sitting in the store cache marked dirty — land it in localStorage
    now that the key exists. */
@@ -993,7 +1002,9 @@ chatState.profile?.stablePeerId,
 ].filter(Boolean));
 const out = [];
 Object.entries(chatState.history || {}).forEach(([key, entries]) => {
-if (!key || key === 'system' || !Array.isArray(entries) || !entries.length) return;
+/* 'saved' is Saved Messages (46-saved-messages.js): its own record, never
+   somebody recovered from history. */
+if (!key || key === 'system' || key === 'saved' || !Array.isArray(entries) || !entries.length) return;
 if (covered.has(key) || mine.has(key)) return;
 const named = [...entries].reverse().find((entry) => entry?.senderName || entry?.username);
 out.push({
@@ -1032,6 +1043,7 @@ avatarData: '',
 lastSeenAt: chatState.history['system'].slice(-1)[0]?.timestamp || 0
 });
 }
+if (typeof shouldListSavedMessages === 'function' && shouldListSavedMessages()) result.push(savedMessagesRecord());
 return result;
 }
 function conversationRecordById(conversationId) {

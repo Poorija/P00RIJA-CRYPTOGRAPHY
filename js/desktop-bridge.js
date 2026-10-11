@@ -47,6 +47,11 @@
     return invoke(command, payload);
   };
 
+  /* Read once, as early as anything can: whether a proxy is set decides
+     whether the first peer connection may use a direct path at all
+     (js/chat/53-native-proxy.js), and that must be known before it is made. */
+  window.__POORIJA_SHELL_SETTINGS__ = invoke('desktop_get_shell_settings').catch(() => null);
+
   window.__POORIJA_DESKTOP_DIALOG__ = {
     open(options) {
       if (!dialog?.open) return Promise.resolve(null);
@@ -179,6 +184,16 @@
 
     /* ---- external links ---- */
     openExternal: (url) => invoke('desktop_open_external', { url }),
+
+    /* ---- screen guard (js/screen-guard.js) ---- */
+    setScreenGuard: (enabled) => invoke('desktop_set_screen_guard', { enabled: Boolean(enabled) }),
+
+    /* ---- proxy (js/chat/53-native-proxy.js) ---- */
+    setProxy: (url) => invoke('desktop_set_proxy', { url: String(url || '') }),
+    restart: () => invoke('desktop_restart'),
+
+    /* ---- link previews (js/chat/54-link-preview.js) ---- */
+    linkPreview: (url) => invoke('desktop_link_preview', { url: String(url || '') }),
 
     bytesToBase64,
     base64ToBytes

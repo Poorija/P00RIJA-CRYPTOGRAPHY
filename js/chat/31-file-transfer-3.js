@@ -813,6 +813,21 @@ if (isPeerKeyBlocked(incomingPeerId)) {
 call?.close?.();
 return;
 }
+/* A message request does not ring (49-message-requests.js): the call is
+   written down as missed and the person decides later. */
+if (typeof callFromMessageRequest === 'function'
+&& callFromMessageRequest(incomingPeerId, { provenFingerprint: invite?.provenFingerprint || '' })) {
+const requestPeer = findPeerRecordByPeerId(incomingPeerId);
+appendCall({
+name: requestPeer?.username || call?.metadata?.username || invite?.name || incomingPeerId,
+peerId: incomingPeerId,
+mode: call?.metadata?.mode || invite?.mode || 'voice',
+status: 'missed',
+direction: 'in',
+});
+call?.close?.();
+return;
+}
 if (chatState.currentCall && incomingPeerId !== chatState.currentCall?.peer) {
 const busyPeer = findPeerRecordByPeerId(incomingPeerId);
 if (busyPeer) {

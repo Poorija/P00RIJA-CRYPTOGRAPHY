@@ -1,182 +1,202 @@
-# P00RIJA Cryptography 2.98.27
+# P00RIJA Cryptography 2.98.28
 
-Version 2.98.27 · build chat-v120
+Version 2.98.28 · build chat-v121
 
-این نسخه حاصل یک ممیزی کامل روی دو رلهٔ واقعی (خارج از ایران و ایران) است: هر یافته
-فیکس شد، مسیر تماس و فایل هوشمند شد، گروه‌ها بین دو رله کار می‌کنند، و
-همگام‌سازی چند دستگاهی دستگاه‌به‌دستگاه شد بی‌آنکه سروری چیزی برای دستگاه دیگر
-نگه دارد. متن هر بخش اول فارسی است و بعد انگلیسی.
+دوازده قابلیت تازه برای چت امن و کل برنامه: پنهان شدن فرستنده از رله، اندازهٔ
+یکسان برای پیام‌ها، تأیید هویت با اسکن کد، صندوق درخواست پیام، آدرس پشتیبان
+برای رله، محافظ صفحه، پراکسی، و چند امکان روزمره. هر قابلیت پیش از انتشار با
+تست واقعی بین دو رله و یک بازبینی امنیتی جدا آزموده شده و یافته‌های آن بازبینی
+همه فیکس شده‌اند. متن هر بخش اول فارسی است و بعد انگلیسی.
 
-This release comes from a full audit of the two production relays (outside Iran and
-Iran): every finding fixed, a measured route for calls and files, groups that
-work across relays, and multi-device sync that runs device to device with no
-server keeping anything for the other device. Each section is Persian first,
-English after.
-
----
-
-## ۱. پیامی که بی‌صدا گم نمی‌شود · Messages that no longer vanish quietly
-
-- **پیام در رلهٔ اشتباه دیگر «تحویل شده» نشان داده نمی‌شود** — وقتی رلهٔ خانگی
-  مخاطب معلوم نبود، پیام در رلهٔ خودت صف می‌شد و تیک «ارسال شد» می‌گرفت، در حالی
-  که گیرنده هرگز به آن رله وصل نمی‌شد. حالا رله می‌گوید این گیرنده را نمی‌شناسد،
-  برنامه از رله‌های متصل می‌پرسد او کجا زندگی می‌کند، پیام‌های پارک‌شده را از
-  مسیر درست دوباره می‌فرستد و نسخه‌های سرگردان را پس می‌گیرد.
-- **خطای لحظه‌ای لینک بین دو رله پیام را ناموفق نمی‌کند** — پیام در صف می‌ماند و
-  تا یک روز با فاصلهٔ فزاینده خودکار دوباره فرستاده می‌شود؛ به‌محض اولین پاسخ لینک،
-  صف جلو می‌افتد.
-- **باگ رله در پنجرهٔ وصل‌شدن دوبارهٔ لینک** — پاکتی که در آن لحظه می‌رسید پارک
-  می‌شد و بعد روی متغیرِ تهی فرستاده می‌شد؛ همه با خطا ناموفق می‌شدند. فیکس شد.
-- **لینک مرده در ~۳۰ ثانیه شناخته می‌شود** (قبلاً تا ~۷۵ ثانیه) و پاکت‌های بی‌پاسخش
-  همان لحظه برای ارسال دوباره آزاد می‌شوند.
-- **تکه‌های فایل بین دو رله** شماره‌دار، با پنجرهٔ کنترل سرعت و ارسال دوبارهٔ
-  تکهٔ گمشده؛ گیرنده هم می‌تواند تکه‌های گمشده را از مسیر رله بخواهد.
-- **تماس با مخاطب آفلاینِ رلهٔ دیگر** به‌جای ۴۵ ثانیه زنگِ بی‌حاصل، به حالت
-  «زنگ برای مخاطب آفلاین» می‌رود و به‌محض برگشتن او برقرار می‌شود.
-
-- **A message parked at the wrong relay no longer shows as delivered.** The relay
-  now says when it queues for a stranger; the app asks the linked relays where
-  that person lives, re-sends the parked messages the right way and withdraws
-  the stray copies.
-- **A transit hiccup no longer fails a message**: it stays queued and is retried
-  with backoff for up to a day, brought forward the moment the link answers.
-- **The relay's redial-window bug** (a parked envelope sent on a null link) is
-  fixed; a dead link is noticed in ~30 s instead of ~75 s, and its unanswered
-  envelopes are released for retry at once.
-- **File chunks across relays** are tagged, paced and re-sent when lost; the
-  receiver can ask for missing chunks over the relay too.
-- **Calling an offline contact on another relay** turns into the offline ring and
-  connects when they come back, instead of ringing nobody for 45 seconds.
-
-## ۲. گروه بین دو رله · Groups across relays
-
-- **هر عضو به هر عضو می‌رسد** — فهرست گروه فقط اثرانگشت اعضا را داشت؛ عضوی که
-  مخاطب مستقیم نبود بی‌صدا جا می‌افتاد و در گروهی با اعضای فنلاند و ایران، فقط کسانی
-  که کارت هم را داشتند صدای هم را می‌شنیدند. حالا با فهرست گروه یک «کارت عضو»
-  برای هر عضو می‌رود (کلید عمومی + رلهٔ خانگی، کلید با اثرانگشت چک می‌شود) و عضو
-  ناآشنا به‌صورت ساکت نگه داشته می‌شود — بدون باز شدن چت جدید.
-- **کد دعوت** رلهٔ دعوت‌کننده و کارت اعضا را نگه می‌دارد.
-- **حریم خصوصی** — اطلاعات گروه دیگر برای هر کسی که آنلاین می‌شد فرستاده نمی‌شود،
-  فقط برای اعضا.
-
-- **Every member reaches every member**: rosters carry a verified card per member
-  (public key + home relay; the key must hash to the fingerprint), so members
-  who never swapped cards can seal to each other on either relay.
-- **Invite codes keep the inviter's relay** and carry member cards.
-- **Privacy**: a group's record is no longer pushed to every peer that comes online.
-
-## ۳. مسیر هوشمند برای تماس و فایل · A measured route for calls and files
-
-- **اول P2P، اگر پایدار بود** — ICE مسیر مستقیم را ترجیح می‌دهد؛ برنامه حالا
-  می‌سنجد که آن مسیر *دوام* می‌آورد یا نه. اندازه‌گیری روی سرورها نشان داد جریان UDP
-  که از داخل ایران شروع شود بعد از ۷ تا ۹ بسته قطع می‌شود؛ مسیر مستقیمی که این‌طور
-  می‌میرد یا ضعیف می‌ماند با یک ICE restart به مسیر رله منتقل می‌شود و آن مخاطب
-  یک روز به خاطر سپرده می‌شود تا تماس بعدی مستقیم از مسیر رله شروع شود.
-- **TURN مشترک، فقط برای همان تماس یا انتقال** — برای ارتباط بین دو رله، از رلهٔ
-  مخاطب یک اعتبارنامهٔ کوتاه‌مدت TURN گرفته و فقط به همان اتصال اضافه می‌شود تا هر
-  دو طرف روی یک TURN به هم برسند؛ پروفایل دست نمی‌خورد و با پایان تماس از بین می‌رود.
-- **کانال مستقیم داده بین دو رله** — پیام و فایل بین دو نفر روی دو رلهٔ مختلف حالا
-  از کانال مستقیم (یا TURN) می‌رود، نه تکه‌تکه از رله‌ها.
-- **اعتبارنامهٔ TURN زمان‌دار (TURN REST)** — `/turn-config` دیگر رمز ثابت coturn را
-  به همه نمی‌دهد؛ هر کلاینت اعتبارنامهٔ منقضی‌شونده می‌گیرد و پیش از انقضا تازه می‌کند.
-- **TURNS روی سرور ایران دوباره روشن است** — کلید TLS برای coturn قابل خواندن نبود؛
-  دیپلوی و تمدیدکنندهٔ گواهی حالا مالکیت را درست و coturn را ری‌استارت می‌کنند.
-
-- **Direct first, if it holds**: the selected pair is watched; a direct path that
-  dies or stays poor moves to a relay path once, and the contact is remembered
-  for a day. (Measured: a UDP flow started from inside Iran is cut after 7–9
-  packets.)
-- **A shared TURN, for that connection only**: a short-lived credential from the
-  contact's relay is added to the one call or transfer that needs it.
-- **A live data channel across relays** carries sessions, messages, and files.
-- **TURN REST**: expiring credentials instead of the static coturn pair.
-- **TURNS on the Iran server is back** (coturn could not read its key).
-
-## ۴. چند دستگاه، دستگاه‌به‌دستگاه · Several devices, device to device
-
-- **سرور برای دستگاه آفلاین چیزی نگه نمی‌دارد** — دستگاهی که هم‌اکانت داشت رسید
-  پیام‌ها را تا برگشتن همهٔ دستگاه‌ها نگه می‌داشت و رله همه‌چیز را — حتی تکه‌های
-  فایل — هفته‌ها نگه می‌داشت. رسید حالا فوری است.
-- **beacon رمزنگاری‌شده (حداکثر ۸ کیلوبایت)** — هر دستگاه یک خلاصهٔ رمزنگاری‌شده با
-  کلید خود اکانت روی رله می‌گذارد: زمان آخرین پیام هر گفتگو (با نام هش‌شده) و
-  رلهٔ خانگی دستگاه؛ هیچ متن، نام یا فایلی. دستگاه برگشته می‌فهمد عقب است و به‌محض
-  آنلاین بودن هر دو، فقط تغییرات را مستقیم از دستگاه دیگر می‌گیرد.
-- **پیام فرستاده‌شده روی یک دستگاه** فوراً روی دستگاه‌های آنلاین دیگر دیده می‌شود.
-- **فایل‌ها** فقط به درخواست شما و فقط وقتی هر دو دستگاه آنلاین‌اند منتقل می‌شوند؛
-  وگرنه ردیف پیام می‌گوید فایل روی دستگاه دیگر است.
-
-- **No server keeps anything for an absent device**: acknowledgements are
-  immediate; the relay no longer holds mail (file chunks included) for siblings.
-- **An encrypted beacon of at most 8 KB** per device tells a returning device it
-  is behind; deltas then come straight from a sibling while both are online.
-- **Sent messages are mirrored live** to the account's other online devices.
-- **Files sync only when asked, and only while both devices are online.**
-
-## ۵. امنیت · Security
-
-- رمز مانیتور فقط به‌صورت هش scrypt ذخیره می‌شود (قبلاً متن ساده بود).
-- origin که رله به کلاینت‌های رلهٔ دیگر اعلام می‌کند دیگر از هدر Host قابل جعل نیست.
-- یک بروزرسانی حضور دیگر بلاک، بی‌صدا، آرشیو و تایمر پیام را پاک نمی‌کند.
-- کارت مخاطبی که فوروارد می‌شود دیگر «حدس» رلهٔ خانگی را به «کارت» ارتقا نمی‌دهد.
-
-- The monitor password is stored only as a scrypt hash.
-- The origin a relay repeats to linked relays can no longer be set by a Host header.
-- A presence update no longer clears block, mute, archive, and the message timer.
-- Forwarding a contact card no longer launders a relay hint into a card.
-
-## ۶. زیر کاپوت · Under the hood
-
-- `standalone-relay` همان برنامهٔ رلهٔ اصلی را اجرا می‌کند (نسخهٔ جداگانه‌اش عقب
-  افتاده بود)؛ پورت اشغالِ نصب‌کنندهٔ bootstrap دیگر رله را از کار نمی‌اندازد.
-- **گواهی‌ها با Let's Encrypt (رایگان)** صادر و ۱۰ روز مانده به انقضا خودکار تمدید
-  می‌شوند؛ آستانهٔ خود certbot هم روی ۱۰ روز هم‌گام می‌شود. اسکریپت تمدیدکننده با هر
-  دیپلوی به سرور می‌رسد و تاریخ openssl را زیر busybox درست می‌خواند (قبلاً هر شش
-  ساعت گواهی سالم را «ناموجود» گزارش می‌کرد).
-- nginx آدرس `/transit-peers` را به رله می‌رساند و ابزار تازهٔ
-  `tools/check-nginx-routes.cjs` جلوی دیپلوی مسیری را می‌گیرد که nginx نمی‌شناسد.
-- نوشتن صندوق نامه حداکثر ظرف یک ثانیه روی دیسک است؛ فایل‌های موقت جامانده جارو می‌شوند.
-- سوئیت‌های جدید: پرسش‌های بین‌رله‌ای (۲۷ چک)، گروه بین دو رله (۱۶)، مسیر هوشمند و
-  کانال داده (۱۵)، beacon چند دستگاهی (۱۰).
-
-- `standalone-relay` now runs the deployed relay program; a busy bootstrap port
-  no longer kills the relay.
-- **Let's Encrypt certificates (free)** are issued automatically and renewed
-  when ten days are left; certbot's own window is kept in step. The renewer's
-  script ships with every deploy and reads OpenSSL's date under busybox (it
-  used to call a healthy certificate missing every six hours).
-- nginx routes `/transit-peers` to the relay, and `tools/check-nginx-routes.cjs`
-  stops a deploy that would send a relay path to the single-page app.
-- Mailbox writes reach disk within a second; leftover temp files are swept.
-- New suites: transit queries (27), groups across relays (16), smart path and
-  data link (15), device beacon (10).
+Twelve new features for the secure chat and the app as a whole: a sender the
+relay cannot see, messages of uniform size, verification by scanning a code,
+message requests, backup addresses for a relay, a screen guard, a proxy, and a
+few everyday conveniences. Each was tested end to end across two relays and
+reviewed for security on its own, and every finding of that review is fixed.
+Each section is Persian first, English after.
 
 ---
 
-## بررسی صحت فایل‌ها · Verifying the downloads
+## ۱. آنچه رله دیگر نمی‌بیند · What the relay no longer sees
 
-روی مک · on macOS:
+- **فرستندهٔ پنهان (Sealed Sender)** — پیامی که برای مخاطبِ آفلاین در صف رله
+  می‌ماند دیگر اسم فرستنده، امضا، نوع پیام و زمانش را بیرون نشان نمی‌دهد؛ همهٔ این‌ها
+  در جعبه‌ای رمزنگاری‌شده با همان کلیدی است که فقط گیرنده باز می‌کند. رله پیام را
+  بدون نام فرستنده در صندوق ذخیره می‌کند و بدون نام فرستنده تحویل می‌دهد، و در
+  فایل صندوق روی سرور هیچ ردی از اینکه چه کسی به چه کسی نوشته نمی‌ماند. امضا حالا
+  گیرنده را هم پوشش می‌دهد تا پیامی که برای یک نفر بوده، برای نفر دیگری جا زده نشود.
+  فقط برای مخاطبی به کار می‌رود که نسخه‌اش آن را می‌خواند؛ نسخه‌های قدیمی همان شکل
+  قبلی را می‌گیرند.
+- **اندازهٔ یکسان (Padding)** — طول متنِ رمزشده همان طول پیام بود؛ «باشه» و یک
+  نامهٔ بلند و یک رسید از روی اندازه قابل تشخیص بودند. حالا بدنهٔ پیام‌های صف‌شده و
+  هر فریم کوچکِ مسیر مستقیم به چند اندازهٔ ثابت (۵۱۲ بایت تا ۶۴ کیلوبایت) گرد
+  می‌شوند.
+- **هر پاکت امضا دارد** — پاکتِ بی‌امضایی که خودش را یکی از مخاطبان جا می‌زد، قبلاً
+  به‌عنوان «شکل قدیمی» پذیرفته می‌شد. حالا هر دو نامی که پاکت می‌دهد با کلید
+  ذخیره‌شده چک می‌شود، نامِ خودِ شما فقط با امضای خودِ شما پذیرفته است، و پاکت
+  بی‌امضا از یک مخاطبِ شناخته‌شده فقط برای رسید و «در حال نوشتن» قبول می‌شود.
 
-```bash
-shasum -a 256 -c SHA256SUMS.txt
-```
+- **Sealed sender.** A message queued for somebody who is away no longer shows
+  its sender, signature, kind, or time on the outside; they travel in a box
+  encrypted under the key only the recipient can recover. The relay files and
+  delivers it without a sender, and the mailbox on its disk says nothing about
+  who wrote to whom. The signature now covers the recipient, so an envelope
+  written to one person cannot pass as written to another. Used only toward a
+  build that reads it; older builds get the old shape.
+- **Padding.** Ciphertext was as long as what it hid. Queued bodies and every
+  small frame on a live channel are now rounded to fixed sizes, 512 B to 64 KB.
+- **Every envelope signed.** An unsigned envelope naming a contact used to pass
+  as "the old format". Both names an envelope gives are now checked against the
+  pinned key, the reader's own name is accepted only with the reader's own
+  signature, and an unsigned envelope from a pinned contact is accepted only for
+  receipts and typing.
 
-روی لینوکس · on Linux:
+## ۲. اعتماد به مخاطب · Trusting a contact
 
-```bash
-sha256sum -c SHA256SUMS.txt
-```
+- **تأیید با اسکن کد** — در صفحهٔ تأیید کلید، کدی نمایش داده می‌شود که اثرانگشت هر
+  دو طرف را دارد؛ یکی کد دیگری را با دوربین اسکن می‌کند و اگر جور باشد مخاطب خودکار
+  تأیید می‌شود. اگر کسی میان شما کلید عوض کرده باشد، کدها جور نمی‌شوند و برنامه
+  همین را می‌گوید. فقط با دوربین: تصویرِ یک کد چیزی دربارهٔ صاحب گوشی ثابت نمی‌کند.
+- **نشان «تأییدشده»** در فهرست چت‌ها.
+- **قانون سخت‌تر برای مخاطب تأییدشده** — اگر کلید مخاطبی که تأیید کرده بودید عوض
+  شود، تا کلید تازه را بررسی نکنید چیزی برایش فرستاده نمی‌شود (پیام، فایل، پیام
+  زمان‌بندی‌شده). اسکن کد تازه کلید را می‌پذیرد و تأیید می‌کند؛ پذیرفتن بدون اسکن هم
+  ممکن است اما با هشدار صریح.
+- **صندوق درخواست پیام** — پیام کسی که در مخاطبان شما نیست زیر «درخواست‌ها» می‌ماند:
+  صدا و اعلان ندارد، رسید خواندن نمی‌گیرد، فایل و استیکرش نمایش داده نمی‌شود، فایل
+  بزرگش همیشه پرسیده می‌شود و تماسش زنگ نمی‌زند (به‌عنوان تماس ازدست‌رفته ثبت
+  می‌شود). گروهی که غریبه‌ای شما را در آن گذاشته هم همین‌طور. با یک دکمه پذیرفته
+  می‌شود و پاسخ دادن هم یعنی پذیرفتن. مخاطبان قبلی شما خودکار پذیرفته شده‌اند.
 
-روی ویندوز (PowerShell) · on Windows:
+- **Verify by scanning a code.** The safety panel shows a code holding both
+  fingerprints; one of you scans the other's with the camera, and the contact is
+  verified when the halves fit. A relay that swapped a key produces codes that
+  do not fit, and the scan says so. Camera only: a picture of a code proves
+  nothing about whose phone it came from.
+- **A verified badge** in the chat list.
+- **A stricter rule for verified contacts.** When a verified contact's key
+  changes, nothing is sent to them — messages, files, scheduled messages — until
+  the new key is checked. Scanning their new code accepts and verifies it in one
+  step; accepting without a scan is possible, with a plain warning.
+- **Message requests.** What somebody who is not a contact sends waits under
+  Requests: no sound, no notification, no read receipt, files, and stickers not
+  drawn, large files always asked about, calls logged as missed instead of
+  ringing. A group a stranger put you in waits the same way. One tap accepts,
+  and replying accepts. Everybody you already talked to is accepted.
 
-```powershell
-Get-FileHash ".\P00RIJA Cryptography_2.98.27_x64-setup.exe" -Algorithm SHA256
-```
+## ۳. وقتی دامنه مسدود است · When the domain is blocked
 
-برای یک فایل تکی، چک‌سام را با سطر مربوط به همان فایل در `SHA256SUMS.txt`
-مقایسه کنید. اگر نخواند، نصبش نکنید و دوباره دانلود کنید.
-For a single file, compare the hash against that file's line in
-`SHA256SUMS.txt`. If it does not match, do not install it — download again.
+- **آدرس‌های پشتیبان برای رله** — مدیر سرور می‌تواند آدرس‌های دیگری که به همان
+  رله می‌رسند (دامنهٔ دوم یا یک CDN) را در `CHAT_MIRROR_ORIGINS` معرفی کند. برنامه
+  فهرست را وقتی آدرس اصلی کار می‌کند یاد می‌گیرد — فهرستی که با کلید خود رله تأیید
+  شده و کسی سر راه نمی‌تواند آدرسی به آن اضافه کند. اگر آدرس اصلی ۲۵ ثانیه پاسخ
+  ندهد، آدرس پشتیبان باید ثابت کند به دارندهٔ کلیدِ همان رله می‌رسد، بعد اتصال از آن
+  برقرار می‌شود؛ آدرس تنظیم‌شدهٔ شما دست نمی‌خورد و هر چند دقیقه دوباره امتحان
+  می‌شود. CSP صفحه آدرس‌های پشتیبان را خودکار شامل می‌شود.
+- **اتصال رله‌به‌رله با چند آدرس** — در `CHAT_TRANSIT_PEERS` می‌شود برای یک رله
+  چند آدرس با `|` داد؛ به نوبت امتحان می‌شوند.
+- **پراکسی در نسخهٔ نیتیو (ویندوز و لینوکس)** — v2ray، xray یا Tor محلی را در
+  تنظیمات اتصال وارد کنید (`socks5://127.0.0.1:10808`)؛ پنجرهٔ برنامه و درخواست‌های
+  خود برنامه از آن عبور می‌کنند و نام‌ها هم در پراکسی resolve می‌شوند. چون WebRTC
+  روی UDP از پراکسی رد نمی‌شود، با پراکسی تماس‌ها و انتقال مستقیم فقط از مسیر رله
+  برقرار می‌شوند تا آدرس شما به طرف مقابل نرسد. روی مک از پراکسی سیستم استفاده
+  کنید و روی گوشی از برنامه‌ای مثل v2rayNG در حالت VPN.
 
----
+- **Backup addresses for a relay.** An operator can list other addresses that
+  reach the same relay (a second domain, a CDN) in `CHAT_MIRROR_ORIGINS`. The app
+  learns the list while the main address works, authenticated by the relay's own
+  key so nobody on the path can add to it. If the main address is silent for 25
+  seconds, a mirror must prove it reaches the holder of that relay's key before
+  the app connects through it; the configured address is kept and tried again
+  every few minutes. The page's CSP includes the mirrors automatically.
+- **Relay-to-relay links with several addresses**: `CHAT_TRANSIT_PEERS` takes
+  `id@https://a|https://b`, tried in turn.
+- **A proxy for the native app on Windows and Linux.** Enter a local v2ray, xray
+  or Tor (`socks5://127.0.0.1:10808`) in the connection settings; the window and
+  the app's own requests use it, with names resolved at the proxy. WebRTC over UDP
+  does not go through a proxy, so while one is set calls and direct transfers go
+  through the relay only. On a Mac, use the system proxy; on a phone, a VPN-mode
+  client such as v2rayNG.
 
-AGPL-3.0-only · P00RIJA · p00rija@tutamail.com
+## ۴. محافظ صفحه · Screen guard
+
+- یک کلید در تنظیمات امنیتی: روی **اندروید** سیستم جلوی اسکرین‌شات و ضبط صفحه را
+  می‌گیرد و کارت برنامه در فهرست برنامه‌های اخیر خالی است (از اولین فریم اجرای بعد)؛
+  روی **ویندوز و مک** پنجره از اسکرین‌شات، ضبط و اشتراک صفحه کنار گذاشته می‌شود؛ روی
+  لینوکس، iOS و مرورگر چنین کلیدی در سیستم نیست، پس برنامه هر وقت پنهان شود یا از
+  فوکوس خارج شود خودش را می‌پوشاند و صادقانه می‌گوید که جلوی اسکرین‌شاتِ پنجرهٔ باز را
+  نمی‌شود گرفت.
+
+- One switch in the security settings. **Android** refuses screenshots and
+  recording and blanks the recent-apps card, from the first frame of the next
+  start; **Windows and macOS** leave the window out of screenshots, recordings
+  and screen sharing; on Linux, iOS, and browsers the system has no such switch,
+  so the app covers itself whenever it is hidden or loses focus, and says that a
+  screenshot of the open window cannot be stopped there.
+
+## ۵. امکانات چت · Chat conveniences
+
+- **قالب‌بندی متن** — `*پررنگ*`، `_کج_`، `~خط‌خورده~`، `` `کد` ``، بلوک کد، و
+  `||متن پنهان||` که با لمس باز می‌شود؛ لینک‌ها قابل کلیک‌اند. میان‌برها: Ctrl/⌘+B و I،
+  و Ctrl/⌘+Shift+X، M، P. نسخه‌های قدیمی همان علامت‌ها را نشان می‌دهند.
+- **پیام‌های ذخیره‌شده** — یادداشت، لینک یا فایل برای خودتان، و هدایت هر پیام به
+  آن. فقط روی دستگاه‌های خودتان می‌ماند و مستقیم بین آن‌ها همگام می‌شود؛ هیچ سروری
+  چیزی از آن نمی‌بیند. از دکمهٔ نشانک بالای فهرست چت‌ها باز می‌شود.
+- **ارسال زمان‌بندی‌شده** — از منوی + یا کلیک راست روی دکمهٔ ارسال. پیام روی همین
+  دستگاه می‌ماند و سر وقت از همین دستگاه فرستاده می‌شود (اگر برنامه بسته باشد، با
+  باز شدن بعدی)؛ دستگاه دیگر شما آن را «زمان‌بندی‌شده» نشان می‌دهد اما نسخهٔ دوم
+  نمی‌فرستد.
+- **موقعیت زنده** — ۱۵ دقیقه، ۱ ساعت یا ۸ ساعت. فقط یک کارت فرستاده می‌شود و
+  به‌روزرسانی‌ها پین آن را جابه‌جا می‌کنند (هر ۲۵ متر حرکت یا دقیقه‌ای یک بار، حداکثر
+  هر ۱۵ ثانیه)؛ برای کسی که آنلاین نیست حداکثر یکی در هر ۵ دقیقه در صف می‌ماند.
+  توقف، پایان زمان و بستن برنامه اشتراک را در هر دو طرف تمام می‌کند. هیچ کاشی نقشه‌ای
+  دانلود نمی‌شود.
+- **پیش‌نمایش لینک (فقط دسکتاپ، پیش‌فرض خاموش)** — دستگاه فرستنده صفحه را باز
+  می‌کند و عنوان و تصویر کوچک رمزنگاری‌شده همراه پیام می‌رود؛ دستگاه گیرنده هرگز به
+  سایت وصل نمی‌شود. فقط آدرس‌های عمومی، بدون ریدایرکت به سایت دیگر، با سقف حجم و
+  زمان؛ کارت فقط برای میزبانِ لینکی که در متن دیده می‌شود رسم می‌شود. با پراکسی و
+  برای درخواست‌های پیام خاموش است.
+
+- **Text formatting**: `*bold*`, `_italic_`, `~strike~`, `` `code` ``, code
+  blocks, and `||spoilers||` revealed by a tap; links are clickable. Shortcuts:
+  Ctrl/⌘+B and I, Ctrl/⌘+Shift+X, M, P. Older builds show the markers as typed.
+- **Saved Messages**: notes, links, and files for yourself, and any message
+  forwarded there. It stays on your own devices and syncs directly between them;
+  no server sees any of it. Opened from the bookmark above the chat list.
+- **Scheduled messages**, from the + menu or a right-click on Send. The message
+  waits on this device and is sent from it at that time (or when the app next
+  opens); your other device shows it as scheduled and never sends a second copy.
+- **Live location** for 15 minutes, an hour, or eight hours. One card is sent and
+  updates move its pin (every 25 m or once a minute, never more often than every
+  15 seconds); at most one per five minutes is queued for somebody not connected.
+  Stopping, running out, and closing the app end it on both sides. No map tiles
+  are fetched.
+- **Link previews (desktop only, off by default)**: the sender's device opens the
+  page and its title and a small picture travel encrypted with the message; the
+  recipient's device never contacts the site. Public addresses only, no redirect
+  to another site, size and time caps; a card is drawn only for the host of a link
+  visible in the text. Off behind a proxy and for message requests.
+
+## ۶. رفع اشکال · Fixes
+
+- **دکمهٔ «قطع اتصال» خودش دوباره وصل نمی‌شود** — اتصالی که هنگام زدن دکمه در
+  جریان بود، بعد از تمام شدن دوباره آنلاین می‌شد؛ گرم کردن سشن در پس‌زمینه هم همین کار
+  را می‌کرد.
+- کلیدهای مکالمه‌ای که مال خود دستگاه‌اند (پیام‌های ذخیره‌شده، اعلان‌های سیستم) از
+  شناسهٔ گروه، شناسهٔ همتا یا هدف ویرایشی که از بیرون می‌رسد محافظت می‌شوند.
+
+- **Disconnect stays disconnected.** A connect already in flight when the button
+  was pressed came back online when it finished, and so did a session warm-up in
+  the background.
+- Conversation keys that belong to this device (Saved Messages, the
+  announcements thread) are refused as remote group ids, peer ids, or edit targets.
+
+## راه‌اندازی · Operator notes
+
+- `CHAT_MIRROR_ORIGINS` (اختیاری): آدرس‌های پشتیبان، با فاصله یا کاما. هر آدرس باید با
+  گواهی معتبر برای نام خودش به همین سرور برسد — CDN در حالت TLS کامل این کار را
+  می‌کند. / Optional backup addresses, space- or comma-separated; each must reach
+  this server with a certificate valid for its name (a CDN in full TLS mode does).
+- سرور باید با این نسخه به‌روز شود تا فرستندهٔ پنهان، آدرس‌های پشتیبان و پس‌گرفتن پیام
+  با رمز کار کنند. / The relay must be updated for sealed sender, mirrors and
+  secret-based withdrawal; clients fall back to the old shapes against an old relay.

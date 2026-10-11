@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.27**
+نسخهٔ این پکیج: **2.98.28**
 
 </div>
 
@@ -401,9 +401,9 @@ document commits, so registered timers never fire and every global reads
 `undefined`. To probe the real page, put the probe in the frontend.
 
 **A UDP flow started from inside Iran dies after a few packets.** Measured
-between the two production servers: Finland→Iran, 300 of 300 datagrams;
-Iran→Finland when Iran sends first, 7–9 and then nothing; Iran→Finland after
-Finland spoke first, 283 of 300. It is not a firewall and not DPI of the
+between the two production servers: outside→Iran, 300 of 300 datagrams;
+Iran→outside when Iran sends first, 7–9 and then nothing; Iran→outside after
+the outside server spoke first, 283 of 300. It is not a firewall and not DPI of the
 STUN/DTLS shape — both pass. So a TURN-on-each-side candidate pair between
 the two relays never connects, and a direct path from an Iranian client can
 connect and then die. That is why a cross-relay connection borrows the
@@ -423,6 +423,42 @@ writes coordinates into, use physical `left`/`right` only.
 **Playwright:** `isMobile: true` / `hasTouch: true` trips the PWA install gate,
 `checkFirstVisit()` returns before setup runs, and `#mainApp` stays at
 `opacity-0` — every screenshot comes out blank. Use a narrow viewport instead.
+
+**Message requests change what a test sees (2.98.28).** Somebody this account
+never added, pinned, synced or wrote to is a message request: their
+conversation is not in the main list, makes no sound, gets no read receipt and
+their calls do not ring. A suite that has only ONE side import the other's card
+and then clicks "the first card" on the other side now clicks nothing. Accept
+the request the way a person would —
+`allConversationRecords().filter(isMessageRequest).forEach(acceptMessageRequest)`
+— or have both sides import each other. Being in a group is NOT acceptance:
+group member lists are assembled from what members send.
+
+**Who a message is from is never what it says about itself.** Request status,
+"who put me in this group" (`addedBy`), the caller of a call and the mover of
+a live-location pin are all decided from what this device authenticated — the
+session, the relay's proven fingerprint, a verified signature — and never from
+fields a sender wrote (`ownerFingerprint`, call metadata, a `~device` suffix).
+The background security review found every one of those shortcuts; keep it so.
+
+**Sealed sender hides the sender from the relay.** An `offline-chat` envelope
+with `ss: 1` names nobody outside; `message.fromFingerprint` on the relay frame
+is blank for it. Anything new that needs the sender has to read it after
+`openSealedSender`, from the signed fields inside. Only toward a contact whose
+record has `caps` containing `ss1`.
+
+**Conversation keys of this device's own** — `saved` and `system` — are refused
+as remote group ids, peer ids and edit targets (`isReservedConversationKey`).
+A new conversation of the device's own needs adding there.
+
+**Windows and Linux create the main window in code** (`create_main_window` in
+lib.rs; `create: false` in `tauri.windows.conf.json` and `tauri.linux.conf.json`)
+because a webview takes its proxy only as it is created. macOS and the phones
+still create it from `tauri.conf.json`.
+
+**Global localStorage keys.** A key read on the lock screen must be in
+`GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted
+profile and reads as empty before unlock (`poorija_screen_guard` is).
 
 ---
 

@@ -93,7 +93,10 @@ await A.page.fill('#chatComposer', 'live and forward secret');
 await A.page.click('#chatSendMessageBtn');
 await B.page.waitForTimeout(5000);
 
-const arrived = await B.page.evaluate(()=>document.body.innerText.includes('live and forward secret'));
+/* In B's history rather than on B's screen: A is not one of B's contacts, so
+   the conversation waits under Requests (49-message-requests.js) instead of
+   quoting itself in the list. */
+const arrived = await B.page.evaluate(()=>Object.values(chatState.history).flat().some((e)=>e.text==='live and forward secret'));
 check('the message arrives', arrived === true, String(arrived));
 const [keysA, keysB] = await Promise.all([
   A.page.evaluate(()=>window.__keyFingerprints()),

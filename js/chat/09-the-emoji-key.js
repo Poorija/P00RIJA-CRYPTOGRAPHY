@@ -183,6 +183,8 @@ async function renderSafetyPanel() {
         </button>`
       : `<p class="chat-safety-hint">${app().escapeHTML(t('برای این گفتگو کلیدی در دسترس نیست.', 'No key is available for this conversation.'))}</p>`}
     </section>`;
+  /* The scan-to-verify half (48-key-verify.js). */
+  if (code && typeof decorateSafetyPanel === 'function') decorateSafetyPanel(panel, { localFp, remoteFp, offeredFp, peer });
 }
 /* .chat-shell is overflow:hidden, which clips a fixed-position child however
    high its z-index is. Both the group panel and the rules dialog hit this and

@@ -120,6 +120,11 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64) } = {}) {
       TURN_SECRET: turnSecret,
       CHAT_TURN_URL: `turn:127.0.0.1:3478?transport=udp`,
       CHAT_OFFLINE_STORE_PATH: path.join(side.dir, 'offline-messages.json'),
+      /* Named outright: a runner that set these for its own stack would
+         otherwise hand both sides ITS directories, and every check that reads
+         a side's mailbox would read somebody else's (an empty one). */
+      CHAT_OFFLINE_STORE_DIR: path.join(side.dir, 'mailboxes'),
+      CHAT_BEACON_DIR: path.join(side.dir, 'beacons'),
       CHAT_PUSH_STORE_PATH: path.join(side.dir, 'push.json'),
       CHAT_VAPID_STORE_PATH: path.join(side.dir, 'vapid.json'),
       CHAT_POLICY_STORE_PATH: path.join(side.dir, 'policy.json'),

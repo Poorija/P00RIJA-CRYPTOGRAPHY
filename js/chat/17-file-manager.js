@@ -803,11 +803,22 @@ console.error(`[chat] could not flush ${address}:`, error);
 }
 return flushed;
 }
-function chatServerOrigin() {
+/* The relay address the person configured, whatever is in use right now. */
+function configuredRelayOrigin() {
 const configured = String(chatState.profile.serverUrl || '').trim();
 const fallbackOrigin = defaultRelayFallbackOrigin();
 if (!configured || configured === 'file://' || configured === 'null') return fallbackOrigin;
 return normalizeRelayOrigin(configured, fallbackOrigin);
+}
+/* The address in use: the configured one, or a mirror of the same relay that
+   proved it holds the relay's key while the configured one was unreachable
+   (52-relay-mirrors.js). A mirror chosen for another configured relay never
+   applies. */
+function chatServerOrigin() {
+const configured = configuredRelayOrigin();
+const mirror = chatState.profile.activeMirror;
+if (mirror && mirror.primary === configured && typeof mirror.origin === 'string' && mirror.origin) return mirror.origin;
+return configured;
 }
 /* The auto-download quota: an incoming live transfer at or under this size is
    accepted silently and written straight into the encrypted vault; anything
@@ -853,6 +864,12 @@ turnChoices: chatState.prefs?.turnChoices && typeof chatState.prefs.turnChoices 
    timestamps against fingerprints, nothing about what was said. */
 pathChoices: chatState.prefs?.pathChoices && typeof chatState.prefs.pathChoices === 'object'
 ? chatState.prefs.pathChoices : {},
+/* Whether the contacts this device had before message requests existed
+   have been marked accepted (49-message-requests.js). */
+requestsSeeded: Boolean(chatState.prefs?.requestsSeeded),
+/* Sender-made link previews, desktop only and off unless turned on
+   (54-link-preview.js). */
+linkPreviews: chatState.prefs?.linkPreviews === true,
 });
 }
 /* The webview's internal origin is never a relay.
@@ -1803,6 +1820,11 @@ iceServers,
 bundlePolicy: 'max-bundle',
 rtcpMuxPolicy: 'require',
 iceCandidatePoolSize: 2,
+/* Behind the native proxy (53-native-proxy.js) nothing may take a direct
+   UDP path the proxy cannot carry — relay candidates only, and none at all
+   when there is no TURN: a connection that fails is the price, a leaked
+   address is not. */
+...(chatState.nativeProxyActive ? { iceTransportPolicy: 'relay' } : {}),
 },
 };
 }
@@ -2441,7 +2463,11 @@ console.warn('Relay config hydration failed:', error);
 function applyRelayDiscoveryResult(result) {
 if (!result?.origin || !result?.health) return false;
 console.log(`[Discovery] Applying results from ${result.origin}`);
-chatState.profile.serverUrl = result.origin;
+/* A mirror in use is a detour (52-relay-mirrors.js), not the address the
+   person configured: what it says about itself is applied, the configured
+   address is not replaced by it. */
+const onMirror = Boolean(chatState.profile.activeMirror && result.origin === chatState.profile.activeMirror.origin);
+if (!onMirror) chatState.profile.serverUrl = result.origin;
 chatState.profile.presenceUrl = String(result.health?.presenceUrl || chatState.profile.presenceUrl || '');
 chatState.profile.peerOrigin = String(result.health?.peerOrigin || chatState.profile.peerOrigin || result.origin);
 if (result.turnConfig) {

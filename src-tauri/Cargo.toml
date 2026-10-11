@@ -1,6 +1,6 @@
 [package]
 name = "p00rija-cryptography"
-version = "2.98.27"
+version = "2.98.28"
 description = "P00RIJA Cryptography native desktop shell"
 authors = ["P00RIJA"]
 license = "AGPL-3.0-only"
@@ -39,7 +39,7 @@ tauri-plugin-single-instance = "2.4.3"
 # a desktop-only problem. It also drags in aws-lc-sys, whose build script
 # does not survive the Android NDK, so keeping it off mobile removes an
 # entire TLS stack from the APK for a command mobile does not need.
-reqwest = { version = "0.13.3", default-features = false, features = ["json", "default-tls", "charset"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "default-tls", "charset", "socks"] }
 
 # Face ID, Touch ID and the Android keystore's prompt. The crate is mobile
 # only, which is why it sits here rather than in the shared table: on the

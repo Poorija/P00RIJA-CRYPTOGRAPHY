@@ -1234,7 +1234,9 @@ ownerPeerId: chatState.peerId || '',
 ownerClientId: chatState.clientId || '',
 ownerFingerprint: chatState.identity?.fingerprint || '',
 };
-upsertSharedSpace(space);
+const made = upsertSharedSpace(space);
+/* Made here is accepted here (49-message-requests.js). */
+if (made) { made.accepted = true; saveSpaces(); }
 broadcastSpaceRecord(space);
 input.value = '';
 groupMakerAvatar = '';

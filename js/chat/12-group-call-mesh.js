@@ -251,7 +251,7 @@ async function addPeopleToLiveCall(people) {
    * duplicate costs nothing: the receiver ignores an invite once it is already
    * in that call. */
   relaySessionEvent(onCall, upgradeNotice);
-  sendRelayEnvelope(onCall, offlineEnvelope(upgradeNotice, { createdAt: upgradeNotice.createdAt }));
+  sendSignedPlainEnvelope(onCall, upgradeNotice);
   /* And give the channel a beat to flush before anything is closed. */
   await new Promise((resolve) => setTimeout(resolve, 350));
   /* The same microphone cannot feed both stages, so the pair call comes down

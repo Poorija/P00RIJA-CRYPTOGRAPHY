@@ -341,7 +341,15 @@ if (handleSpaceRemoval(payload.space)) {
 ackRelayMessage(message.relayId);
 return;
 }
-const merged = upsertSharedSpace(payload.space);
+/* Who put this account in a group it did not know yet: the relay-proven
+   sender, or the author the record names when that author's pinned key
+   signed it (over transit the relay's word is blank by design). */
+let addedBy = senderFingerprint;
+if (!addedBy && payload.fromFingerprint && typeof verifySpaceSyncSender === 'function') {
+const authorKey = String(findPeerByAnyKey(payload.fromFingerprint)?.publicKeyData || '');
+if (authorKey && await verifySpaceSyncSender(payload, authorKey)) addedBy = String(payload.fromFingerprint);
+}
+const merged = upsertSharedSpace(payload.space, { addedBy });
 /* Only for a group this device is actually in - a note about a group we are
 not a member of would be a thread appearing out of nowhere. */
 if (merged && payload.note) appendSpaceNote(merged, String(payload.note).slice(0, 300));
@@ -458,6 +466,12 @@ peer.status = 'offline';
 	/* Everyone is here: whatever mail was held back for the sibling that was
 	   away can be acknowledged out of the shared box now. */
 	if (chatState.hasLinkedDevices && chatState.linkedDevices.length >= 2) flushDeferredMailAcks();
+	/* Which fingerprint the relay vouches for behind each peer id it lists —
+	   how a call from a contact's second device is recognised as theirs
+	   without trusting anything the caller wrote (49-message-requests.js). */
+	chatState.presenceFingerprints = new Map(verified
+	.filter((peer) => peer.peerId && peer.fingerprint)
+	.map((peer) => [String(peer.peerId), String(peer.fingerprint)]));
 	verified.forEach((peer) => mergePeerRecord(peer, { online: true }));
 	chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
 	dropStaleSessionChannels();
@@ -756,6 +770,9 @@ peerId: incomingPeerId,
 mode: payload.mode || 'voice',
 name: payload.name || message.fromClientId,
 groupId: payload.groupId || null,
+/* The relay's own word for who is calling, for screening a caller whose
+   device id this side has never seen (49-message-requests.js). */
+provenFingerprint: message.fromFingerprint || '',
 });
 appendCall({
 name: payload.name || message.fromClientId,
@@ -1096,6 +1113,10 @@ setTimeout(() => connectChatTransport().catch(console.error), 250);
 }
 }
 async function buildChatTransport() {
+/* A Disconnect pressed while this build is between its awaits must win: the
+   build resuming afterwards used to clear the offline latch and dial again,
+   so the button quietly undid itself a few seconds later. */
+const disconnectEpoch = chatState.disconnectEpoch || 0;
 if (!isUnlocked()) {
 notify(t('برای فعال‌سازی چت ابتدا باید برنامه را باز کنید', 'Unlock the app before enabling chat'), 'warning');
 return;
@@ -1120,6 +1141,7 @@ await discoverLocalRelayServer({ fullScan: false, silent: true });
 }
 await hydrateRelayTurnConfig();
 if (!await ensureRelayTransportReady()) return;
+if ((chatState.disconnectEpoch || 0) !== disconnectEpoch) return;
 chatState.shouldReconnect = true;
 /* Asking for a transport is the opposite of having asked to be offline, so it
    lifts the latch disconnectChat() set. It is safe to do it here and not
@@ -1146,6 +1168,10 @@ if (canReusePeer) {
 connectPresence();
 return;
 }
+/* Whether a proxy is set has to be known before the first peer connection:
+   behind one, a direct path would show this device's address
+   (53-native-proxy.js). */
+if (window.nativeProxyReady) await window.nativeProxyReady;
 const PeerCtor = window.Peer;
 if (!PeerCtor || !webRTCSupported()) {
 /* Relay-only transport. Constructing a Peer on an engine without WebRTC
@@ -1487,6 +1513,11 @@ if (chatState.editingMessageId) {
 await finalizeMessageEdit(chatState.editingMessageId, text);
 return;
 }
+/* Saved Messages: written here and nowhere else (46-saved-messages.js). */
+if (getActiveConversation()?.type === 'saved' && typeof keepTextInSaved === 'function') {
+await keepTextInSaved(text);
+return;
+}
 let session = activeSession();
 const peer = getActiveConversation();
 const directPeer = activePeer();
@@ -1521,28 +1552,30 @@ return;
 }
 }
 
-const expiresAt = ''; // Start timer only on delivery
 const replyToId = chatState.replyToId;
 const createdAt = new Date().toISOString();
+const clearComposer = () => {
+composer.value = '';
+/* The draft store is written from the composer's input event, and clearing the
+   box in code fires no such event — so the text that was just sent stayed
+   filed as a draft and came back the next time the conversation was opened. */
+setDraft(chatState.activeConversationId, '');
+syncComposerHeight(composer);
+clearMessageContext();
+};
 if (peer.type === 'group') {
-const members = groupDeliveryMemberKeys(peer);
-/* groupDeliveryMemberKeys resolves every member to whatever key the peer is
-   reachable by right now — usually a peerId, which changes between sessions.
-   Writing that back into space.members replaced the stable fingerprint roster
-   the group was created with, so after the first message the member list was
-   full of volatile ids: removals matched nothing and a reconnected peer looked
-   like a stranger. The delivery list is derived; it must not be persisted. */
 /* No write-back. groupDeliveryMemberKeys resolves each member to whatever key
    they are reachable by right now — usually a peerId, which changes between
    sessions. Persisting that replaced the stable fingerprint roster the group
    was created with, so removals matched nothing and a reconnected peer looked
    like a stranger. The delivery list is derived; it stays derived. */
-
-appendHistory(peer.conversationId, {
+const preview = typeof takeComposerPreview === 'function' ? takeComposerPreview(text) : null;
+const entry = appendHistory(peer.conversationId, {
 id: messageId,
 direction: 'out',
 type: 'text',
 text,
+...(preview ? { preview } : {}),
 hidden: hiddenMessage,
 senderName: chatState.profile.name || t('شما', 'You'),
 senderPeerId: chatState.peerId || '',
@@ -1553,13 +1586,56 @@ timerSeconds,
 replyToId,
 createdAt,
 });
-composer.value = '';
-/* The draft store is written from the composer's input event, and clearing the
-   box in code fires no such event — so the text that was just sent stayed
-   filed as a draft and came back the next time the conversation was opened. */
-setDraft(chatState.activeConversationId, '');
-syncComposerHeight(composer);
-clearMessageContext();
+clearComposer();
+await deliverTextEntry(peer, entry || { id: messageId, text, timerSeconds, replyToId, hidden: hiddenMessage, createdAt, preview });
+return;
+}
+const targetPeer = directPeer || (peer && !peer.type ? peer : null);
+if (!targetPeer) return;
+if (isSelfPeerRecord(targetPeer)) {
+notify(t('ارسال پیام به خود همین سشن مجاز نیست.', 'Sending a message to the current session itself is not allowed.'), 'warning');
+return;
+}
+const directPreview = typeof takeComposerPreview === 'function' ? takeComposerPreview(text) : null;
+const entry = appendHistory(getConversationKey(targetPeer), {
+id: messageId,
+direction: 'out',
+type: 'text',
+text,
+...(directPreview ? { preview: directPreview } : {}),
+status: 'queued',
+expiresAt: '',
+hidden: hiddenMessage,
+timerSeconds,
+replyToId,
+createdAt,
+});
+clearComposer();
+await deliverTextEntry(targetPeer, entry || { id: messageId, text, timerSeconds, replyToId, hidden: hiddenMessage, createdAt, preview: directPreview });
+}
+
+/* Encrypts and sends one text message already written into history.
+ *
+ * Split out of sendMessage so that a message sent later — a scheduled one
+ * (47-scheduled-send.js) — takes exactly the path a message sent now takes:
+ * the same session, the same relay fallback, the same status ticks. Two
+ * copies of this logic would be two places for the next fix to miss.
+ * `interactive` is false when nobody just pressed send: the toasts that
+ * explain a slow first send are then left out. */
+async function deliverTextEntry(conversation, entry, { interactive = true } = {}) {
+if (!conversation || !entry?.id) return false;
+const messageId = entry.id;
+const text = String(entry.text || '');
+const timerSeconds = Number(entry.timerSeconds || 0);
+const replyToId = entry.replyToId || '';
+const hiddenMessage = Boolean(entry.hidden);
+const createdAt = entry.createdAt || new Date().toISOString();
+/* A sender-made link preview (54-link-preview.js) travels inside the
+   encryption with the text it belongs to. */
+const preview = typeof sanitizeLinkPreview === 'function' ? sanitizeLinkPreview(entry.preview) : null;
+if (conversation.type === 'group') {
+const peer = conversation;
+const members = groupDeliveryMemberKeys(peer);
 let delivered = 0;
 /* Roster keys this device cannot seal to — no record, or no key on it. They
    used to be skipped without a word; now the message remembers who it missed
@@ -1595,6 +1671,7 @@ expiresAt: '',
 timerSeconds,
 replyToId,
 hidden: hiddenMessage,
+...(preview ? { preview } : {}),
 };
 const payload = await encryptForSession(memberSession, new TextEncoder().encode(JSON.stringify(spacePayload)));
 const outbound = { id: messageId, type: 'space-message', createdAt, payload };
@@ -1614,44 +1691,27 @@ const sentEntry = (chatState.history[peer.conversationId] || []).find((item) => 
 if (sentEntry) { sentEntry.skippedMembers = skippedMembers; storeHistory(); }
 if (typeof requestMemberCards === 'function') requestMemberCards(peer, skippedMembers);
 }
-if (!delivered && members.length && !skippedMembers.length) {
+if (interactive && !delivered && members.length && !skippedMembers.length) {
 notify(t('پیام گروه ذخیره شد؛ بعد از آماده شدن سشن اعضا دوباره تلاش کنید.', 'Group message was saved; retry after member sessions are ready.'), 'warning');
 }
-return;
+return delivered > 0;
 }
-const targetPeer = directPeer || (peer && !peer.type ? peer : null);
-if (!targetPeer) return;
-if (isSelfPeerRecord(targetPeer)) {
-notify(t('ارسال پیام به خود همین سشن مجاز نیست.', 'Sending a message to the current session itself is not allowed.'), 'warning');
-return;
+const targetPeer = conversation;
+const conversationKey = getConversationKey(targetPeer);
+/* The gate checked whoever was open; this is whoever it is going to. */
+if (typeof refuseIfVerifiedKeyChanged === 'function' && refuseIfVerifiedKeyChanged(targetPeer, { quiet: !interactive })) {
+markMessageStatus(conversationKey, messageId, 'failed');
+return false;
 }
-appendHistory(getConversationKey(targetPeer), {
-id: messageId,
-direction: 'out',
-type: 'text',
-text,
-status: 'queued',
-expiresAt: '',
-hidden: hiddenMessage,
-timerSeconds,
-replyToId,
-createdAt: new Date().toISOString(),
-});
-composer.value = '';
-/* The draft store is written from the composer's input event, and clearing the
-   box in code fires no such event — so the text that was just sent stayed
-   filed as a draft and came back the next time the conversation was opened. */
-setDraft(chatState.activeConversationId, '');
-syncComposerHeight(composer);
-clearMessageContext();
+let session = chatState.sessions.get(targetPeer.peerId) || null;
 if (!session?.cryptoKey) {
-notify(t('در حال ساخت سشن امن برای ارسال پیام...', 'Creating secure session before sending...'), 'info');
+if (interactive) notify(t('در حال ساخت سشن امن برای ارسال پیام...', 'Creating secure session before sending...'), 'info');
 session = await ensureDirectSession(targetPeer);
 }
 if (!session?.cryptoKey) {
-markMessageStatus(getConversationKey(targetPeer), messageId, 'failed');
-notify(t('سشن امن هنوز آماده نیست. چند ثانیه بعد دوباره ارسال کنید یا اتصال را بررسی کنید.', 'Secure session is not ready yet. Try again in a few seconds or check the connection.'), 'warning');
-return;
+markMessageStatus(conversationKey, messageId, 'failed');
+if (interactive) notify(t('سشن امن هنوز آماده نیست. چند ثانیه بعد دوباره ارسال کنید یا اتصال را بررسی کنید.', 'Secure session is not ready yet. Try again in a few seconds or check the connection.'), 'warning');
+return false;
 }
 const payload = await encryptForSession(session, new TextEncoder().encode(text));
 const outbound = {
@@ -1664,17 +1724,19 @@ replyToId,
 hidden: hiddenMessage,
 payload,
 };
-	/* Same rule as the group path: a data-channel send that throws must not be
-	   reported as sent. Fall through to the relay queue so the message survives
-	   a flaky channel instead of dying with a confident tick. */
-	if (session.connection?.open
-	&& safeConnectionSend(session.connection, outbound, 'text-message')) {
-	markMessageStatus(getConversationKey(targetPeer), messageId, 'sent');
-	} else {
-	await sendSealedRelay(targetPeer, session, outbound, { createdAt: outbound.createdAt });
-	markMessageStatus(getConversationKey(targetPeer), messageId, 'queued');
-	}
-	}
+if (preview) outbound.previewPayload = await encryptForSession(session, new TextEncoder().encode(JSON.stringify(preview)));
+/* Same rule as the group path: a data-channel send that throws must not be
+   reported as sent. Fall through to the relay queue so the message survives
+   a flaky channel instead of dying with a confident tick. */
+if (session.connection?.open
+&& safeConnectionSend(session.connection, outbound, 'text-message')) {
+markMessageStatus(conversationKey, messageId, 'sent');
+} else {
+await sendSealedRelay(targetPeer, session, outbound, { createdAt: outbound.createdAt });
+markMessageStatus(conversationKey, messageId, 'queued');
+}
+return true;
+}
 // A file upload used to happen in complete silence, so a slow transfer looked
 // like nothing was happening at all. Telegram shows progress at the top of the
 // thread; so do we.
@@ -1917,6 +1979,14 @@ if (!conversation) {
     'Open a conversation first, then send the file.'), 'warning');
   return;
 }
+/* Saved Messages keeps the file in this device's vault; nothing is sent. */
+if (conversation.type === 'saved' && typeof keepBlobInSaved === 'function') {
+await keepBlobInSaved(file, kind, durationMs, extra, privateSend);
+return;
+}
+/* Checked again here, after the awaits above: the conversation open now is
+   the one the file is going to, whatever was open at the gate. */
+if (typeof refuseIfVerifiedKeyChanged === 'function' && refuseIfVerifiedKeyChanged(conversation)) return;
 if (file.size > MAX_FILE_BYTES) {
 notify(t(`حداکثر حجم فایل ${app().formatBytes(MAX_FILE_BYTES)} است`, `Files are limited to ${app().formatBytes(MAX_FILE_BYTES)}`), 'warning');
 return;

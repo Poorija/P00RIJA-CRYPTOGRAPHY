@@ -27,7 +27,9 @@
    events: a ballot is content, not metadata, and the relay must not be
    able to read it when the peer is offline.
    ===================================================================== */
-const RICH_KINDS = new Set(['poll', 'location', 'contact']);
+/* 'live-location' is the card of a share whose pin keeps moving
+   (50-live-location.js); its updates are not entries and never come here. */
+const RICH_KINDS = new Set(['poll', 'location', 'contact', 'live-location']);
 const POLL_MAX_OPTIONS = 10;
 const POLL_MIN_OPTIONS = 2;
 
@@ -53,6 +55,11 @@ async function sendRichMessage(kind, data) {
   const createdAt = new Date().toISOString();
   const timerSeconds = Number(chatState.timerSeconds || 0);
   const rich = { kind, ...data, id: messageId };
+  /* Saved Messages keeps the card here and sends it nowhere. */
+  if (conversation.type === 'saved' && typeof keepRichInSaved === 'function') {
+    keepRichInSaved(rich);
+    return;
+  }
   const entry = {
     id: messageId,
     direction: 'out',
@@ -124,6 +131,7 @@ async function sendRichMessage(kind, data) {
   }
 
   if (!peer || isSelfPeerRecord(peer)) return;
+  if (typeof refuseIfVerifiedKeyChanged === 'function' && refuseIfVerifiedKeyChanged(peer)) return;
   appendHistory(getConversationKey(peer), entry);
   let session = activeSession();
   if (!session?.cryptoKey) session = await ensureDirectSession(peer);

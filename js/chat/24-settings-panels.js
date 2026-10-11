@@ -451,10 +451,15 @@ return;
 heading?.classList.remove('hidden');
 list.classList.remove('hidden');
 const showArchived = Boolean(chatState.showArchived);
+/* Message requests (49-message-requests.js) wait under their own chip and
+   are kept out of the main list until accepted. */
+const showRequests = Boolean(chatState.showRequests);
+const requestOf = (peer) => typeof isMessageRequest === 'function' && isMessageRequest(peer);
 const allPeers = allConversationRecords()
-.filter((peer) => peer.type !== 'group')
+.filter((peer) => peer.type !== 'group' || (showRequests && requestOf(peer)))
 .filter((peer) => shouldShowConversation(peer))
-.filter((peer) => Boolean(peer.archived) === showArchived);
+.filter((peer) => (showRequests ? !peer.archived : Boolean(peer.archived) === showArchived))
+.filter((peer) => requestOf(peer) === showRequests);
 allPeers.sort((left, right) => {
 const leftPinned = left.pinned ? 1 : 0;
 const rightPinned = right.pinned ? 1 : 0;
@@ -486,7 +491,8 @@ chatState.activeConversationId = '';
 let records = allPeers;
 let title = t('چت‌ها', 'Chats');
 if (chatState.activeView === 'groups') {
-records = chatState.spaces.groups;
+/* A group somebody else put this account in waits under Requests. */
+records = chatState.spaces.groups.filter((space) => !requestOf(space));
 title = t('گروه‌ها', 'Groups');
 } else if (chatState.activeView === 'calls') {
 renderCalls();
@@ -521,10 +527,12 @@ chip.addEventListener('click', () => setChatListFilter(chip.getAttribute('data-c
 });
 };
 if (!records.length) {
-list.innerHTML = filterChips + archiveShelf + `<div class="chat-empty-state">${showArchived ? t('آرشیو خالی است.', 'The archive is empty.') : t('هنوز موردی وجود ندارد.', 'Nothing here yet.')}</div>`;
+list.innerHTML = filterChips + archiveShelf + `<div class="chat-empty-state">${showRequests ? t('درخواستی در انتظار نیست.', 'No requests are waiting.') : showArchived ? t('آرشیو خالی است.', 'The archive is empty.') : t('هنوز موردی وجود ندارد.', 'Nothing here yet.')}</div>`;
 bindArchiveShelf();
 return;
 }
+/* Read once per render rather than once per row: it is a decrypt. */
+const verifiedMap = typeof verifiedPeers === 'function' ? verifiedPeers() : {};
 list.innerHTML = filterChips + archiveShelf + records.map((record) => {
 const key = getConversationKey(record);
 const history = conversationHistory(record);
@@ -538,7 +546,9 @@ const presence = isGroup ? groupPresence(record) : null;
    the people in it, and the dot follows the same three-way reading the badge
    does: everybody here, somebody here, nobody here. */
 const online = isGroup ? Boolean(presence?.some) : peerLooksOnline(record);
-const presenceClass = isGroup
+const presenceClass = record.type === 'saved'
+  ? 'is-saved'
+  : isGroup
   ? (presence?.dissolved ? 'dissolved' : (presence?.all ? 'online' : (presence?.some ? 'partial' : 'offline')))
   : (online ? 'online' : 'offline');
 const isSystem = record.system === true;
@@ -550,10 +560,11 @@ const previewLine = pendingDraft
    happens to be revealed in the open thread: the list is a different surface
    and owes the secret nothing. */
 || (last?.hidden ? t('پیام مخفی', 'Hidden message') : '')
-|| (last?.hidden ? '' : last?.text)
+|| (last?.hidden ? '' : (typeof plainMessageText === 'function' ? plainMessageText(last?.text) : last?.text))
 || (last?.type === 'sticker' || last?.type === 'rich' ? mediaEntryLabel(last) : '')
 || last?.name
 || (record.type === 'group' ? t('گروه محلی', 'Local group') : '')
+|| (record.type === 'saved' ? t('یادداشت برای خودتان', 'Notes to yourself') : '')
 || (isGroup ? '' : (online ? t('متصل', 'Connected') : t('عدم اتصال', 'Offline')));
 /* A locked thread must not put its last line in the list - that is most of
    what somebody glancing at the phone would read. */
@@ -568,8 +579,11 @@ const blocked = Boolean(record.blocked);
    verified; sanitizeAvatarData admits only raster data: URLs, so nothing
    else can reach an src attribute in this list. */
 const avatarSrc = sanitizeAvatarData(record.avatarData);
+const isSaved = record.type === 'saved';
 const avatarContent = isSystem
 ? '<i class="fas fa-bullhorn text-lg"></i>'
+: isSaved
+? '<i class="fas fa-bookmark text-lg"></i>'
 : (avatarSrc ? `<img src="${avatarSrc}" alt="">` : app().escapeHTML(initials(displayName)));
 return `
 <div role="button" tabindex="0" data-chat-conversation="${app().escapeHTML(key)}" data-chat-peer="${app().escapeHTML(record.clientId || '')}" class="chat-peer-card w-full text-right ${active ? 'active' : ''} ${pinned ? 'is-pinned' : ''} ${blocked ? 'is-blocked' : ''}">
@@ -584,6 +598,7 @@ ${unreadCount ? `<span class="chat-unread-badge">${Math.min(99, unreadCount)}</s
 <span class="chat-peer-presence-dot ${presenceClass}" aria-hidden="true"></span>
 <div class="font-semibold text-white truncate">${app().escapeHTML(displayName)}</div>
 ${isSecure ? '<span class="text-emerald-300 text-xs"><i class="fas fa-shield-halved"></i></span>' : ''}
+${!record.type && record.fingerprint && verifiedMap[record.fingerprint] ? `<span class="chat-verified-badge" title="${app().escapeHTML(t('تأییدشده', 'Verified'))}"><i class="fas fa-circle-check"></i></span>` : ''}
 ${pinned ? '<span class="text-amber-300 text-xs"><i class="fas fa-thumbtack"></i></span>' : ''}
 ${muted ? '<span class="text-slate-400 text-xs" title="' + app().escapeHTML(t('بی‌صدا', 'Muted')) + '"><i class="fas fa-bell-slash"></i></span>' : ''}
 ${blocked ? '<span class="text-rose-400 text-xs" title="' + app().escapeHTML(t('مسدود', 'Blocked')) + '"><i class="fas fa-ban"></i></span>' : ''}
@@ -592,6 +607,8 @@ ${isGroup
 ? (presence.dissolved
   ? `<span class="chat-peer-status-badge dissolved">${t('منحل شده', 'Dissolved')}</span>`
   : `<span class="chat-peer-status-badge chat-group-count ${presenceClass}" title="${app().escapeHTML(t(`${presence.online} نفر از ${presence.total} عضو آنلاین‌اند`, `${presence.online} of ${presence.total} members are online`))}"><span class="chat-group-count-here">${presence.online}</span><span class="chat-group-count-sep">/</span><span class="chat-group-count-all">${presence.total}</span></span>`)
+: isSaved
+? `<span class="chat-peer-status-badge chat-saved-badge"><i class="fas fa-lock"></i></span>`
 : `<span class="chat-peer-status-badge ${online ? 'online' : 'offline'}">${online ? t('متصل', 'Connected') : t('عدم اتصال', 'Offline')}</span>`}
 </div>
 <div class="flex items-center justify-between gap-3 min-w-0 mt-1">

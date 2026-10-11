@@ -10,12 +10,18 @@
 package com.p00rija.cryptography
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
+    /* Before anything is drawn: a screen guard chosen last time covers this
+       start from its first frame (ScreenGuard.kt). */
+    if (ScreenGuard.enabled(this)) {
+      window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
     super.onCreate(savedInstanceState)
     /* After super.onCreate, because that is what loads the Rust library this
        call lands in. The Keystore work needs an Android Context and Rust has
@@ -31,6 +37,11 @@ class MainActivity : TauriActivity() {
       UnifiedPush.nativeRegister(applicationContext)
     } catch (error: Throwable) {
       android.util.Log.w("P00RIJA", "UnifiedPush unavailable: ${error.message}")
+    }
+    try {
+      ScreenGuard.nativeRegister(this)
+    } catch (error: Throwable) {
+      android.util.Log.w("P00RIJA", "screen guard unavailable: ${error.message}")
     }
   }
 

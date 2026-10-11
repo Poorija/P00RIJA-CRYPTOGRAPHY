@@ -35,6 +35,10 @@ services:
       APP_DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       APP_ORIGIN: https://${DOMAIN}:${APP_PORT:-8585}
       APP_ORIGIN_WS: wss://${DOMAIN}:${APP_PORT:-8585}
+      # The relay's other addresses, for the page's connect-src: an installed
+      # app must be able to open a socket to a mirror when the main domain is
+      # blocked. Same list the relay publishes (CHAT_MIRROR_ORIGINS below).
+      APP_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
     depends_on:
       - chat-signal
     ports:
@@ -95,6 +99,10 @@ services:
       CHAT_POLICY_STORE_PATH: /data/server-policy.json
       CHAT_SELF_DESTRUCT_STORE_PATH: /data/self-destruct-records.json
       CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
+      # Other addresses of this same relay — a second domain, a CDN in front of
+      # it — published at /relay-mirrors. A client switches to one only after
+      # it proves it holds this relay's key. See docs/RELAY-NETWORK.md.
+      CHAT_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       CHAT_TLS_CERT_PATH: /etc/certs/cert.pem
       # ---- the monitor's machine half (3.33) ----

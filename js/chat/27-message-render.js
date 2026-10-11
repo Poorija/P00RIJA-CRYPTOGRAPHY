@@ -206,11 +206,16 @@ chatState.threadRender = { conversationId: conversationKey, newestId: newestEntr
    Escaping is transparent to dataset/getAttribute reads, so handlers still
    see the raw id. */
 const eid = (value) => app().escapeHTML(String(value ?? ''));
-panel.innerHTML = olderNotice + renderHistory.map((entry) => {const canReactToEntry = entry.direction !== 'out';
+const requestThread = typeof isMessageRequest === 'function' && isMessageRequest(peer);
+panel.innerHTML = olderNotice + renderHistory.map((entry) => {
+/* Nothing a request sent is drawn until it is accepted. */
+if (requestThread && typeof requestMasksEntry === 'function' && requestMasksEntry(peer, entry)) return requestMaskedBubble(entry, bubbleClass(entry));
+const canReactToEntry = entry.direction !== 'out';
 	const meta = `
 <div class="chat-message-meta" style="display: flex !important; opacity: 1 !important; visibility: visible !important;">
 <span>${formatTime(entry.createdAt)}</span>
 ${entry.expiresAt ? `<span class="chat-timer-countdown bg-brand-500/10 text-brand-500 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1" data-expires="${app().escapeHTML(entry.expiresAt)}"><i class="fas fa-stopwatch animate-pulse"></i> ${formatCountdown(entry.expiresAt)}</span>` : (entry.timerSeconds ? `<span class="chat-timer-countdown bg-brand-500/10 text-brand-500 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1"><i class="fas fa-stopwatch"></i> ${entry.timerSeconds}s</span>` : '')}
+${typeof scheduledChipHtml === 'function' ? scheduledChipHtml(entry) : ''}
 ${entry.transitFallback ? `<span class="chat-transit-fallback-badge" data-chat-transit-fallback="${eid(entry.id)}" title="${app().escapeHTML(t('این پیام از رلهٔ خودتان رفت، نه از مسیر رلهٔ مقابل', 'This message went through your own relay, not the far relay\'s route'))}"><i class="fas fa-route"></i></span>` : ''}
 ${entry.direction === 'out' ? (() => {
 const meta = statusMeta(entry.status);
@@ -250,7 +255,7 @@ const replyName = replied.direction === 'out'
 return `
 <div class="chat-reply-preview" data-chat-jump-to="${eid(replied.id)}" role="button" tabindex="0">
 <span class="reply-name">${app().escapeHTML(replyName)}</span>
-<span class="reply-text">${app().escapeHTML(replied.text || mediaEntryLabel(replied) || t('فایل', 'File'))}</span>
+<span class="reply-text">${app().escapeHTML((typeof plainMessageText === 'function' ? plainMessageText(replied.text) : replied.text) || mediaEntryLabel(replied) || t('فایل', 'File'))}</span>
 </div>
 `;
 })() : '';
@@ -372,6 +377,9 @@ ${reactionToolbar}
 ${meta}
 </div>`;
 }
+if (rich.kind === 'live-location' && typeof liveLocationCardHtml === 'function') {
+return liveLocationCardHtml(entry, { bubbleClassName: bubbleClass(entry), senderHtml, reactionToolbar, meta, mine });
+}
 if (rich.kind === 'location') {
 /* Coordinates are peer-controlled and used to reach this href raw. Coerce to
    finite numbers first; a garbage lat/lng renders as an inert card instead of
@@ -476,6 +484,7 @@ if (entry.type === 'file') {
 return `
 <div class="${bubbleClass(entry)}" data-id="${eid(entry.id)}">
 ${senderHtml}
+${typeof forwardedFromHtml === 'function' ? forwardedFromHtml(entry) : ''}
 ${replyPreview}
 <div class="flex items-start gap-3">
 <div class="w-10 h-10 rounded-xl bg-sky-500/20 text-brand-400 flex items-center justify-center shrink-0">
@@ -574,8 +583,10 @@ ${meta}
 return `
 <div class="${bubbleClass(entry)}" data-id="${eid(entry.id)}">
 ${senderHtml}
+${typeof forwardedFromHtml === 'function' ? forwardedFromHtml(entry) : ''}
 ${replyPreview}
-<div class="chat-message-text text-sm whitespace-pre-wrap" dir="${detectComposerDirection(entry.text)}">${decorateMentions(app().escapeHTML(entry.text || ''), entry)} ${entry.edited ? `<span class="text-[10px] opacity-40 italic ml-1">(${t('ویرایش شده', 'edited')})</span>` : ''}</div>
+<div class="chat-message-text text-sm whitespace-pre-wrap" dir="${detectComposerDirection(entry.text)}">${typeof formatMessageHtml === 'function' ? formatMessageHtml(app().escapeHTML(entry.text || ''), { decorate: (html) => decorateMentions(html, entry) }) : decorateMentions(app().escapeHTML(entry.text || ''), entry)} ${entry.edited ? `<span class="text-[10px] opacity-40 italic ml-1">(${t('ویرایش شده', 'edited')})</span>` : ''}</div>
+${!requestThread && typeof linkPreviewCardHtml === 'function' ? linkPreviewCardHtml(entry) : ''}
 ${reactionToolbar}
 ${meta}
 </div>
@@ -925,7 +936,8 @@ const entry = historyById.get(entryId);
    message was rendered, not read — leave the status alone so the guarded
    flushSeenReceipts pass (which checks visibility and burst-limits) is the
    one that sends it, instead of firing one receipt per hidden render. */
-if (entryId && entry && entry.direction === 'in' && entry.status !== 'opened' && directPeer && !document.hidden) {
+if (entryId && entry && entry.direction === 'in' && entry.status !== 'opened' && directPeer && !document.hidden
+&& !(typeof isMessageRequest === 'function' && isMessageRequest(directPeer))) {
 if (receiptsEnabled()) sendRelayEnvelope(directPeer, {
 type: 'receipt',
 messageId: entryId,
@@ -1058,7 +1070,8 @@ entry.status = 'opened';
 storeHistory();
 renderMessages();
 }
-if (entryId && peer && !peer.type && directPeer && receiptsEnabled()) {
+if (entryId && peer && !peer.type && directPeer && receiptsEnabled()
+&& !(typeof isMessageRequest === 'function' && isMessageRequest(directPeer))) {
 relaySessionEvent(directPeer, {
 type: 'receipt',
 messageId: entryId,
@@ -1481,6 +1494,14 @@ peerName.textContent = displayName;
    before the branches below, because every one of them ends in a return. */
 const keyAlert = document.getElementById('chatKeyAlert');
 if (keyAlert) keyAlert.classList.toggle('hidden', !(peer && !peer.type && peer.keyChangedAt));
+document.getElementById('chatKeyAlertStrict')?.classList.toggle('hidden', !(peer && !peer.type && peer.keyChangedAt && peer.keyChangeWasVerified));
+if (typeof renderMessageRequestBar === 'function') renderMessageRequestBar(peer);
+if (peer.type === 'saved' && typeof renderSavedMessagesHeader === 'function') {
+peerName.textContent = displayName;
+renderSavedMessagesHeader(peer);
+renderMessages();
+return;
+}
 if (peer.clientId === 'system') {
 composerBar?.classList.add('hidden');
 securityDrawer?.classList.add('hidden');
@@ -1632,6 +1653,9 @@ chatState.sessionWarmupInFlight.delete(peerRecord.peerId);
 chatState.sessionWarmupTimers.set(peerRecord.peerId, timer);
 }
 function appendHistory(conversationId, entry) {
+/* Saved Messages only ever holds what this account wrote. Whatever else
+   tries to land there arrived from outside under a borrowed key. */
+if (conversationId === 'saved' && entry?.direction !== 'out') return;
 if (!chatState.history[conversationId]) {
 chatState.history[conversationId] = [];
 }
@@ -1687,7 +1711,10 @@ renderPeers();
 renderMessages();
 if (entry.direction === 'in') {
 const conversationRecord = conversationRecordById(conversationId);
-const muted = Boolean(conversationRecord?.muted);
+/* A message request makes no sound and raises no notification
+   (49-message-requests.js); it waits under its chip. */
+const muted = Boolean(conversationRecord?.muted)
+|| (typeof isMessageRequest === 'function' && isMessageRequest(conversationRecord));
 if (!muted) playSound('message');
 if (!visibleNow && !muted) {
 const sender = conversationRecord;

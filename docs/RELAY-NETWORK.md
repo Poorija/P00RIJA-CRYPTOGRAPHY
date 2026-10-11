@@ -336,7 +336,7 @@ rank of the trust ladder: it routes, but never displaces a card or a session.
 A call or transfer between two relays asks the contact's relay for a
 short-lived TURN credential (`turn-query`) and adds that TURN to the one
 connection that needs it, so both ends can meet on one server. This matters
-between Finland and Iran: a UDP flow started from inside Iran is cut after a
+between a relay outside Iran and one inside it: a UDP flow started from inside Iran is cut after a
 few packets, so a relayed candidate on each side's own TURN never connects,
 while one TURN reachable by both does. A direct path that dies or stays poor
 is moved to a relay path with an ICE restart, and remembered for a day.
@@ -356,6 +356,54 @@ and which relay the device lives on. A device that comes back reads its
 siblings' beacons, sees what it is missing and asks a sibling for exactly that
 while both are online. Files move only when asked, and only between two
 devices that are both online.
+
+### Other addresses for a relay (from 2.98.28)
+
+When the relay's domain is filtered, clients can reach the same relay through
+another address: a second domain pointing at the same server, or a CDN in
+front of it. List them in `.env` and redeploy:
+
+```bash
+CHAT_MIRROR_ORIGINS=https://mirror.example.net https://cdn.example.org
+```
+
+- The relay publishes the list at `/relay-mirrors`. A client asks for it while
+  the main address works, sealing a nonce and a one-off secret to the relay key
+  it pinned; the answer carries an HMAC under that secret, so the list a client
+  keeps is exactly what this relay declared — nobody on the path can add to it.
+- When the main address has been silent for 25 seconds, the client asks each
+  mirror to open a nonce sealed to the relay key (`/relay-prove`) and moves only
+  to one that can. The configured address is never overwritten and is tried
+  again every five minutes; the client goes back the moment it answers.
+- nginx writes the mirrors into the page's `connect-src` when the container
+  starts, so an installed app served from the main domain can still open a
+  socket to a mirror. The shipped template is not modified.
+- Each mirror must reach this server's port with a certificate valid for its
+  own name. A CDN in "full" TLS mode does this; a second domain pointing
+  straight at the server needs the certificate to cover it.
+
+What the proof does not prove, said plainly: that a mirror is not a proxy in
+front of the relay. That is what a CDN mirror is, and a browser cannot bind a
+proof to the TLS connection that would tell the two apart. A mirror is trusted
+as far as the operator who listed it: it carries sealed envelopes it cannot
+open and sees the traffic a relay sees.
+
+The link between two relays can also take several addresses for the far relay,
+separated by `|`, tried in turn:
+
+```bash
+CHAT_TRANSIT_PEERS=<relay id>@https://relay.example.com|https://mirror.example.net
+```
+
+### Sealed sender (from 2.98.28)
+
+A queued envelope toward a client that reads sealed envelopes (`ss1`) carries
+its sender's fingerprint, peer id, signature, inner type and time inside a box
+encrypted under the body's key. The relay stores it with no sender, delivers
+it live with no sender, and keeps one bit about it (`eph`, whether to store it
+at all). A sender takes such an envelope back with a secret only it can derive
+(`wd` is its hash). The relay still knows which socket handed it a frame at
+the moment it did; it no longer writes that down.
 
 ---
 
@@ -686,6 +734,38 @@ beacon رمزنگاری‌شده با کلید خود اکانت (حداکثر �
 می‌گذارد که زمان آخرین پیام هر گفتگو (با نام هش‌شده) و رلهٔ خانگی دستگاه را دارد؛
 دستگاه برگشته می‌فهمد عقب است و به‌محض آنلاین بودن هر دو، فقط تغییرات را مستقیم
 می‌گیرد. فایل‌ها فقط به درخواست و فقط وقتی هر دو آنلاین‌اند منتقل می‌شوند.
+
+#### آدرس‌های دیگر یک رله (از نسخهٔ 2.98.28)
+
+اگر دامنهٔ رله فیلتر شد، کلاینت‌ها می‌توانند از آدرس دیگری به همان رله برسند:
+دامنهٔ دومی که به همین سرور اشاره می‌کند، یا یک CDN جلوی آن. در `.env` بنویسید و
+دوباره دیپلوی کنید:
+
+```bash
+CHAT_MIRROR_ORIGINS=https://mirror.example.net https://cdn.example.org
+```
+
+- رله فهرست را در `/relay-mirrors` منتشر می‌کند و کلاینت آن را وقتی آدرس اصلی کار
+  می‌کند می‌گیرد؛ پاسخ با رمزی که فقط دارندهٔ کلید رله می‌تواند باز کند تأیید شده،
+  پس کسی سر راه نمی‌تواند آدرسی به آن اضافه کند.
+- اگر آدرس اصلی ۲۵ ثانیه ساکت بماند، کلاینت از هر آدرس پشتیبان می‌خواهد ثابت کند
+  به دارندهٔ کلید همان رله می‌رسد (`/relay-prove`) و فقط به آدرسی می‌رود که بتواند.
+  آدرس تنظیم‌شده عوض نمی‌شود و هر پنج دقیقه دوباره امتحان می‌شود.
+- nginx هنگام بالا آمدن کانتینر آدرس‌های پشتیبان را در `connect-src` صفحه می‌گذارد.
+- هر آدرس پشتیبان باید با گواهی معتبر برای نام خودش به همین سرور برسد؛ CDN در حالت
+  TLS کامل این کار را می‌کند.
+
+آنچه این اثبات نشان نمی‌دهد: اینکه آدرس پشتیبان یک پراکسی جلوی رله نیست — CDN همین
+است. پس آدرس پشتیبان به اندازهٔ مدیری که آن را معرفی کرده قابل اعتماد است.
+
+اتصال رله‌به‌رله هم می‌تواند چند آدرس داشته باشد:
+`CHAT_TRANSIT_PEERS=<relay id>@https://relay.example.com|https://mirror.example.net`
+
+#### فرستندهٔ پنهان (از نسخهٔ 2.98.28)
+
+پاکتی که برای مخاطبی با نسخهٔ جدید در صف می‌ماند، اثرانگشت و شناسه و امضا و نوع و
+زمانِ فرستنده را در جعبه‌ای رمزنگاری‌شده دارد. رله آن را بدون نام فرستنده ذخیره و
+تحویل می‌دهد و فرستنده با رمزی که فقط خودش می‌سازد می‌تواند آن را پس بگیرد.
 
 ### ۶. هر ماشین چه می‌بیند
 

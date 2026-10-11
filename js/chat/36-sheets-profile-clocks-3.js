@@ -48,7 +48,7 @@ const text = document.getElementById('chatContextText');
 const icon = ctx?.querySelector('.chat-context-icon i');
 if (ctx && title && text) {
 title.textContent = entry.direction === 'out' ? t('پاسخ به خودتان', 'Reply to yourself') : t('پاسخ به', 'Reply to') + ' ' + (peer.username || peer.name || t('کاربر', 'User'));
-text.textContent = entry.text || mediaEntryLabel(entry) || t('فایل', 'File');
+text.textContent = (typeof plainMessageText === 'function' ? plainMessageText(entry.text) : entry.text) || mediaEntryLabel(entry) || t('فایل', 'File');
 if (icon) {
 icon.className = 'fas fa-reply';
 }
@@ -92,6 +92,9 @@ const entry = history.find(m => m.id === messageId);
 if (!entry) return;
 entry.text = newText;
 entry.edited = true;
+if (entry.preview) {
+try { if (!newText.includes(new URL(entry.preview.url).host)) delete entry.preview; } catch (_error) { delete entry.preview; }
+}
 // Editing changes the text, not whether the peer already received or read it.
 // Forcing 'queued' here put a pending clock back on messages that had already
 // been delivered and seen — Telegram and WhatsApp both keep the ticks.
@@ -106,6 +109,12 @@ composer.style.height = '';
 /* Same reason as the send paths: clearing the box in code fires no input
    event, so the edited text would otherwise stay filed as a draft. */
 setDraft(chatState.activeConversationId, '');
+}
+/* Saved Messages: the edit is local, and reaches the account's other online
+   devices the way the original did. */
+if (peer.type === 'saved') {
+if (typeof mirrorToSiblings === 'function') mirrorToSiblings(key, entry);
+return;
 }
 /* A group has no single peer to open a session with, so the edit used to
 stop here: the sender saw the new text and every member kept the old one
@@ -196,7 +205,8 @@ icon: 'fa-user-group',
 label: space.name,
 hint: t('گروه', 'Group'),
 }));
-return [...direct, ...spaces].filter((item) => {
+const saved = typeof savedMessagesDestination === 'function' ? savedMessagesDestination(activeKey) : [];
+return [...saved, ...direct.filter((item) => item.key !== 'saved'), ...spaces].filter((item) => {
 if (!item.key || seen.has(item.key)) return false;
 seen.add(item.key);
 return true;
@@ -219,6 +229,15 @@ modal?.classList.add('hidden');
 async function forwardEntryToDestination(entry, destinationKey) {
 const text = forwardEntryLabel(entry).trim();
 if (!destinationKey) return;
+/* Into Saved Messages the message itself is copied — there is nobody to send
+   a "Forwarded:" line to. */
+if (destinationKey === 'saved' && typeof copyEntryToSaved === 'function') {
+closeForwardModal();
+const source = getActiveConversation();
+const kept = await copyEntryToSaved(entry, source?.username || source?.name || '');
+notify(kept ? t('در پیام‌های ذخیره‌شده نگه داشته شد.', 'Kept in Saved Messages.') : t('این پیام قابل نگه‌داشتن نبود.', 'That message could not be kept.'), kept ? 'success' : 'warning');
+return;
+}
 if (!text && !entry?.downloadUrl) return;
 const target = allConversationRecords().find((record) => getConversationKey(record) === destinationKey);
 if (!target) {
@@ -441,6 +460,7 @@ window.__groupCreate = (name, memberFingerprints = []) => {
     ownerPeerId: chatState.peerId || '',
     createdAt: new Date().toISOString(),
   });
+  if (space) space.accepted = true;
   saveSpaces?.();
   renderPeers();
   return space ? { conversationId: space.conversationId } : null;

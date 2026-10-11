@@ -176,6 +176,8 @@ function chatToolsUndelivered() {
     for (const entry of entries || []) {
       if (entry.direction !== 'out') continue;
       if (entry.status === 'delivered' || entry.status === 'read' || entry.status === 'failed') continue;
+      /* Waiting for its time, not for the network (47-scheduled-send.js). */
+      if (entry.status === 'scheduled') continue;
       const at = Date.parse(entry.createdAt || '') || 0;
       rows.push({
         conversationId,

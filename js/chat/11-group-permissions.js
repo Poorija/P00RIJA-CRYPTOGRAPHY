@@ -181,6 +181,9 @@ function guardGroupSend(kind = 'sendMessages') {
       : 'This conversation is locked; unlock it before sending.'), 'warning');
     return false;
   }
+  /* A verified contact whose key changed: nothing goes until the new key is
+     checked (48-key-verify.js). */
+  if (typeof verifiedKeyChangeBlocksSend === 'function' && verifiedKeyChangeBlocksSend()) return false;
   const space = activeGroupSpace();
   if (!space) return true;
   /* A dissolved group is readable, not writable: the conversation stays so
@@ -391,6 +394,9 @@ async function redeemGroupInvite(code) {
     notify(t('پیوستن به گروه ناموفق بود.', 'Joining the group failed.'), 'error');
     return false;
   }
+  /* Joining by a code somebody handed over is saying yes. */
+  space.accepted = true;
+  saveSpaces();
   /* Announce ourselves, or the existing members never learn we are here.
      The note is a sentence, not a roster: it cannot override anything. */
   if (iAmOwner) broadcastSpaceRecord(space);

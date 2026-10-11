@@ -62,6 +62,26 @@ const LINK_BUFFER_LIMIT_BYTES = 48 * 1024 * 1024;
    half-accepted. A typo in this setting must not widen who may connect, and
    an address with no id would be naming a relay by its hostname, which is the
    thing relay identities exist to stop. */
+/* Several addresses for one relay, separated by "|", are tried in turn —
+   `<id>@https://main.example|https://mirror.example` — so a link whose main
+   address is blocked on the way still comes up through another. Each answer
+   is checked against the id exactly as a single address is. Kept as one
+   "|"-joined string, which is what the dialler and the store already carry. */
+function cleanOriginList(value) {
+  const origins = [];
+  for (const part of String(value || '').split('|')) {
+    try {
+      const parsed = new URL(part.trim());
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !origins.includes(parsed.origin)) origins.push(parsed.origin);
+    } catch (_error) { /* not an address */ }
+  }
+  return origins.slice(0, 6).join('|');
+}
+function originForAttempt(origin, attempt = 0) {
+  const choices = String(origin || '').split('|').filter(Boolean);
+  return choices.length ? choices[Math.abs(Number(attempt) || 0) % choices.length] : '';
+}
+
 function parseTransitPeers(value) {
   const seen = new Map();
   for (const entry of String(value || '').split(/[,\s]+/)) {
@@ -71,12 +91,7 @@ function parseTransitPeers(value) {
     const id = (at < 0 ? trimmed : trimmed.slice(0, at)).toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(id)) continue;
     let origin = '';
-    if (at >= 0) {
-      try {
-        const parsed = new URL(trimmed.slice(at + 1));
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') origin = parsed.origin;
-      } catch (_error) { origin = ''; }
-    }
+    if (at >= 0) origin = cleanOriginList(trimmed.slice(at + 1));
     /* Last one wins, so a later line can correct an earlier address. */
     seen.set(id, { id, origin });
   }
@@ -405,7 +420,10 @@ function createRelayPeers({
     if (dialling.has(peerId)) return null;
     dialling.set(peerId, { attempt, timer: null });
     try {
-      const bundle = await fetchIdentity(origin);
+      /* One address per attempt, round the list: a mirror gets its turn
+         when the main address keeps failing. */
+      const target = originForAttempt(origin, attempt);
+      const bundle = await fetchIdentity(target);
       /* The key is checked against the id that was WANTED, not against the id
          the answer carried. Otherwise whoever answers is authenticated as
          themselves, which is not the question being asked. */
@@ -413,7 +431,7 @@ function createRelayPeers({
         throw new Error('the relay at that address is not the one named');
       }
       const started = startLink(identity, bundle.publicKey, bundle.pqPublicKey || '');
-      const url = new URL('/relay-link', origin);
+      const url = new URL('/relay-link', target);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocketImpl(url.toString(), {
         handshakeTimeout: DIAL_TIMEOUT_MS,
@@ -464,10 +482,8 @@ function createRelayPeers({
     if (!/^[a-f0-9]{64}$/.test(key)) return false;
     let cleanOrigin = '';
     if (origin) {
-      try {
-        const parsed = new URL(origin);
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') cleanOrigin = parsed.origin;
-      } catch (_error) { return false; }
+      cleanOrigin = cleanOriginList(origin);
+      if (!cleanOrigin) return false;
     }
     const existed = allowed.has(key);
     allowed.add(key);
@@ -544,5 +560,7 @@ function createRelayPeers({
 }
 
 module.exports = {
+  cleanOriginList,
+  originForAttempt,
   createRelayPeers, parseTransitPeers, parsePeerAllowlist, backoffFor, makeIdentityFetcher,
 };
