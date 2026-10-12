@@ -12,12 +12,18 @@
    Link previews, made by the sender.
    ============================================================================
 
-   Off until the person turns it on, and only in the desktop app, whose shell
-   can fetch a page (src-tauri/src/link_preview.rs: public addresses only,
-   pinned against rebinding, capped, through the proxy when one is set). A
-   browser cannot fetch somebody else's page without a server in the middle,
-   and a server that fetched links for people would learn every link they
-   share — so the web build offers no previews rather than that.
+   Off until the person turns it on. Who fetches the page depends on what can:
+
+     - the desktop app fetches it itself (src-tauri/src/link_preview.rs:
+       public addresses only, pinned against rebinding, capped). Nobody else
+       learns the link.
+     - the web app and the phone apps cannot — a browser will not read
+       another site's page, and the phone shells carry no fetcher — so the
+       person's own relay fetches it (POST /link-preview, the same checks in
+       scripts/lib/link-preview.js). The relay then sees the link, and the
+       site sees the relay's address rather than the person's. That is said
+       in the hint beside the switch before it is turned on, and the switch
+       is offered only against a relay that says it does previews.
 
    The person typing a link is the one who sees the preview first, above the
    composer, and can drop it. What is sent is the title, a line of text and
@@ -35,13 +41,58 @@ const LINK_PREVIEW_THUMB_PX = 320;
 const LINK_PREVIEW_IMAGE_MAX_CHARS = 48000;
 const LINK_IN_TEXT = /\bhttps?:\/\/[^\s<>"']+/i;
 
-function linkPreviewsAvailable() {
-  return Boolean(window.PoorijaDesktop?.available) && !window.__POORIJA_NATIVE_MOBILE__;
+/* 'local' when this device fetches the page itself (the desktop app),
+   'relay' when the relay is asked to. */
+function linkPreviewMode() {
+  return window.PoorijaDesktop?.available && !window.__POORIJA_NATIVE_MOBILE__ ? 'local' : 'relay';
 }
-/* Not behind a proxy: a page's name cannot be checked there without a DNS
-   question outside the proxy (see link_preview.rs). */
+/* Whether the relay this device uses does previews, from its /chat-health.
+   Asked once per relay address; an older relay simply does not say so. */
+const relayPreviewSupport = { origin: '', value: false, asking: null };
+function relayOffersPreviews() {
+  let origin = '';
+  try { origin = chatServerOrigin(); } catch (_error) { origin = ''; }
+  return Boolean(origin) && relayPreviewSupport.origin === origin && relayPreviewSupport.value;
+}
+async function refreshRelayPreviewSupport() {
+  if (linkPreviewMode() !== 'relay') return;
+  let origin = '';
+  try { origin = chatServerOrigin(); } catch (_error) { return; }
+  if (!origin || relayPreviewSupport.origin === origin || relayPreviewSupport.asking) return;
+  relayPreviewSupport.asking = (async () => {
+    try {
+      const response = await fetch(new URL('/chat-health', origin), { cache: 'no-store', mode: 'cors' });
+      /* Only an answer is remembered; an unreachable relay is asked again. */
+      if (response.ok) {
+        relayPreviewSupport.value = (await response.json())?.linkPreviews === true;
+        relayPreviewSupport.origin = origin;
+      }
+    } catch (_error) { /* asked again on the next round */ }
+    relayPreviewSupport.asking = null;
+    syncLinkPreviewToggle();
+  })();
+}
+function linkPreviewsAvailable() {
+  return linkPreviewMode() === 'local' || relayOffersPreviews();
+}
+/* Not behind the desktop app's proxy: a page's name cannot be checked there
+   without a DNS question outside the proxy (see link_preview.rs). */
 function linkPreviewsEnabled() {
-  return linkPreviewsAvailable() && chatState.prefs?.linkPreviews === true && !chatState.nativeProxyActive;
+  if (chatState.prefs?.linkPreviews !== true || !linkPreviewsAvailable()) return false;
+  return linkPreviewMode() === 'relay' || !chatState.nativeProxyActive;
+}
+/* The page's title, text and picture, from whichever side fetches it. */
+async function fetchLinkPreview(link) {
+  if (linkPreviewMode() === 'local') return window.PoorijaDesktop.linkPreview(link);
+  const response = await fetch(new URL('/link-preview', chatServerOrigin()), {
+    method: 'POST',
+    mode: 'cors',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: link }),
+  });
+  if (!response.ok) return null;
+  return (await response.json())?.preview || null;
 }
 
 function firstLinkIn(text) {
@@ -139,7 +190,7 @@ async function refreshComposerPreview() {
   const seq = ++previewRequestSeq;
   let fetched = null;
   try {
-    fetched = await window.PoorijaDesktop.linkPreview(link);
+    fetched = await fetchLinkPreview(link);
   } catch (error) {
     console.warn('[Preview] no preview for that link:', error?.message || error);
   }
@@ -206,11 +257,15 @@ function syncLinkPreviewToggle() {
   const available = linkPreviewsAvailable();
   row?.classList.toggle('hidden', !available);
   hint?.classList.toggle('hidden', !available);
+  const local = linkPreviewMode() === 'local';
   if (toggle) {
     toggle.checked = linkPreviewsEnabled();
-    toggle.disabled = Boolean(chatState.nativeProxyActive);
+    toggle.disabled = local && Boolean(chatState.nativeProxyActive);
   }
-  if (hint && available) {
+  if (hint && available && !local) {
+    hint.textContent = t('روشن: وقتی لینکی می‌نویسید، رلهٔ شما صفحه را باز می‌کند و عنوان و تصویر کوچکش رمزنگاری‌شده همراه پیام می‌رود؛ دستگاه گیرنده هرگز به آن سایت وصل نمی‌شود. چون این نسخه خودش نمی‌تواند صفحهٔ سایت دیگری را باز کند، رله لینک را می‌بیند (ولی پیام را نه) و سایت آدرس رله را می‌بیند، نه آدرس شما. رله چیزی را نگه نمی‌دارد. خاموش: هیچ صفحه‌ای باز نمی‌شود.',
+      'On: when you type a link, your relay opens the page and its title and a small picture travel encrypted with the message; the recipient\'s device never contacts the site. Because this version cannot open another site\'s page itself, the relay sees the link (not the message) and the site sees the relay\'s address, not yours. The relay keeps nothing. Off: no page is opened.');
+  } else if (hint && available) {
     hint.textContent = chatState.nativeProxyActive
       ? t('با پراکسی، پیش‌نمایش لینک خاموش است: نام سایت را نمی‌شود بدون پرسیدن از DNS بیرون از پراکسی بررسی کرد، و همین چیزی است که پراکسی جلویش را می‌گیرد.',
         'With a proxy set, link previews are off: a site\'s name cannot be checked without asking DNS outside the proxy, which is what the proxy prevents.')
@@ -220,6 +275,7 @@ function syncLinkPreviewToggle() {
 }
 
 document.getElementById('chatComposer')?.addEventListener('input', () => {
+  refreshRelayPreviewSupport();
   if (!linkPreviewsEnabled()) return;
   window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(() => { refreshComposerPreview().catch(() => {}); }, LINK_PREVIEW_DEBOUNCE_MS);
@@ -231,9 +287,11 @@ document.getElementById('chatLinkPreviews')?.addEventListener('change', (event) 
   if (!chatState.prefs.linkPreviews) { chatState.composerLinkPreview = null; renderComposerPreviewChip(); }
   syncLinkPreviewToggle();
 });
-window.addEventListener('poorija:unlock', () => window.setTimeout(syncLinkPreviewToggle, 500));
+window.addEventListener('poorija:unlock', () => window.setTimeout(() => { syncLinkPreviewToggle(); refreshRelayPreviewSupport(); }, 500));
 window.addEventListener('poorija:language-changed', () => window.setTimeout(syncLinkPreviewToggle, 50));
-window.setTimeout(syncLinkPreviewToggle, 1500);
+window.setTimeout(() => { syncLinkPreviewToggle(); refreshRelayPreviewSupport(); }, 1500);
+/* The relay can change (a new address, a mirror): ask the new one. */
+window.setInterval(refreshRelayPreviewSupport, 60 * 1000);
 
 window.sanitizeLinkPreview = sanitizeLinkPreview;
 window.takeComposerPreview = takeComposerPreview;

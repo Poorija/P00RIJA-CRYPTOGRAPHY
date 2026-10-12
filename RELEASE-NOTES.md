@@ -1,3 +1,108 @@
+# P00RIJA Cryptography 2.98.32
+
+Version 2.98.32 · build chat-v125
+
+پیش‌نمایش لینک حالا در نسخهٔ وب و گوشی هم کار می‌کند، کشف محلی دیگر رله را بدون
+رمزنگاری انتخاب نمی‌کند، و در نسخهٔ گوشی لینک‌ها (از جمله دانلود به‌روزرسانی) باز
+می‌شوند. متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر
+آمده‌اند.
+
+Link previews now work in the web and phone apps, local discovery no longer picks
+an unencrypted relay address, and links (an update's download included) open in
+the phone apps. Each section is Persian first, English after. Earlier changes
+follow below.
+
+---
+
+## ۱. پیش‌نمایش لینک در وب و گوشی · Link previews on the web and phones
+
+- **در همهٔ نسخه‌ها** — نسخهٔ دسکتاپ صفحه را مثل قبل خودش باز می‌کند. مرورگر
+  نمی‌تواند صفحهٔ سایت دیگری را بخواند و نسخهٔ گوشی هم ابزاری برای این کار نداشت؛
+  حالا این دو از رلهٔ خودتان می‌خواهند که صفحه را باز کند.
+- **با همان قواعد امنیتی** — رله فقط آدرس عمومی را باز می‌کند و به همان آدرسی وصل
+  می‌شود که بررسی کرده؛ فقط پورت‌های وب؛ حداکثر سه ریدایرکت و هیچ‌کدام به سایت
+  دیگر؛ سقف حجم صفحه و تصویر و هشت ثانیه زمان. شبکهٔ داخلی سرور، آدرس‌های محلی و
+  آدرس متادیتای ابر دست‌نیافتنی‌اند. رله چیزی ثبت یا نگه نمی‌دارد و برای هر کلاینت
+  سقف تعداد دارد.
+- **صریح دربارهٔ هزینه** — در این حالت رله لینک را می‌بیند (نه پیام را) و سایت
+  آدرس رله را می‌بیند نه شما؛ این را متن کنار کلید پیش از روشن کردن می‌گوید. پیش‌فرض
+  خاموش است، و کلید فقط وقتی نشان داده می‌شود که رله اعلام کند این کار را می‌کند.
+  مدیر سرور با `CHAT_LINK_PREVIEWS=0` آن را خاموش می‌کند.
+
+- **Everywhere**: the desktop app still opens the page itself. A browser cannot
+  read another site's page and the phone apps had no way to, so they now ask
+  your own relay to open it.
+- **Under the same rules**: the relay opens public addresses only and connects
+  to exactly the address it checked; web ports only; at most three redirects,
+  none to another site; size caps on page and picture, and eight seconds. The
+  server's own network, local addresses, and the cloud metadata address are out
+  of reach. The relay logs and keeps nothing, and each client has a ceiling.
+- **Plain about the cost**: in this mode the relay sees the link (not the
+  message) and the site sees the relay's address, not yours. The hint beside the
+  switch says so before it is turned on. Off by default, and offered only when
+  the relay says it does previews. An operator turns it off with
+  `CHAT_LINK_PREVIEWS=0`.
+
+## ۲. کشف محلی و رلهٔ بدون رمزنگاری · Local discovery and unencrypted relays
+
+- **سرور ایران از بیرون ایران** — بررسی شد: از بیرون ایران (حتی از سرور فنلاند)
+  اتصال امن به سرور ایران دست‌دادنش کامل می‌شود و بعد هیچ داده‌ای برنمی‌گردد، هم
+  روی 8585 و هم روی 443، در حالی که HTTP ساده روی 9000 رد می‌شود و سرور ایران خودش
+  سالم است. این فیلتر شبکه است نه ایراد برنامه. اتصال میان دو رله برقرار است چون
+  سمت ایران آن را برقرار می‌کند. کاربران بیرون از ایران از رلهٔ بیرون استفاده
+  کنند؛ پیام و تماس با کاربران رلهٔ ایران از مسیر میان دو رله می‌رود.
+- **دیگر بدون رمزنگاری نه** — در اندروید، کشف محلی آدرس `http://...:9000` را
+  برمی‌داشت و ارتباط با رله (اطلاعات اتصال، حضور آنلاین، رمز TURN) بی‌رمز از
+  اینترنت می‌گذشت؛ در مک هم همهٔ آدرس‌های امتحانی به آدرس خود برنامه تبدیل می‌شدند.
+  حالا رلهٔ اینترنتی فقط با https امتحان می‌شود و HTTP ساده فقط در شبکهٔ محلی. پیام‌ها
+  در هر حال سرتاسری رمز بودند.
+- **انتقال خودکار به https** — آدرسی که قبلاً روی پورت بی‌رمز ذخیره شده، به محض
+  جواب دادن https همان سرور به آن منتقل می‌شود؛ اگر جواب ندهد، یک بار هشدار داده
+  می‌شود که اتصال بی‌رمز است.
+- **پیام دقیق‌تر** — اگر سروری فقط بی‌رمز جواب بدهد، نسخهٔ native همین را می‌گوید نه
+  «پیدا نشد»؛ نسخهٔ وب توضیح می‌دهد که ممکن است اتصال امن در مسیر مسدود باشد.
+- **سریع‌تر** — آدرس‌ها هم‌زمان امتحان می‌شوند؛ سروری که TLS آن فیلتر شده یک بار
+  منتظر می‌گذارد، نه یک بار برای هر آدرس.
+
+- **The Iranian relay from outside Iran**: checked. From outside Iran (even from
+  the Finnish server) a secure connection to it completes its handshake and then
+  receives nothing, on 8585 and on 443 alike, while plain HTTP on 9000 passes and
+  the server itself is healthy. That is network filtering, not the app. The link
+  between the two relays stays up because the Iranian side dials it. People
+  outside Iran use the relay outside; messages and calls to people on the
+  Iranian relay travel over the link.
+- **No more unencrypted relays**: on Android, discovery took `http://...:9000`
+  and the relay traffic (connection details, presence, the TURN password)
+  crossed the internet unencrypted; on a Mac every candidate became the app's
+  own origin. An internet relay is now tried over https only, and plain HTTP
+  only on the local network. Messages were end-to-end encrypted either way.
+- **Moved to https by itself**: an address saved under a plain port moves to the
+  same server's https as soon as that answers; if it does not, a one-time
+  warning says the connection is unencrypted.
+- **A clearer answer**: when a server answers only without encryption, the
+  native apps say exactly that instead of "nothing found"; the web app explains
+  that secure connections may be blocked on the way.
+- **Faster**: candidates are probed together, so a relay whose TLS is filtered
+  costs one wait, not one per address.
+
+## ۳. لینک و به‌روزرسانی در گوشی · Links and updates on phones
+
+- **دانلود به‌روزرسانی** — در اندروید و iOS دستور باز کردن لینک در مرورگر همیشه رد
+  می‌شد؛ برای همین «دانلود» در درباره من خطای «لینک باز نشد» می‌داد، و هیچ لینک
+  خارجی دیگری (لینک داخل پیام، باز کردن در نقشه) هم باز نمی‌شد. حالا لینک به مرورگر
+  گوشی داده می‌شود و فایل نصب از همان‌جا دانلود می‌شود. برنامه خودش چیزی را نصب
+  نمی‌کند.
+- این بخش در نسخهٔ native است؛ برای گرفتنش نسخهٔ جدید اندروید را نصب کنید.
+
+- **An update's download**: on Android and iOS, opening a link in the browser was
+  always refused, so "Download" on the About page said the link would not open,
+  and no other external link (a link in a message, "open in maps") opened either.
+  Links now go to the phone's browser, and the installer downloads from there.
+  The app still installs nothing by itself.
+- This part lives in the native app; install the new Android build to get it.
+
+---
+
 # P00RIJA Cryptography 2.98.31
 
 Version 2.98.31 · build chat-v124

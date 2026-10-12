@@ -405,6 +405,37 @@ at all). A sender takes such an envelope back with a secret only it can derive
 (`wd` is its hash). The relay still knows which socket handed it a frame at
 the moment it did; it no longer writes that down.
 
+### Link previews for the web and phone apps (from 2.98.32)
+
+The desktop app fetches a link's preview itself. A browser cannot read another
+site's page and the phone shells carry no fetcher, so the web and phone apps
+ask their relay: `POST /link-preview` with `{"url": ...}`. The relay opens the
+page under the same rules as the desktop fetch — public addresses only, the
+checked address is the one connected to, web ports only, at most three
+redirects and none to another site, 512 KB of page and 1 MB of picture, eight
+seconds — and returns the title, text and picture. It logs and keeps nothing,
+allows 20 previews a minute per client and 8 at once. `/chat-health` says
+`"linkPreviews": true`, and only then do those apps offer the switch, whose
+hint says the relay sees the link. `CHAT_LINK_PREVIEWS=0` turns it off.
+
+### When a relay answers only in plain HTTP
+
+A relay whose https address times out after the TLS handshake, while its plain
+port (9000) answers, is usually not down: TLS to it is being filtered on the
+way. Measured in October 2026 between the two production relays: from outside
+Iran, every TLS connection to the relay inside Iran completed its handshake and
+then received nothing (8585 and 443 alike), plain HTTP passed, and the relay
+inside Iran could still reach the one outside over TLS — so the link between
+them, which the Iranian side dials, stayed up. People outside Iran use the
+relay outside, people inside use the one inside, and the link carries the
+rest.
+
+The app never picks a relay's plain port by itself: «کشف محلی» tries an
+internet relay over https only and plain http only on the local network, and
+an address saved under a plain port is moved to the same server's https
+address as soon as that answers. When a native app sees that a relay answers
+only in plain HTTP it says so instead of "nothing found".
+
 ---
 
 ## 6. What each machine sees
@@ -766,6 +797,33 @@ CHAT_MIRROR_ORIGINS=https://mirror.example.net https://cdn.example.org
 پاکتی که برای مخاطبی با نسخهٔ جدید در صف می‌ماند، اثرانگشت و شناسه و امضا و نوع و
 زمانِ فرستنده را در جعبه‌ای رمزنگاری‌شده دارد. رله آن را بدون نام فرستنده ذخیره و
 تحویل می‌دهد و فرستنده با رمزی که فقط خودش می‌سازد می‌تواند آن را پس بگیرد.
+
+#### پیش‌نمایش لینک برای نسخهٔ وب و گوشی (از نسخهٔ 2.98.32)
+
+نسخهٔ دسکتاپ پیش‌نمایش را خودش می‌گیرد. مرورگر نمی‌تواند صفحهٔ سایت دیگری را
+بخواند و نسخهٔ گوشی هم ابزاری برای این کار ندارد، پس این دو از رلهٔ خودشان
+می‌خواهند: `POST /link-preview`. رله صفحه را با همان قواعد نسخهٔ دسکتاپ باز
+می‌کند (فقط آدرس عمومی، اتصال به همان آدرس بررسی‌شده، فقط پورت‌های وب، حداکثر سه
+ریدایرکت و هیچ‌کدام به سایت دیگر، سقف حجم و هشت ثانیه)، چیزی ثبت یا نگه نمی‌دارد،
+و برای هر کلاینت ۲۰ پیش‌نمایش در دقیقه و هم‌زمان ۸ تا مجاز است. کلید این قابلیت
+فقط وقتی نشان داده می‌شود که `/chat-health` بگوید `"linkPreviews": true`، و متن
+کنارش می‌گوید که رله لینک را می‌بیند. `CHAT_LINK_PREVIEWS=0` آن را خاموش می‌کند.
+
+#### وقتی رله فقط بدون رمزنگاری جواب می‌دهد
+
+رله‌ای که آدرس https آن بعد از دست‌دادن TLS بی‌جواب می‌ماند ولی پورت ساده‌اش
+(9000) جواب می‌دهد، معمولاً خاموش نیست: TLS به آن در مسیر فیلتر می‌شود. اندازه‌گیری
+مهر ۱۴۰۵ میان دو رلهٔ واقعی: از بیرون ایران هر اتصال TLS به رلهٔ داخل ایران
+دست‌دادنش کامل می‌شد و بعد هیچ داده‌ای نمی‌رسید (هم 8585 هم 443)، HTTP ساده رد
+می‌شد، و رلهٔ داخل همچنان با TLS به رلهٔ بیرون می‌رسید — پس اتصال میان دو رله که
+سمت ایران آن را برقرار می‌کند، برقرار ماند. کاربران بیرون از ایران از رلهٔ بیرون
+و کاربران داخل از رلهٔ داخل استفاده کنند؛ اتصال میان دو رله بقیه را می‌رساند.
+
+برنامه هیچ‌وقت خودش پورت بی‌رمز یک رله را انتخاب نمی‌کند: «کشف محلی» رلهٔ
+اینترنتی را فقط با https امتحان می‌کند و HTTP ساده را فقط در شبکهٔ محلی، و آدرسی
+که روی پورت بی‌رمز ذخیره شده به محض جواب دادن https همان سرور به آن منتقل می‌شود.
+نسخهٔ native وقتی ببیند رله‌ای فقط بی‌رمز جواب می‌دهد، همین را می‌گوید نه «پیدا
+نشد».
 
 ### ۶. هر ماشین چه می‌بیند
 

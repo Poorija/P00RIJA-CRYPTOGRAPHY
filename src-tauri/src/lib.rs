@@ -616,7 +616,7 @@ fn desktop_set_badge_count<R: Runtime>(
 /// webview instead would be worse: it would replace the app with a web page in
 /// a window that has no back button and no way home.
 #[tauri::command]
-fn desktop_open_external(url: String) -> Result<(), NativeError> {
+fn desktop_open_external<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), NativeError> {
     let parsed = url::Url::parse(&url).map_err(|error| NativeError::msg(error.to_string()))?;
     // Only ever hand the shell an http(s) URL. Anything else — file:, smb:,
     // a custom scheme registered by some other app — is a way to make this
@@ -624,17 +624,26 @@ fn desktop_open_external(url: String) -> Result<(), NativeError> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(NativeError::msg("only http and https links can be opened"));
     }
-    open_external_url(parsed.as_str())
+    #[cfg(mobile)]
+    return open_external_url(&app, parsed.as_str());
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        open_external_url(parsed.as_str())
+    }
 }
 
+/// On a phone the link goes to the system browser through the opener plugin.
+/// This used to refuse, on the belief that the webview would hand the link to
+/// the OS by itself — but the page cancels every external click and asks this
+/// command, so on Android and iOS no link opened at all, an update's download
+/// included.
 #[cfg(mobile)]
-fn open_external_url(url: &str) -> Result<(), NativeError> {
-    // Mobile webviews hand an unhandled navigation to the OS themselves, so
-    // the link opens in the default browser without help from here.
-    let _ = url;
-    Err(NativeError::msg(
-        "links open through the system browser on this platform",
-    ))
+fn open_external_url<R: Runtime>(app: &AppHandle<R>, url: &str) -> Result<(), NativeError> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| NativeError::msg(format!("could not open the link: {error}")))
 }
 
 #[cfg(desktop)]
@@ -2127,7 +2136,9 @@ pub fn run() {
        the crate does not exist for those targets. */
     #[cfg(mobile)]
     {
-        builder = builder.plugin(tauri_plugin_biometric::init());
+        builder = builder
+            .plugin(tauri_plugin_biometric::init())
+            .plugin(tauri_plugin_opener::init());
     }
 
     let app = builder

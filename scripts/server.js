@@ -25,6 +25,7 @@ const { openTransit, transitFacts } = require('./lib/relay-transit.js');
 /* The 3.34 dashboard sheet the relay serves at /Monitor_Server — HTML lives
    in its own module so the server file stays about the server. */
 const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
+const { linkPreview } = require('./lib/link-preview.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
@@ -599,6 +600,9 @@ const RATE_LIMITS = {
      faster. */
   login: Number(process.env.CHAT_RATE_LOGIN || 10),
   write: Number(process.env.CHAT_RATE_WRITE || CAPACITY.rateWrite),
+  /* Each preview is an outbound fetch of up to two pages on someone's behalf;
+     a person typing links does a handful a minute. */
+  preview: Number(process.env.CHAT_RATE_PREVIEW || 20),
 };
 const rateBuckets = new Map();
 
@@ -655,6 +659,7 @@ app.use('/self-destruct', rateLimit('write'));
 /* Each proof costs a key agreement; a flood of them is a flood of work. */
 app.use('/relay-prove', rateLimit('write'));
 app.use('/relay-mirrors', rateLimit('write'));
+app.use('/link-preview', rateLimit('preview'));
 app.use(rateLimit('default'));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -3988,6 +3993,9 @@ app.get('/chat-health', (req, res) => {
     service: 'poorija-chat-signal',
     peers: presence.size,
     turnEnabled: TURN_URLS.length > 0,
+    /* Whether POST /link-preview answers, so a client offers the switch only
+       against a relay that will do the fetch. */
+    linkPreviews: LINK_PREVIEWS_ENABLED,
     /* So a client learns the relay's name in the probe it already makes. */
     relayId: relayIdentity.id,
     /* Which tree this relay was built from, so a deploy can check it. */
@@ -4088,6 +4096,32 @@ app.get('/turn-config', (req, res) => {
 /* The other addresses of this relay (CHAT_MIRROR_ORIGINS). Unsigned on
    purpose: a list naming a wrong address costs a client one failed proof,
    because every mirror is checked against this relay's key before use. */
+/* A link preview for a client that cannot fetch one itself — the web app and
+   the phone apps (scripts/lib/link-preview.js has the checks). The client says
+   before the switch is on that the relay sees the link; nothing about the
+   request is logged or kept here. CHAT_LINK_PREVIEWS=0 turns it off, and the
+   number in flight at once is capped so it cannot tie up the relay. */
+const LINK_PREVIEWS_ENABLED = process.env.CHAT_LINK_PREVIEWS !== '0';
+const LINK_PREVIEW_MAX_IN_FLIGHT = Number(process.env.CHAT_LINK_PREVIEW_MAX_IN_FLIGHT || 8);
+let linkPreviewsInFlight = 0;
+app.post('/link-preview', async (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  if (!LINK_PREVIEWS_ENABLED) return res.status(404).json({ ok: false, reason: 'disabled' });
+  if (linkPreviewsInFlight >= LINK_PREVIEW_MAX_IN_FLIGHT) return res.status(503).json({ ok: false, reason: 'busy' });
+  const url = String(req.body?.url || '').slice(0, 2048);
+  if (!url) return res.status(400).json({ ok: false, reason: 'url-required' });
+  linkPreviewsInFlight += 1;
+  try {
+    const preview = await linkPreview(url);
+    return res.json({ ok: true, preview });
+  } catch (error) {
+    return res.status(422).json({ ok: false, reason: String(error?.message || 'refused').slice(0, 120) });
+  } finally {
+    linkPreviewsInFlight -= 1;
+  }
+});
+
 app.get('/relay-mirrors', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   setNoStoreHeaders(res);

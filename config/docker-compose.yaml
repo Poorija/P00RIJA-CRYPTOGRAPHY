@@ -103,6 +103,9 @@ services:
       # it — published at /relay-mirrors. A client switches to one only after
       # it proves it holds this relay's key. See docs/RELAY-NETWORK.md.
       CHAT_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
+      # Link previews for the web and phone apps: the relay fetches the page a
+      # person is about to share (it sees the link; nothing is kept). 0 = off.
+      CHAT_LINK_PREVIEWS: ${CHAT_LINK_PREVIEWS:-1}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       CHAT_TLS_CERT_PATH: /etc/certs/cert.pem
       # ---- the monitor's machine half (3.33) ----

@@ -122,9 +122,13 @@ export function makeSparseFile(name, bytes) {
    served by different origins and talk to different relays, which a
    module-level BASE cannot express. */
 /* `context` is merged over the desktop defaults, so a suite can open the same
-   app as a phone (viewport, isMobile, hasTouch, userAgent) and keep the rest. */
-export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY, context = {} } = {}) {
+   app as a phone (viewport, isMobile, hasTouch, userAgent) and keep the rest.
+   `init` runs in the page before any of the app's scripts — a stand-in for
+   the native shell's window.__TAURI__, typically — with `initArg` as its
+   argument. */
+export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY, context = {}, init = null, initArg = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, permissions: ['microphone', 'camera'], ...context });
+  if (init) await ctx.addInitScript(init, initArg);
   /* The chat module wires its console probes only when a page asks for them
      before load — shipping them unconditionally would be a bypass rather than
      a diagnostic. Every suite that reaches this harness drives conversations

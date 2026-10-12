@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.31**
+نسخهٔ این پکیج: **2.98.32**
 
 </div>
 
@@ -473,6 +473,32 @@ and gone once the bar moved after `</footer>` (2.98.31). Being outside the
 footer, it cancels its own pointer-down to keep focus in the input. Its edits
 go through `document.execCommand('insertText')` so the phone's undo keeps
 working — do not replace that with `box.value =`.
+
+**Discovery never takes a relay's plain port** (2.98.32,
+`localDiscoveryCandidates`). The scheme comes from the relay's address, not
+the page's: the native shells load from `tauri://` (macOS, iOS — every
+candidate became the shell's own origin) or `http://` (Android, Windows —
+«کشف محلی» set `http://<relay>:9000` and the chat ran unencrypted). Internet
+relays are https-only; plain http is for loopback and private addresses.
+`upgradePlaintextRelay` moves an old `http://<public>:9000` setting to the
+same host's https. Probes run together (`firstAnsweringRelay`), so a relay
+whose TLS is filtered costs one timeout.
+
+**The relay inside Iran is not reachable over TLS from outside Iran**
+(measured 2026-10-12): handshake completes, then nothing — 8585 and 443, from
+Canada and from the Finnish server alike — while plain HTTP on 9000 passes and
+the Iranian relay reaches the outside one over TLS. Not an app bug, and not
+fixable here. Test the Iranian relay from inside Iran or over the transit link.
+
+**Phones open links through tauri-plugin-opener** (2.98.32,
+`open_external_url` under `cfg(mobile)`). It used to refuse, so on Android and
+iOS no external link opened — an update's download included. Pinned to 2.5.3:
+2.6+ needs tauri 2.12.
+
+**Link previews on web and phones come from the relay** (`POST /link-preview`,
+`scripts/lib/link-preview.js`, gated by `/chat-health` `linkPreviews`). The
+desktop keeps fetching its own. `CHAT_LINK_PREVIEW_ALLOW_PRIVATE=1` exists for
+test stacks only.
 
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted

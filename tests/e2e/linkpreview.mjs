@@ -11,14 +11,15 @@
 /* A sender-made link preview, from the composer to the other side's card.
  *
  * The fetch itself is the desktop shell's (src-tauri/src/link_preview.rs,
- * with its own tests); here the preview the composer holds is set directly,
+ * with its own tests) or the relay's (linkpreviewrelay.mjs); here the preview the composer holds is set directly,
  * which is what the fetch produces, and the rest of the path is real:
  *   - it goes only with a message that still contains its link;
  *   - it arrives encrypted, is checked again on arrival, and is drawn as a
  *     card that links out — the receiver fetches nothing;
  *   - a bad picture or a non-web link is dropped by the checks;
  *   - a message request shows no card;
- *   - a browser does not offer the switch at all.
+ *   - in a browser the switch starts off and the relay is the one that
+ *     fetches (linkpreviewrelay.mjs covers that fetch).
  */
 import { openApp, identity, importIdentity, browser, waitFor } from './_chat-harness.mjs';
 import { startTwoStacks } from './_two-stacks.mjs';
@@ -52,7 +53,7 @@ try {
   await importIdentity(READER, cardSender);
   await waitFor(SENDER, (fp) => Boolean(findPeerByAnyKey(fp)?.publicKeyData), { timeoutMs: 30000, arg: fpReader });
 
-  check('a browser offers no preview switch', await READER.evaluate(() => document.getElementById('chatLinkPreviewsRow')?.classList.contains('hidden') && !linkPreviewsEnabled()));
+  check('in a browser previews are off until turned on, and fetched by the relay', await READER.evaluate(() => linkPreviewMode() === 'relay' && !linkPreviewsEnabled()));
 
   const checks = await SENDER.evaluate((pixel) => ({
     good: Boolean(sanitizeLinkPreview({ url: 'https://example.com/a', title: 'T', image: pixel })),

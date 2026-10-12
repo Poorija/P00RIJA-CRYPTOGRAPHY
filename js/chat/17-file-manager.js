@@ -1958,25 +1958,54 @@ console.log(`[Discovery] Probe failed for ${normalizedOrigin}:`, error.message);
 return probeRelayOriginNatively(normalizedOrigin);
 }
 }
+/* Whether a relay address is on this machine or this network. Only those may
+   be spoken to in plain HTTP: anything else carries the relay's traffic —
+   TURN credentials, presence, the sealed envelopes' metadata — across the
+   internet, where plain HTTP hides none of it. */
+function isLocalRelayOrigin(origin) {
+try {
+const host = new URL(origin).hostname;
+return isLocalRelayHostname(host) || isPrivateIpv4(host);
+} catch (_error) {
+return false;
+}
+}
+function isPlaintextPublicRelay(origin) {
+return /^http:\/\//i.test(String(origin || '')) && !isLocalRelayOrigin(origin);
+}
+/* The addresses discovery tries, best first.
+ *
+ * The scheme comes from the relay's address, never from the page's. It used to
+ * be the page's: in a browser that is https and right, but the native shells
+ * load the app from their own origin — tauri:// on macOS and iOS, which turned
+ * every candidate into the shell's own origin and so into 127.0.0.1, and
+ * http:// on Android and Windows, which turned an https relay into its plain
+ * port: «کشف محلی» on Android set http://<relay>:9000 and the chat then ran
+ * unencrypted across the internet. Now an internet relay is only ever tried
+ * over https (its own port, 8585, 443), and plain http is tried only on this
+ * machine and the local network. */
 function localDiscoveryCandidates(fullScan = false) {
 const origins = [];
 const fallbackOrigin = defaultRelayFallbackOrigin();
-const appProtocol = window.location.protocol;
-
 const seedInputs = [
 chatState.profile.serverUrl,
 ...relayHintOrigins(),
 fallbackOrigin,
 window.location.origin,
 ];
-
 const pushOrigin = (host, port, protocol) => {
 if (!host || !protocol) return;
-const origin = `${protocol}//${host}${port ? `:${port}` : ''}`;
+const defaultPort = (protocol === 'https:' && port === '443') || (protocol === 'http:' && port === '80');
+let origin;
+try {
+origin = new URL(`${protocol}//${host}${port && !defaultPort ? `:${port}` : ''}`).origin;
+} catch (_error) {
+return;
+}
 if (!origins.includes(origin)) origins.push(origin);
 };
-
 const expandSeed = (rawSeed) => {
+if (isInternalShellOrigin(String(rawSeed || ''))) return;
 const normalized = normalizeRelayOrigin(rawSeed, fallbackOrigin);
 let seedOrigin;
 try {
@@ -1986,38 +2015,88 @@ return;
 }
 const hostname = seedOrigin.hostname;
 const isLocal = isLocalRelayHostname(hostname) || isPrivateIpv4(hostname);
-
-// Force HTTPS if app is HTTPS, unless the target is a local IP.
-const protocols = [appProtocol];
-if (isLocal && appProtocol === 'https:') protocols.push('http:');
-
+if (!isLocal) {
 const ports = Array.from(new Set([
-seedOrigin.port,
-'9000',
+seedOrigin.protocol === 'https:' ? seedOrigin.port : '',
 '8585',
-isLocal ? '80' : '',
 '443',
-])).filter(Boolean);
-
+].filter(Boolean)));
+ports.forEach((port) => pushOrigin(hostname, port, 'https:'));
+return;
+}
+const protocols = seedOrigin.protocol === 'https:' ? ['https:', 'http:'] : ['http:', 'https:'];
+const ports = Array.from(new Set([seedOrigin.port, '9000', '8585', '80', '443'])).filter(Boolean);
 protocols.forEach((protocol) => {
 ports.forEach((port) => {
 if (protocol === 'https:' && port === '80') return;
-if (protocol === 'http:' && port === '443' && !isLocal) return;
 pushOrigin(hostname, port, protocol);
 });
 });
-
-if (isLocal) {
 ['127.0.0.1', 'localhost'].forEach((host) => {
 protocols.forEach((protocol) => {
-ports.forEach((port) => pushOrigin(host, port, protocol));
+ports.forEach((port) => {
+if (protocol === 'https:' && port === '80') return;
+pushOrigin(host, port, protocol);
 });
 });
-}
+});
 };
-
 seedInputs.filter(Boolean).forEach(expandSeed);
 return origins;
+}
+/* Probes every candidate at once, a few at a time, and returns the first that
+   answers in the order the candidates were given — so a preferred address
+   still wins over a later one, but a relay whose TLS is filtered (the
+   handshake completes and then nothing comes back) costs one timeout rather
+   than one timeout per guess. */
+async function firstAnsweringRelay(candidates, concurrency = 6) {
+const results = new Array(candidates.length);
+let next = 0;
+let settledUpTo = 0;
+let done = false;
+let resolveWinner;
+const winner = new Promise((resolve) => { resolveWinner = (value) => { done = true; resolve(value); }; });
+const settle = () => {
+while (settledUpTo < candidates.length && results[settledUpTo] !== undefined) {
+if (results[settledUpTo]) { resolveWinner(results[settledUpTo]); return; }
+settledUpTo += 1;
+}
+if (settledUpTo >= candidates.length) resolveWinner(null);
+};
+const worker = async () => {
+while (!done && next < candidates.length) {
+const index = next;
+next += 1;
+let result = null;
+try { result = await probeRelayOrigin(candidates[index]); } catch (_error) { result = null; }
+results[index] = result || null;
+settle();
+}
+};
+if (!candidates.length) return null;
+for (let i = 0; i < Math.min(concurrency, candidates.length); i += 1) worker();
+return winner;
+}
+/* After an internet relay did not answer over https: does it answer in plain
+   HTTP on its relay port? Only the native shell can ask (a browser refuses
+   http from an https page). A yes means the server is up and TLS to it is
+   being blocked on the way — which is what a filter that lets the handshake
+   through and drops what follows looks like — so the person is told that,
+   rather than "nothing found", and the plain address is still not taken. */
+async function plaintextOnlyRelayHost() {
+if (!window.PoorijaDesktop?.available) return '';
+const hosts = [];
+[chatState.profile.serverUrl, ...relayHintOrigins()].forEach((value) => {
+try {
+const host = new URL(normalizeRelayOrigin(value)).hostname;
+if (host && !isLocalRelayHostname(host) && !isPrivateIpv4(host) && !hosts.includes(host)) hosts.push(host);
+} catch (_error) { /* not an address */ }
+});
+for (const host of hosts.slice(0, 3)) {
+const found = await probeRelayOriginNatively(`http://${host}:9000`);
+if (found) return host;
+}
+return '';
 }
 async function discoverLocalRelayServer({ fullScan = false, silent = false, allowOverwrite = false } = {}) {
 if (hasActiveServerRestriction()) {
@@ -2030,13 +2109,12 @@ return null;
  * another self-hosted install) the scan finds it and — unchecked — it used to
  * stomp the configured address with its own. The explicit «کشف محلی» button
  * stays allowed to overwrite: there the user asked for it. */
-if (silent && !allowOverwrite && isUsableRelayOrigin(chatState.profile.serverUrl)) {
+if (silent && !allowOverwrite && isUsableRelayOrigin(chatState.profile.serverUrl) && !isPlaintextPublicRelay(chatState.profile.serverUrl)) {
 return null;
 }
 const candidates = localDiscoveryCandidates(fullScan);
-for (const origin of candidates) {
-const result = await probeRelayOrigin(origin);
-if (!result) continue;
+const result = await firstAnsweringRelay(candidates);
+if (result) {
 chatState.profile.serverUrl = result.origin;
 chatState.profile.presenceUrl = String(result.health?.presenceUrl || chatState.profile.presenceUrl || '');
 chatState.profile.peerOrigin = String(result.health?.peerOrigin || chatState.profile.peerOrigin || result.origin);
@@ -2045,14 +2123,53 @@ applyRelayIdentity(result.origin, result.relayIdentity);
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 if (!silent) {
-notify(t(`سرور محلی پیدا شد: ${result.origin}`, `Local relay discovered: ${result.origin}`), 'success');
+notify(t(`سرور پیدا شد: ${result.origin}`, `Relay found: ${result.origin}`), 'success');
 }
 return result;
 }
 if (!silent) {
-notify(t('سرور محلی پیدا نشد.', 'No local relay server was discovered.'), 'warning');
+const plainHost = await plaintextOnlyRelayHost();
+if (plainHost) {
+notify(t(`سرور ${plainHost} روشن است ولی فقط بدون رمزنگاری (HTTP) جواب می‌دهد؛ اتصال امن به آن از شبکهٔ شما مسدود است. برای امنیت، آدرس بدون رمزنگاری انتخاب نشد. از رلهٔ دیگری که در دسترس است استفاده کنید.`,
+`${plainHost} is up but answers only without encryption (HTTP): a secure connection to it is blocked from your network. For your safety the unencrypted address was not chosen. Use another relay you can reach.`), 'warning');
+} else {
+notify(t('هیچ رله‌ای با اتصال امن پیدا نشد. اگر سرور در کشور دیگری است، ممکن است اتصال امن به آن در مسیر مسدود باشد؛ رلهٔ دیگری را امتحان کنید.',
+'No relay answered over a secure connection. If the server is in another country, secure connections to it may be blocked on the way; try another relay.'), 'warning');
+}
 }
 return null;
+}
+/* A relay saved under its plain-HTTP port — what «کشف محلی» used to pick on
+   Android — is moved to the same server's https address the moment that
+   answers. Only the same host: silently swapping someone's relay for a
+   different server would change their address under them. When https does
+   not answer, the plain address is kept (the person chose it, or kept it)
+   but they are told once per session that the connection is unencrypted. */
+async function upgradePlaintextRelay() {
+const current = chatState.profile.serverUrl;
+if (!isPlaintextPublicRelay(current)) return false;
+let host = '';
+try { host = new URL(current).hostname; } catch (_error) { return false; }
+/* Every connect would otherwise wait out the https timeout again. */
+if (Date.now() - (chatState.plaintextUpgradeTriedAt || 0) < 10 * 60 * 1000) return false;
+chatState.plaintextUpgradeTriedAt = Date.now();
+const result = await firstAnsweringRelay([`https://${host}:8585`, `https://${host}`]);
+if (!result) {
+if (!chatState.plaintextRelayWarned) {
+chatState.plaintextRelayWarned = true;
+notify(t(`اتصال به رلهٔ ${host} بدون رمزنگاری (HTTP) است: پیام‌ها همچنان سرتاسری رمز می‌شوند، ولی اطلاعات اتصال، حضور آنلاین و رمز TURN در مسیر خوانا هستند. آدرس https همین سرور از شبکهٔ شما در دسترس نیست.`,
+`The connection to ${host} is unencrypted (HTTP): messages are still end-to-end encrypted, but connection details, presence and the TURN password can be read on the way. This server's https address cannot be reached from your network.`), 'warning');
+}
+return false;
+}
+chatState.profile.serverUrl = result.origin;
+chatState.profile.presenceUrl = String(result.health?.presenceUrl || '');
+chatState.profile.peerOrigin = String(result.health?.peerOrigin || result.origin);
+if (result.turnConfig?.enabled) adoptRelayTurnConfig(result.turnConfig, result.origin);
+applyRelayIdentity(result.origin, result.relayIdentity);
+saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+renderStaticUi();
+return true;
 }
 /* ===================== هویت رله ===================== */
 /* A relay's own name, checked rather than believed.
@@ -2489,6 +2606,7 @@ if (hasActiveServerRestriction()) {
 notifyRestrictionOnce();
 return false;
 }
+await upgradePlaintextRelay();
 /* The cached presence/peer pair counts as ready only while it belongs to the
  * server currently configured. Trusting a pair saved under an older setup is
  * what produced "connected to the relay" while the server box pointed at a
