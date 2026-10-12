@@ -504,27 +504,36 @@ function selectionLineTop(box) {
   return box.getBoundingClientRect().top + offset - box.scrollTop;
 }
 
-/* Sets how far above the input the bar floats. With a fine pointer there is
-   no system menu to clear and the bar sits just above the input. On a touch
-   screen it keeps FORMAT_MENU_CLEARANCE clear above the selection's first
-   line — less when that line is low in a tall input, since the menu then
-   opens inside the input. It never climbs past the top of the messages. */
+/* Places the bar above the input. With a fine pointer there is no system
+   menu to clear and the bar sits just above the input. On a touch screen it
+   keeps FORMAT_MENU_CLEARANCE clear above the selection's first line — less
+   when that line is low in a tall input, since the menu then opens inside the
+   input. It never climbs past the top of the messages. The bar is not inside
+   the composer (see index.html), so it is positioned from the input's rect
+   against its own offset parent; it follows the input on every sync. */
 function positionFormatBar(bar, box) {
-  const surface = bar.parentElement;
-  if (!surface) return;
-  const surfaceTop = surface.getBoundingClientRect().top;
+  const surface = box.closest('.chat-composer-surface') || box;
+  const parent = bar.offsetParent;
+  if (!parent) return;
+  const input = surface.getBoundingClientRect();
   let lift = FORMAT_BAR_GAP;
   if (window.matchMedia?.('(pointer: coarse)')?.matches) {
-    const lineTop = selectionLineTop(box);
-    lift = Math.max(FORMAT_BAR_GAP, FORMAT_MENU_CLEARANCE - (lineTop - surfaceTop));
+    lift = Math.max(FORMAT_BAR_GAP, FORMAT_MENU_CLEARANCE - (selectionLineTop(box) - input.top));
   }
+  const height = bar.offsetHeight || 48;
   const pane = document.getElementById('chatMessages')?.getBoundingClientRect();
-  const height = bar.getBoundingClientRect().height || 48;
   if (pane && pane.height > 0) {
-    const room = surfaceTop - pane.top - height - 4;
-    lift = Math.max(FORMAT_BAR_GAP, Math.min(lift, room));
+    lift = Math.max(FORMAT_BAR_GAP, Math.min(lift, input.top - pane.top - height - 4));
   }
-  bar.style.setProperty('--format-lift', `${Math.round(lift)}px`);
+  const wide = window.matchMedia?.('(min-width: 768px)')?.matches;
+  bar.style.width = wide ? '' : `${Math.round(input.width)}px`;
+  const width = wide ? bar.offsetWidth : input.width;
+  const rtl = getComputedStyle(surface).direction === 'rtl';
+  const origin = parent.getBoundingClientRect();
+  const left = (rtl ? input.right - width : input.left) - origin.left - parent.clientLeft + parent.scrollLeft;
+  const top = input.top - lift - height - origin.top - parent.clientTop + parent.scrollTop;
+  bar.style.left = `${Math.round(left)}px`;
+  bar.style.top = `${Math.round(top)}px`;
 }
 
 function setFormatBarVisible(bar, show) {
@@ -607,9 +616,16 @@ function syncFormatBar(now = false) {
       if (document.activeElement !== box) setFormatBarVisible(bar, false);
     }, 150);
   });
-  /* The footer already cancels pointer-down on its buttons so the input keeps
-     focus and the keys stay up. Should a phone drop the selection anyway, the
-     one the bar was showing for is put back before the format is applied. */
+  /* Cancelling pointer-down keeps focus in the input, so the keys stay up
+     and the selection stays — the same courtesy the composer's own buttons
+     get from the footer, which the bar is not inside. Should a phone drop the
+     selection anyway, the one the bar was showing for is put back before the
+     format is applied. */
+  bar.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+  });
+  bar.addEventListener('mousedown', (event) => event.preventDefault());
   bar.addEventListener('click', (event) => {
     const button = event.target.closest?.('[data-format]');
     if (!button || button.disabled) return;

@@ -1,3 +1,37 @@
+# P00RIJA Cryptography 2.98.31
+
+Version 2.98.31 · build chat-v124
+
+هایلایت متن انتخاب‌شده روی آیفون دوباره همان جایی کشیده می‌شود که متن هست. متن هر بخش
+اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+The selection highlight on an iPhone is drawn over the selected text again.
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هایلایت انتخاب روی آیفون · The selection highlight on an iPhone
+
+- **سر جای خودش** — در 2.98.30، تا نوار قالب‌بندی ظاهر می‌شد، iOS هایلایت آبی و
+  دستگیره‌های انتخاب را حدود ۱۴۰ پیکسل بالاتر و کمی چپ‌تر از متن داخل کادر
+  می‌کشید، روی پیام‌ها. قالب درست اعمال می‌شد ولی ظاهرش به هم می‌ریخت. علت این بود
+  که نوار داخل همان ظرفِ کادر پیام بود و از آن بیرون زده بود؛ حالا نوار بیرون از کادر
+  است و جایش با محاسبه تعیین می‌شود. روی شبیه‌ساز آیفون آزموده شد: هایلایت بعد از
+  انتخاب، بعد از پررنگ و بعد از کجِ همان کلمه روی متن می‌ماند.
+- جای نوار همان است که در 2.98.30 بود: بالای کادر و دور از منوی کپی خود گوشی.
+
+- **Where it belongs**: in 2.98.30, as soon as the formatting bar appeared, iOS
+  drew the blue highlight and the selection handles about 140px above and a
+  little left of the text in the box, over the messages. Formats were applied
+  correctly, but it looked wrong. The bar sat inside the message box's own
+  container and hung out of it; it is now outside the box and placed by
+  measurement. Tested in the iPhone simulator: the highlight stays on the text
+  after selecting, after Bold, and after Italic on the same word.
+- The bar sits where it did in 2.98.30: above the box, clear of the phone's own
+  copy menu.
+
+---
+
 # P00RIJA Cryptography 2.98.30
 
 Version 2.98.30 · build chat-v123

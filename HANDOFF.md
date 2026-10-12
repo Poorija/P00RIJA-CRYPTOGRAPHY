@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.30**
+نسخهٔ این پکیج: **2.98.31**
 
 </div>
 
@@ -465,8 +465,13 @@ selection — so a bar under the input (2.98.29) was covered by the second kind
 and a bar right on top of the input by the first. The bar floats above the
 input, keeping `FORMAT_MENU_CLEARANCE` clear above the selection's first line
 (`selectionLineTop` lays out a hidden copy of the textarea to find it). It is
-absolutely positioned so showing it never moves the text being selected. Its
-edits go through `document.execCommand('insertText')` so the phone's undo keeps
+absolutely positioned so showing it never moves the text being selected, and
+it is NOT inside the composer: as a child of `.chat-composer-surface` hanging
+out of the input's box (2.98.30) it made iOS draw the selection highlight
+about 140px above and 40px left of the text — reproduced in the iOS Simulator
+and gone once the bar moved after `</footer>` (2.98.31). Being outside the
+footer, it cancels its own pointer-down to keep focus in the input. Its edits
+go through `document.execCommand('insertText')` so the phone's undo keeps
 working — do not replace that with `box.value =`.
 
 **Global localStorage keys.** A key read on the lock screen must be in

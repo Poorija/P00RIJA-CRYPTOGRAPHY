@@ -27409,15 +27409,15 @@ html.screen-shield body::after {
 html:not(.dark) .chat-link-preview { background: rgb(241 245 249); }
 html:not(.dark) .chat-link-preview-chip { background: rgb(248 250 252); }
 
-/* The formatting bar (45-text-format.js). It floats above the input, out of
-   the composer's grid, so showing it never moves the text being selected.
-   How high is --format-lift, set from where the selection's first line is:
-   high enough that the phone's own edit menu, when it opens above that line,
-   opens in the gap between the input and the bar rather than over the bar. */
-html body #mainApp #content-chat .chat-composer-surface > #chatFormatBar {
+/* The formatting bar (45-text-format.js). It floats above the input, so
+   showing it never moves the text being selected, and it is not inside the
+   composer: hanging out of the input's own box, it made iOS draw the
+   selection highlight in the wrong place. Its top, left and width are set
+   from the input's position and the selection's first line — high enough
+   that the phone's own edit menu, when it opens above that line, opens in
+   the gap between the input and the bar rather than over the bar. */
+html body #mainApp #content-chat #chatFormatBar {
   position: absolute;
-  bottom: calc(100% + var(--format-lift, 0.5rem));
-  inset-inline: 0;
   z-index: 58;
 }
 html body #mainApp #content-chat .chat-format-bar {
@@ -27479,6 +27479,6 @@ html:not(.dark) body #mainApp #content-chat .chat-format-btn[aria-pressed="true"
 /* With room to spare the bar is a compact strip at the start of the line
    rather than six buttons spread across a wide composer. */
 @media (min-width: 768px) {
-  html body #mainApp #content-chat .chat-composer-surface > #chatFormatBar { inset-inline-end: auto; width: max-content; }
+  html body #mainApp #content-chat #chatFormatBar { width: max-content; }
   html body #mainApp #content-chat .chat-format-btn { flex: 0 0 2.6rem; min-width: 2.6rem; }
 }
