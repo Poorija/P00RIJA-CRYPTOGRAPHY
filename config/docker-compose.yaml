@@ -39,10 +39,16 @@ services:
       # app must be able to open a socket to a mirror when the main domain is
       # blocked. Same list the relay publishes (CHAT_MIRROR_ORIGINS below).
       APP_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
+      # Relays this one answers for (see CHAT_FRONTS below); nginx gives each
+      # one a port from 8586 up.
+      APP_FRONTS: ${CHAT_FRONTS:-}
     depends_on:
       - chat-signal
     ports:
       - "${APP_PORT:-8585}:8585"
+      # Loopback unless this server keeps a front door (APP_FRONT_BIND=0.0.0.0
+      # with CHAT_FRONTS): a server without one opens nothing new.
+      - "${APP_FRONT_BIND:-127.0.0.1}:${APP_FRONT_PORT:-8586}:8586"
     volumes:
       - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/nginx/certs/fullchain.pem:ro
       - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/nginx/certs/privkey.pem:ro
@@ -106,6 +112,17 @@ services:
       # Link previews for the web and phone apps: the relay fetches the page a
       # person is about to share (it sees the link; nothing is kept). 0 = off.
       CHAT_LINK_PREVIEWS: ${CHAT_LINK_PREVIEWS:-1}
+      # The relay's own plain-http ports (9000, 9001, 9080) answer only this
+      # machine and nginx, never the internet. docker0 stands for the Docker
+      # bridge address nginx reaches the relay at (chat-signal:host-gateway).
+      CHAT_LISTEN_HOSTS: ${CHAT_LISTEN_HOSTS:-127.0.0.1,docker0}
+      # A front door (docs/RELAY-NETWORK.md): on the relay people can reach,
+      # CHAT_FRONTS=<relay id>@https://this-domain:8586 for a relay behind it;
+      # on that relay, CHAT_FRONT_DOORS=<this relay's id>. Both need the
+      # transit link between them.
+      CHAT_FRONTS: ${CHAT_FRONTS:-}
+      CHAT_FRONT_DOORS: ${CHAT_FRONT_DOORS:-}
+      CHAT_FRONT_PORT: ${CHAT_FRONT_PORT:-9011}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       CHAT_TLS_CERT_PATH: /etc/certs/cert.pem
       # ---- the monitor's machine half (3.33) ----

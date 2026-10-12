@@ -170,6 +170,93 @@ function switchRelayOrigin(origin, pin) {
   return true;
 }
 
+/* ---- front doors ------------------------------------------------------------
+
+   A relay people cannot reach can still be reached through another relay that
+   answers for it at an address of its own (scripts/lib/relay-front.js) — the
+   relay inside Iran, seen from outside, is the case this exists for. Reachable
+   relays list the doors they keep at /relay-fronts. A door is used exactly
+   like a mirror: only after it proves it leads to the relay this device
+   pinned. A device that never reached the relay has no pin to prove against;
+   it may then take a door by the relay's name, but only from the relay this
+   app was served from or one the build names — the same parties that already
+   choose which code runs here — and pins what the door answers with. */
+const FRONT_LOOKUP_TIMEOUT_MS = 6000;
+
+function frontLookupOrigins({ trustedOnly = false } = {}) {
+  const out = [];
+  const exclude = [configuredRelayOrigin(), chatServerOrigin()];
+  const push = (value) => {
+    const origin = cleanMirrorOrigin(value);
+    if (origin && !exclude.includes(origin) && !out.includes(origin)) out.push(origin);
+  };
+  try {
+    if (!isInternalShellOrigin(window.location.origin)) push(window.location.origin);
+  } catch (_error) { /* no page origin */ }
+  relayHintOrigins().forEach(push);
+  if (!trustedOnly) {
+    Object.keys(chatState.profile.relayPins || {}).forEach(push);
+    /* Contacts' relays too: a phone app has no page origin to ask, and the
+       relay a contact lives on is often the very one keeping the door. */
+    try {
+      (typeof allConversationRecords === 'function' ? allConversationRecords() : [])
+        .forEach((record) => push(record?.homeRelay?.origin));
+    } catch (_error) { /* no contacts yet */ }
+  }
+  return out.slice(0, 12);
+}
+
+/* The doors that reachable relays keep for `relayId`, or — when `hostname` is
+   given — for a relay that names that host as its own. */
+async function findFrontDoors({ relayId = '', hostname = '', trustedOnly = false } = {}) {
+  const found = [];
+  await Promise.all(frontLookupOrigins({ trustedOnly }).map(async (origin) => {
+    const response = await fetchRelayJson(new URL('/relay-fronts', origin), FRONT_LOOKUP_TIMEOUT_MS);
+    if (!response?.ok) return;
+    let body = null;
+    try { body = await response.json(); } catch (_error) { return; }
+    for (const front of Array.isArray(body?.fronts) ? body.fronts : []) {
+      const doorOrigin = cleanMirrorOrigin(front?.origin);
+      const id = String(front?.relayId || '').toLowerCase();
+      if (!doorOrigin || !/^[a-f0-9]{64}$/.test(id) || found.some((door) => door.origin === doorOrigin)) continue;
+      const names = (Array.isArray(front.names) ? front.names : []).map((name) => {
+        try { return new URL(String(name)).hostname.toLowerCase(); } catch (_error) { return ''; }
+      });
+      if ((relayId && id === relayId) || (hostname && names.includes(hostname.toLowerCase()))) found.push({ origin: doorOrigin, relayId: id });
+    }
+  }));
+  return found;
+}
+
+/* For a relay this device has never reached: take a door by the relay's name,
+   pin the identity the door answers with (for both the relay's own address
+   and the door), and connect through it. */
+async function adoptFrontDoorByName() {
+  const configured = configuredRelayOrigin();
+  let hostname = '';
+  try { hostname = new URL(configured).hostname; } catch (_error) { return false; }
+  if (!hostname || isLocalRelayHostname(hostname) || isPrivateIpv4(hostname)) return false;
+  const doors = await findFrontDoors({ hostname, trustedOnly: true });
+  for (const door of doors) {
+    const response = await fetchRelayJson(new URL('/relay-identity', door.origin), MIRROR_PROOF_TIMEOUT_MS);
+    if (!response?.ok) continue;
+    let identity = null;
+    try { identity = await verifiedRelayIdentity(await response.json(), null); } catch (_error) { identity = null; }
+    if (!identity || identity.id !== door.relayId) continue;
+    if (typeof recordRelayPin === 'function') {
+      recordRelayPin(configured, identity);
+      recordRelayPin(door.origin, identity);
+    }
+    const pin = relayPinFor(configured);
+    if (pin?.id !== identity.id) continue;
+    if (await proveRelayAt(door.origin, pin)) {
+      switchRelayOrigin(door.origin, pin);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function attemptRelayFailover() {
   if (relayFailoverRunning) return false;
   relayFailoverRunning = true;
@@ -177,15 +264,23 @@ async function attemptRelayFailover() {
   try {
     const configured = configuredRelayOrigin();
     const pin = relayPinFor(configured) || relayPinFor(chatServerOrigin());
-    if (!pin?.id) return false;
+    if (!pin?.id) return await adoptFrontDoorByName();
     const current = chatServerOrigin();
     /* On a mirror that has stopped answering, the configured address comes
-       first, then the other mirrors. */
+       first, then the other mirrors, then any door another relay keeps. */
     const candidates = [current !== configured ? configured : '', ...knownMirrorsFor(pin.id)]
       .filter((origin) => origin && origin !== current);
     for (const origin of candidates) {
       if (await proveRelayAt(origin, pin)) {
         switchRelayOrigin(origin, pin);
+        return true;
+      }
+    }
+    const doors = await findFrontDoors({ relayId: pin.id });
+    for (const door of doors) {
+      if (door.origin === current || candidates.includes(door.origin)) continue;
+      if (await proveRelayAt(door.origin, pin)) {
+        switchRelayOrigin(door.origin, pin);
         return true;
       }
     }
@@ -253,3 +348,5 @@ window.setInterval(() => {
 window.learnRelayMirrors = learnRelayMirrors;
 window.proveRelayAt = proveRelayAt;
 window.attemptRelayFailover = attemptRelayFailover;
+window.findFrontDoors = findFrontDoors;
+window.adoptFrontDoorByName = adoptFrontDoorByName;

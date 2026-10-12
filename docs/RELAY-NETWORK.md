@@ -430,6 +430,53 @@ them, which the Iranian side dials, stayed up. People outside Iran use the
 relay outside, people inside use the one inside, and the link carries the
 rest.
 
+### A front door (from 2.98.33)
+
+When TLS into a relay is filtered but the relay can still reach out, a relay
+people can reach answers for it at an address of its own. The hidden relay
+already dials the transit link outward; the outer relay carries each
+connection made to the door as a stream over that link (sealed by the link's
+own encryption, on a connection both relays authenticated) to the hidden
+relay's own server. To a client the door *is* the hidden relay — same
+identity, mailboxes, TURN — and the client proves that before using it, with
+the same key proof as a mirror.
+
+On the reachable relay (`.env`):
+
+```
+CHAT_FRONTS=<hidden relay id>@https://reachable.example:8586
+APP_FRONT_BIND=0.0.0.0
+```
+
+On the hidden relay:
+
+```
+CHAT_FRONT_DOORS=<reachable relay id>
+CHAT_MIRROR_ORIGINS=https://reachable.example:8586
+CHAT_ALLOWED_ORIGINS=<its own origins>,https://reachable.example:8585,https://reachable.example
+```
+
+nginx on the reachable relay answers the door on 8586 with its own
+certificate; `GET /relay-fronts` lists the doors so clients can find them.
+A client whose relay stops answering moves to a door after the key proof; a
+client that has never reached the relay may take a door by the relay's name,
+but only from the relay that served the app. People can also simply type the
+door's address as their relay.
+
+What it costs: the reachable relay terminates TLS for the door, so it sees the
+relay protocol of the people using it — what the hidden relay sees, and no
+message content. Calls do not go through the door: media uses the hidden
+relay's TURN, whose UDP and TCP port 3478 were reachable from outside Iran
+when TLS was not.
+
+### The relay's plain ports (from 2.98.33)
+
+The relay speaks plain HTTP on 9000, 9001 and 9080; nginx carries TLS in
+front of it. In the full stack these ports now listen only on loopback and the
+Docker bridge (`CHAT_LISTEN_HOSTS=127.0.0.1,docker0`), so the internet gets a
+refused connection. The new-server installer moved behind nginx at
+`/bootstrap/` (https).
+
 The app never picks a relay's plain port by itself: «کشف محلی» tries an
 internet relay over https only and plain http only on the local network, and
 an address saved under a plain port is moved to the same server's https
@@ -818,6 +865,50 @@ CHAT_MIRROR_ORIGINS=https://mirror.example.net https://cdn.example.org
 می‌شد، و رلهٔ داخل همچنان با TLS به رلهٔ بیرون می‌رسید — پس اتصال میان دو رله که
 سمت ایران آن را برقرار می‌کند، برقرار ماند. کاربران بیرون از ایران از رلهٔ بیرون
 و کاربران داخل از رلهٔ داخل استفاده کنند؛ اتصال میان دو رله بقیه را می‌رساند.
+
+#### درِ ورودی (از نسخهٔ 2.98.33)
+
+وقتی TLS به یک رله در مسیر ورودی فیلتر می‌شود ولی خود آن رله می‌تواند به بیرون
+وصل شود، رله‌ای که در دسترس است با آدرسی جداگانه به‌جای آن جواب می‌دهد. رلهٔ پنهان
+همین حالا اتصال میان دو رله را خودش به بیرون برقرار می‌کند. رلهٔ بیرونی هر اتصالی را
+که به این در می‌رسد، به‌صورت یک جریان از روی همان اتصال به سرور خودِ رلهٔ پنهان
+می‌رساند. این جریان با رمزنگاری خود اتصال رمز می‌شود و هر دو رله هویت هم را تأیید
+کرده‌اند. برای کاربر، این در خودِ رلهٔ پنهان است: همان هویت، همان صندوق‌ها و همان
+TURN. کاربر هم پیش از استفاده، با همان آزمون کلیدِ آدرس‌های پشتیبان، این را ثابت
+می‌کند.
+
+روی رلهٔ در دسترس (`.env`):
+
+```
+CHAT_FRONTS=<شناسهٔ رلهٔ پنهان>@https://reachable.example:8586
+APP_FRONT_BIND=0.0.0.0
+```
+
+روی رلهٔ پنهان:
+
+```
+CHAT_FRONT_DOORS=<شناسهٔ رلهٔ در دسترس>
+CHAT_MIRROR_ORIGINS=https://reachable.example:8586
+CHAT_ALLOWED_ORIGINS=<آدرس‌های خودش>,https://reachable.example:8585,https://reachable.example
+```
+
+nginx رلهٔ در دسترس، در را روی 8586 با گواهی خودش جواب می‌دهد و `GET /relay-fronts`
+درها را فهرست می‌کند تا کلاینت پیدایشان کند. کلاینتی که رله‌اش جواب نمی‌دهد، پس از
+آزمون کلید به در منتقل می‌شود. کلاینتی که هرگز به آن رله نرسیده، می‌تواند در را با نام
+رله پیدا کند، ولی فقط از رله‌ای که برنامه را به او داده است. می‌شود آدرس در را مستقیم
+هم به‌عنوان رله وارد کرد.
+
+هزینه‌اش این است که رلهٔ در دسترس TLS درِ ورودی را باز می‌کند. پس پروتکل رلهٔ کسانی
+را که از آن می‌آیند می‌بیند: همان چیزی که رلهٔ پنهان می‌بیند، بدون محتوای پیام‌ها. تماس
+از این در عبور نمی‌کند: صدا و تصویر از TURN رلهٔ پنهان می‌رود که UDP و TCP پورت 3478
+آن از بیرون ایران باز بود، در حالی که TLS باز نبود.
+
+#### پورت‌های بی‌رمز رله (از نسخهٔ 2.98.33)
+
+رله روی 9000، 9001 و 9080 با HTTP ساده کار می‌کند و TLS را nginx جلوی آن برقرار
+می‌کند. در استک کامل این پورت‌ها حالا فقط روی loopback و شبکهٔ داخلی داکر گوش
+می‌دهند (`CHAT_LISTEN_HOSTS=127.0.0.1,docker0`)، پس از اینترنت اتصال رد می‌شود.
+نصب‌کنندهٔ سرور جدید هم پشت nginx و روی `/bootstrap/` (https) منتقل شد.
 
 برنامه هیچ‌وقت خودش پورت بی‌رمز یک رله را انتخاب نمی‌کند: «کشف محلی» رلهٔ
 اینترنتی را فقط با https امتحان می‌کند و HTTP ساده را فقط در شبکهٔ محلی، و آدرسی

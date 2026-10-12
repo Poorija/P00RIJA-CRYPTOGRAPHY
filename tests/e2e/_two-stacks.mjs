@@ -77,7 +77,11 @@ function proxyTo(staticPort, relayPort) {
   return { server, sockets };
 }
 
-export async function startTwoStacks({ turnSecret = 'b'.repeat(64) } = {}) {
+/* `front`: A also answers for B at an address of its own (scripts/lib/
+   relay-front.js), as the relay outside Iran does for the one inside — at
+   a.frontUrl, through a proxy standing in for nginx's 8586. `bNames` are extra
+   origins B calls its own (a public-looking name a client may know B by). */
+export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = false, bNames = [] } = {}) {
   const children = [];
   const logs = [];
   const run = (file, env, label) => {
@@ -99,6 +103,11 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64) } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), `poorija-two-${name}-`));
     fs.writeFileSync(path.join(dir, 'relay-identity.json'), JSON.stringify(identity, null, 2), { mode: 0o600 });
     sides[name] = { dir, identity, signal: await freePort(), presence: await freePort(), proxy: await freePort() };
+  }
+  if (front) {
+    sides.a.frontSignal = await freePort();
+    sides.a.frontProxy = await freePort();
+    sides.a.frontUrl = `http://localhost:${sides.a.frontProxy}`;
   }
   for (const name of ['a', 'b']) {
     const side = sides[name];
@@ -131,12 +140,27 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64) } = {}) {
       CHAT_SELF_DESTRUCT_STORE_PATH: path.join(side.dir, 'self-destruct.json'),
       CHAT_EXPIRY_LOG_PATH: path.join(side.dir, 'expiry.json'),
       CHAT_TRANSIT_PEERS: peers,
+      ...(front && name === 'a' ? { CHAT_FRONTS: `${other.identity.id}@${side.frontUrl}`, CHAT_FRONT_PORT: String(side.frontSignal) } : {}),
+      ...(front && name === 'b' ? {
+        /* B's own name, which is what B tells the door it is called. */
+        ...(bNames.length ? { DOMAIN: new URL(bNames[0]).hostname } : {}),
+        CHAT_FRONT_DOORS: other.identity.id,
+        CHAT_MIRROR_ORIGINS: other.frontUrl,
+        CHAT_ALLOWED_ORIGINS: [side.url, ...bNames].join(','),
+      } : {}),
     }, `relay-${name}`);
     side.proxyServer = proxyTo(staticPort, side.signal);
     await new Promise((resolve, reject) => {
       side.proxyServer.server.once('error', reject);
       side.proxyServer.server.listen(side.proxy, '127.0.0.1', resolve);
     });
+    if (front && name === 'a') {
+      side.frontProxyServer = proxyTo(staticPort, side.frontSignal);
+      await new Promise((resolve, reject) => {
+        side.frontProxyServer.server.once('error', reject);
+        side.frontProxyServer.server.listen(side.frontProxy, '127.0.0.1', resolve);
+      });
+    }
   }
   const ready = async (url) => {
     for (let i = 0; i < 150; i += 1) {
@@ -157,8 +181,10 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64) } = {}) {
     logs,
     async stop() {
       for (const side of [sides.a, sides.b]) {
-        side.proxyServer?.sockets.forEach((socket) => socket.destroy());
-        side.proxyServer?.server.close();
+        for (const proxy of [side.proxyServer, side.frontProxyServer]) {
+          proxy?.sockets.forEach((socket) => socket.destroy());
+          proxy?.server.close();
+        }
       }
       for (const child of children) { try { child.kill('SIGTERM'); } catch (_error) { /* gone */ } }
       await new Promise((resolve) => setTimeout(resolve, 300));

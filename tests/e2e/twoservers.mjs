@@ -160,7 +160,7 @@ const messagesOn = (page) => page.evaluate(() => Array.from(document.querySelect
 
 try {
   section('two deployments, each answering for itself');
-  const [healthA, healthB] = await Promise.all([health(A_APP), health(B_APP)]);
+  const [healthA, healthB] = await Promise.all([health(A_RELAY), health(B_RELAY)]);
   check('the first deployment answers its health check', healthA.ok === true, `${healthA.version}-${healthA.buildTag}`);
   check('the second deployment answers its health check', healthB.ok === true, `${healthB.version}-${healthB.buildTag}`);
   check('both serve the same build', `${healthA.version}-${healthA.buildTag}` === `${healthB.version}-${healthB.buildTag}`,
@@ -184,6 +184,22 @@ try {
   section('a client on each');
   const a = await openApp('north', { origin: A_APP, relay: A_RELAY });
   const b = await openApp('south', { origin: B_APP, relay: B_RELAY });
+  /* A relay other than the page's own — a front door, for one — is a
+     reconnect: the app connects to the relay that served it first. */
+  for (const [page, relay, app] of [[a, A_RELAY, A_APP], [b, B_RELAY, B_APP]]) {
+    if (new URL(relay).origin === new URL(app).origin) continue;
+    await page.evaluate(async (target) => {
+      chatState.profile.serverUrl = target;
+      chatState.profile.presenceUrl = '';
+      chatState.profile.peerOrigin = '';
+      chatState.profile.activeMirror = null;
+      saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+      renderStaticUi();
+      document.getElementById('chatReconnectBtn')?.click();
+    }, relay);
+    await waitFor(page, (target) => chatState.connected === true
+      && new URL(chatState.ws?.url || 'ws://none').host === new URL(target).host, { timeoutMs: 60000, arg: relay });
+  }
   /* The relay pin is fetched asynchronously after the WebSocket connects, and
    * against real servers with real latency the 5.5s inside openApp is not
    * always enough. Without the pin the identity card carries an empty relay,

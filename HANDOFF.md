@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.32**
+نسخهٔ این پکیج: **2.98.35**
 
 </div>
 
@@ -486,9 +486,27 @@ whose TLS is filtered costs one timeout.
 
 **The relay inside Iran is not reachable over TLS from outside Iran**
 (measured 2026-10-12): handshake completes, then nothing — 8585 and 443, from
-Canada and from the Finnish server alike — while plain HTTP on 9000 passes and
+Canada and from the relay outside Iran alike — while plain HTTP on 9000 passes and
 the Iranian relay reaches the outside one over TLS. Not an app bug, and not
 fixable here. Test the Iranian relay from inside Iran or over the transit link.
+
+**The relay inside Iran has a front door on the outside relay** (2.98.33,
+`scripts/lib/relay-front.js`). FL `CHAT_FRONTS=<IR id>@https://fl…:8586`,
+IR `CHAT_FRONT_DOORS=<FL id>`. Connections to fl:8586 (nginx, rendered by
+`config/nginx-mirror-csp.sh` from `APP_FRONTS`) go to FL's front port 9011
+and ride the transit link (frames `kind: 'front'`) to IR's own 127.0.0.1:9000.
+IR advertises the door as a mirror; clients prove IR's key through it.
+`tests/e2e/frontdoor.mjs` covers messages, calls and files through it.
+
+**The relay's plain ports listen privately** (2.98.33, `CHAT_LISTEN_HOSTS`,
+`listenOn` in server.js): loopback plus the docker0 address nginx reaches
+through `chat-signal:host-gateway`. Unset (standalone relay, tests) keeps the
+old listeners. `docker exec … fetch('http://127.0.0.1:9000')` in
+sync-to-server still works because loopback is in the list. Node does not
+list docker0 while it is down (no container on the default bridge — the
+stack's normal state), so `interfaceIpv4` asks `ip`; 2.98.33 missed this and
+both servers answered 502 until `.env` named `172.17.0.1` outright, which
+they still do. `verify_through_nginx` in sync-to-server now catches it.
 
 **Phones open links through tauri-plugin-opener** (2.98.32,
 `open_external_url` under `cfg(mobile)`). It used to refuse, so on Android and

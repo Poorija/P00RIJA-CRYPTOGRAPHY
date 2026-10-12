@@ -1,3 +1,154 @@
+# P00RIJA Cryptography 2.98.35
+
+Version 2.98.35 · build chat-v128
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## درِ ورودی در نسخهٔ گوشی · The front door in the phone apps
+
+- نسخهٔ گوشی آدرس صفحه‌ای ندارد که از آن سراغ در را بگیرد. حالا از رلهٔ مخاطبان هم
+  می‌پرسد، پس کاربر اندرویدی که روی رلهٔ ایران است ولی هرگز به رلهٔ خارج از ایران وصل نشده، هم در را
+  پیدا می‌کند. استفاده از در مثل قبل فقط پس از آزمون کلید رلهٔ ایران است.
+- آزموده‌شده با سرورهای واقعی از بیرون ایران: ثبت‌نام تازه روی رلهٔ ایران با وارد کردن
+  آدرس آن، پیام و رسید دوطرفه، تماس با صدا و تصویر از TURN واقعی، و فایل ۳ و ۲ مگابایتی در
+  هر دو جهت میان کاربر رلهٔ خارج از ایران و کاربر رلهٔ ایران.
+
+- A phone app has no page address to ask for the door. It now asks its contacts'
+  relays too, so an Android user on the Iranian relay who never connected to the
+  relay outside Iran still finds the door. As before, the door is used only after the
+  Iranian relay's key proof.
+- Tested against the real servers from outside Iran: a new registration on the
+  Iranian relay by entering its address, messages and receipts both ways, a call
+  with audio and video over the real TURN, and 3 MB and 2 MB files both ways
+  between a user on the relay outside Iran and one on the Iranian relay.
+
+---
+
+# P00RIJA Cryptography 2.98.34
+
+Version 2.98.34 · build chat-v127
+
+اصلاح فوری پس از 2.98.33. متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های
+قبلی پایین‌تر آمده‌اند.
+
+An urgent fix after 2.98.33. Each section is Persian first, English after.
+Earlier changes follow below.
+
+---
+
+## اتصال nginx به رله · nginx reaching the relay
+
+- **چه شد** — در 2.98.33 رله قرار بود فقط روی loopback و شبکهٔ داخلی داکر گوش بدهد،
+  ولی Node رابط `docker0` را وقتی «down» است فهرست نمی‌کند (و در این استک همیشه down
+  است). رله فقط روی loopback گوش داد، nginx به آن نرسید و هر دو سرور چند دقیقه به همه
+  ۵۰۲ دادند. بررسی بعد از deploy رله را از داخل کانتینر خودش می‌پرسید و این را ندید.
+- **اصلاح** — آدرس `docker0` حالا حتی وقتی down است با `ip` خوانده می‌شود. بررسی بعد از
+  deploy از همان مسیری می‌رود که کاربران می‌روند (از nginx) و در صورت خطا deploy شکست
+  می‌خورد. روی سرورها آدرس `172.17.0.1` صریح در `.env` نوشته شده است.
+- **نام‌های در** — فهرست در فقط نام‌های خود رلهٔ پشت در را دارد، نه آدرس‌هایی که فقط برای
+  CORS مجازند، تا کاربری که آدرس رلهٔ خارج از ایران را دارد به اشتباه به رلهٔ ایران فرستاده نشود.
+
+- **What happened**: 2.98.33 meant the relay to listen only on loopback and the
+  Docker bridge, but Node does not list `docker0` while it is down, which it
+  always is in this stack. The relay listened on loopback alone, nginx could not
+  reach it, and both servers answered 502 to everyone for a few minutes. The
+  post-deploy check asked the relay from inside its own container and missed it.
+- **Fixed**: `docker0`'s address is read with `ip` even while it is down. The
+  post-deploy check goes the way clients do (through nginx) and fails the deploy
+  if that fails. The servers name `172.17.0.1` outright in `.env`.
+- **Door names**: a door lists only its relay's own names, not origins allowed
+  for CORS, so somebody with the address of the relay outside Iran is never sent to the Iranian
+  relay by mistake.
+
+---
+
+# P00RIJA Cryptography 2.98.33
+
+Version 2.98.33 · build chat-v126
+
+کاربران بیرون از ایران دوباره می‌توانند روی رلهٔ ایران ثبت‌نام کنند و با کاربران داخل
+پیام، تماس صوتی و تصویری و فایل رد و بدل کنند، و پورت‌های بی‌رمز رله‌ها بسته شدند. متن
+هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+People outside Iran can again register on the relay inside Iran and exchange
+messages, voice and video calls, and files with people inside it, and the
+relays' unencrypted ports are closed. Each section is Persian first, English
+after. Earlier changes follow below.
+
+---
+
+## ۱. درِ ورودی برای رلهٔ ایران · A front door for the relay inside Iran
+
+- **مشکل** — از بیرون ایران، هر اتصال امن (TLS) به سرور ایران بعد از دست‌دادن بی‌جواب
+  می‌ماند. این فیلتر شبکه است و از داخل برنامه رفع‌شدنی نیست. ولی سرور ایران خودش
+  می‌تواند به بیرون وصل شود، و اتصال میان دو رله را همین سرور برقرار می‌کند.
+- **راه‌حل** — رلهٔ خارج از ایران حالا با آدرس جداگانهٔ `https://chat.example.com:8586` به‌جای
+  رلهٔ ایران جواب می‌دهد. هر اتصالی که به این در برسد، از روی همان اتصال رمزدار میان دو
+  رله به سرور خود ایران می‌رسد. برای کاربر این در خودِ رلهٔ ایران است: همان هویت، همان
+  صندوق پیام، همان TURN.
+- **امن** — برنامه پیش از استفاده ثابت می‌کند که این در واقعاً به رلهٔ ایران می‌رسد (با همان
+  آزمون کلید آدرس‌های پشتیبان). رلهٔ ایران فقط از رلهٔ خارج از ایران جریان می‌پذیرد و آن را فقط به
+  سرور خودش وصل می‌کند. رلهٔ خارج از ایران، مثل خود رلهٔ ایران، اطلاعات اتصال کسانی را که از در
+  می‌آیند می‌بیند، ولی محتوای پیام‌ها همچنان سرتاسری رمز است.
+- **خودکار** — کاربری که رلهٔ ایران را دارد و آدرسش جواب نمی‌دهد، خودش به در منتقل
+  می‌شود. کاربر تازه‌ای که آدرس رلهٔ ایران را وارد می‌کند، در را از رله‌ای که برنامه را باز
+  کرده پیدا می‌کند. وارد کردن مستقیم `https://chat.example.com:8586` به‌عنوان آدرس رله هم
+  کار می‌کند.
+- **تماس و فایل** — آزموده شد: پیام دوطرفه، پیام بین دو رله، تماس تصویری مستقیم و بین دو
+  رله، و فایل در هر دو جهت از طریق در. صدا و تصویر تماس از در عبور نمی‌کند و از TURN رلهٔ
+  ایران می‌رود، که پورت 3478 آن (UDP و TCP) از بیرون باز است.
+
+- **The problem**: from outside Iran, every secure (TLS) connection to the
+  Iranian server goes silent after its handshake. That is network filtering and
+  cannot be fixed inside the app. But the Iranian server can still reach out,
+  and it is the one that opens the link between the two relays.
+- **The fix**: the relay outside Iran now answers for the Iranian relay at its own
+  address, `https://chat.example.com:8586`. Each connection to that door is
+  carried over the encrypted link between the relays to the Iranian server
+  itself. To a client the door is the Iranian relay: the same identity,
+  mailbox, and TURN.
+- **Safe**: before using it, the app proves the door leads to the Iranian relay
+  (the backup-address key proof). The Iranian relay accepts streams only from
+  the relay outside Iran and connects them only to its own server. That
+  relay, like the Iranian one, sees the connection details of people coming
+  through the door; message content stays end-to-end encrypted.
+- **Automatic**: a user on the Iranian relay whose address stops answering moves
+  to the door by itself; a new user who enters the Iranian relay's address
+  finds the door through the relay that served the app; entering
+  `https://chat.example.com:8586` as the relay address works too.
+- **Calls and files**: tested through the door — messages both ways, messages
+  across the two relays, video calls direct and across relays, and files both
+  ways. Call audio and video do not go through the door: they use the Iranian
+  relay's TURN, whose port 3478 (UDP and TCP) is open from outside.
+
+## ۲. بستن پورت‌های بی‌رمز · Closing the unencrypted ports
+
+- **پورت 9000 و دوتای دیگر** — رله روی 9000 (رله)، 9001 (حضور آنلاین) و 9080 (نصب
+  سرور جدید) بدون رمزنگاری از کل اینترنت جواب می‌داد. حالا این پورت‌ها فقط به خود سرور
+  و nginx جواب می‌دهند و از اینترنت اتصال رد می‌شود. همهٔ ارتباط بیرونی فقط از HTTPS
+  می‌گذرد.
+- **نصب‌کنندهٔ سرور جدید** — به مسیر `/bootstrap/` روی HTTPS منتقل شد. قبلاً اسکریپتی را
+  که مستقیم اجرا می‌شود و توکن آن را بی‌رمز می‌فرستاد.
+- **استقرار** — اسکریپت deploy حالا وقتی سروری از این‌جا در دسترس نیست (مثل سرور ایران
+  از بیرون)، به‌جای ۱۸ دقیقه انتظار همین را می‌گوید و به بررسی روی خود سرور تکیه می‌کند.
+
+- **Port 9000 and two more**: the relay answered the whole internet without
+  encryption on 9000 (the relay), 9001 (presence), and 9080 (the new-server
+  installer). These ports now answer only the server itself and nginx; from
+  the internet the connection is refused. Everything outside goes through
+  HTTPS only.
+- **The new-server installer** moved to `/bootstrap/` over HTTPS. It used to
+  send a script that is piped straight into a shell, and its token, unencrypted.
+- **Deploying**: when a server cannot be reached from the deploying machine
+  (the Iranian one from outside), the deploy says so instead of waiting out 18
+  minutes, and relies on the checks run on the server itself.
+
+---
+
 # P00RIJA Cryptography 2.98.32
 
 Version 2.98.32 · build chat-v125
@@ -45,7 +196,7 @@ follow below.
 
 ## ۲. کشف محلی و رلهٔ بدون رمزنگاری · Local discovery and unencrypted relays
 
-- **سرور ایران از بیرون ایران** — بررسی شد: از بیرون ایران (حتی از سرور فنلاند)
+- **سرور ایران از بیرون ایران** — بررسی شد: از بیرون ایران (حتی از رلهٔ دیگر)
   اتصال امن به سرور ایران دست‌دادنش کامل می‌شود و بعد هیچ داده‌ای برنمی‌گردد، هم
   روی 8585 و هم روی 443، در حالی که HTTP ساده روی 9000 رد می‌شود و سرور ایران خودش
   سالم است. این فیلتر شبکه است نه ایراد برنامه. اتصال میان دو رله برقرار است چون
@@ -65,7 +216,7 @@ follow below.
   منتظر می‌گذارد، نه یک بار برای هر آدرس.
 
 - **The Iranian relay from outside Iran**: checked. From outside Iran (even from
-  the Finnish server) a secure connection to it completes its handshake and then
+  the other relay) a secure connection to it completes its handshake and then
   receives nothing, on 8585 and on 443 alike, while plain HTTP on 9000 passes and
   the server itself is healthy. That is network filtering, not the app. The link
   between the two relays stays up because the Iranian side dials it. People

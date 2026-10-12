@@ -285,8 +285,10 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         POORIJA_REMOTE_DIR="$s_dir" \
         POORIJA_PUBLIC_URL="${s_url:-https://$s_host:8585}" \
         POORIJA_ROLE="$s_role" \
-            bash "$0" ${ARGS[@]+"${ARGS[@]}"} || OVERALL=1
-        SERVED="$SERVED $name|$s_role|${s_url:-https://$s_host:8585}"
+            bash "$0" ${ARGS[@]+"${ARGS[@]}"}
+        child=$?
+        [ "$child" -eq 0 ] || OVERALL=1
+        SERVED="$SERVED $name|$s_role|$child|${s_url:-https://$s_host:8585}"
     done
 
     # The point of deploying together: afterwards they have to agree. Asked of
@@ -297,7 +299,7 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
     MISMATCH=0
     TREE_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
     for entry in $SERVED; do
-        n="${entry%%|*}"; rest="${entry#*|}"; r="${rest%%|*}"; u="${rest#*|}"
+        n="${entry%%|*}"; rest="${entry#*|}"; r="${rest%%|*}"; rest="${rest#*|}"; c="${rest%%|*}"; u="${rest#*|}"
         if [ "$r" = "relay" ]; then
             live="$(curl -sk --max-time 20 "$u/chat-health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
             want="$TREE_VERSION"
@@ -308,6 +310,10 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         fi
         if [ "$live" = "$want" ]; then
             printf "  %-14s %-7s %s\n" "$n" "$r" "$live"
+        elif [ -z "$live" ] && [ "$c" = "0" ]; then
+            # Verified on the server itself; this machine just cannot reach
+            # it (TLS into Iran is filtered from outside, for one).
+            printf "  %-14s %-7s %s\n" "$n" "$r" "verified on the server (not reachable from here)"
         else
             printf "  %-14s %-7s %s  (tree is %s)\n" "$n" "$r" "${live:-no answer}" "$want"
             MISMATCH=1
@@ -417,6 +423,13 @@ live_check() {
     local tag dialogs sealing health status=0
     tag="$(curl -sk --max-time 20 "$PUBLIC_URL/index.html" | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
     printf "  %-34s %s\n" "asset tag being served" "${tag:-<unreachable>}"
+    # Not reachable from this machine at all: the checks below would each wait
+    # out their timeout for the same answer. The on-server verification above
+    # is what decides; say so and stop.
+    if [ -z "$tag" ] && [ -z "$(curl -sk --max-time 10 "$PUBLIC_URL/chat-health")" ]; then
+        warn "$PUBLIC_URL does not answer from this machine (TLS to it may be filtered on the way); the checks on the server itself are what count."
+        return 2
+    fi
 
     dialogs="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/dialogs.js")"
     printf "  %-34s %s\n" "js/dialogs.js" "$dialogs"
@@ -808,9 +821,16 @@ deploy_status=${PIPESTATUS[0]}
 
 echo
 log "Checking what $PUBLIC_URL serves now"
-if live_check && [ "$deploy_status" -eq 0 ]; then
+live_check
+live_status=$?
+if [ "$live_status" -eq 0 ] && [ "$deploy_status" -eq 0 ]; then
     echo
     ok "Deployed. PWA users get offline delivery on their next load."
+    exit 0
+fi
+if [ "$live_status" -eq 2 ] && [ "$deploy_status" -eq 0 ]; then
+    echo
+    ok "Deployed and verified on the server."
     exit 0
 fi
 echo

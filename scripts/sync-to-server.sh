@@ -197,12 +197,32 @@ verify_health() {
     return 1
 }
 
+# The way clients actually reach the relay: through nginx, from the host.
+# verify_health above asks the relay from inside its own container, which
+# kept passing on 2026-10-12 while nginx could not reach the relay at all —
+# the relay had stopped listening on the address nginx uses — and both
+# servers answered 502 to everyone.
+verify_through_nginx() {
+    local port body
+    port="$(sed -n 's/^APP_PORT=//p' .env 2>/dev/null | tail -1)"
+    port="${port:-8585}"
+    body="$(curl -sk --max-time 10 "https://127.0.0.1:${port}/chat-health" 2>/dev/null \
+        || wget -qO- --no-check-certificate -T 10 "https://127.0.0.1:${port}/chat-health" 2>/dev/null)"
+    if echo "$body" | grep -q '"ok":true'; then
+        ok "nginx reaches the relay (https://127.0.0.1:${port}/chat-health)"
+        return 0
+    fi
+    fail "nginx cannot reach the relay — clients get 502: ${body:-<no response>}"
+    return 1
+}
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
     log "Checking only — nothing will be changed"
     status=0
     verify_assets || status=1
     verify_relay || status=1
     verify_health || status=1
+    verify_through_nginx || status=1
     exit "$status"
 fi
 
@@ -330,6 +350,7 @@ status=0
 verify_assets || status=1
 verify_relay || status=1
 verify_health || status=1
+verify_through_nginx || status=1
 
 echo
 if [ "$status" -eq 0 ]; then

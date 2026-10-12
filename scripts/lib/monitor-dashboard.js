@@ -1138,9 +1138,9 @@ $('bsShow').addEventListener('click', async () => {
   if (!data.ok) { toast(t('fail'), 'err'); return; }
   const origin = location.origin;
   $('bsCommand').style.display = '';
-  /* The command must point at the bootstrap port, not the app port the
-     dashboard itself is served from; the server bakes the number in. */
-  const bsOrigin = origin.replace(':8585', ':' + '${bootstrapPort}');
+  /* nginx carries the installer at /bootstrap/ over https; its own port is
+     no longer open to the internet. */
+  const bsOrigin = origin + '/bootstrap';
   $('bsCommand').textContent = 'curl -sSL ' + bsOrigin + '/install | bash -s -- ' + bsOrigin + ' ' + data.token + ' ~/poorija-cryptography';
 });
 

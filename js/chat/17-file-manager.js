@@ -2127,6 +2127,14 @@ notify(t(`سرور پیدا شد: ${result.origin}`, `Relay found: ${result.orig
 }
 return result;
 }
+/* The configured relay may still be reachable through a door another relay
+   keeps for it (js/chat/52-relay-mirrors.js) — the relay inside Iran, from
+   outside, is reached that way. Proven before it is used. */
+if (!silent && typeof attemptRelayFailover === 'function' && isUsableRelayOrigin(chatState.profile.serverUrl)) {
+if (await attemptRelayFailover()) {
+return { origin: chatServerOrigin(), viaFrontDoor: true };
+}
+}
 if (!silent) {
 const plainHost = await plaintextOnlyRelayHost();
 if (plainHost) {

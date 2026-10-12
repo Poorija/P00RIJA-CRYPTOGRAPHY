@@ -9,6 +9,7 @@
  */
 
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const os = require('os');
 const dns = require('dns').promises;
@@ -26,6 +27,7 @@ const { openTransit, transitFacts } = require('./lib/relay-transit.js');
    in its own module so the server file stays about the server. */
 const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
 const { linkPreview } = require('./lib/link-preview.js');
+const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
@@ -47,6 +49,58 @@ if (fs.existsSync(envPath)) {
 
 const DOMAIN = process.env.DOMAIN || 'localhost';
 const HOST = process.env.CHAT_SIGNAL_HOST || '0.0.0.0';
+/* Where the relay's own ports listen, when that is not everywhere. The relay
+   speaks plain HTTP: in the full stack nginx in front of it carries TLS, and
+   the plain ports (9000, 9001, 9080) used to answer the whole internet as
+   well — anyone could talk to the relay unencrypted, and a client that found
+   9000 did. CHAT_LISTEN_HOSTS names the addresses to listen on instead:
+   loopback for this machine and the Docker bridge for nginx (an interface
+   name such as docker0 stands for its IPv4 address). Unset keeps the old
+   behaviour, which the standalone relay — serving clients itself — needs. */
+/* An interface's IPv4 address, even while the interface is down. Node lists
+   only interfaces that are up and running, and docker0 is down whenever no
+   container sits on the default bridge — which is exactly the full stack's
+   case (nginx has a network of its own) — while its address still answers
+   nginx's host-gateway connections. So `ip` is asked when Node does not know. */
+function interfaceIpv4(name) {
+  const listed = (os.networkInterfaces()[name] || []).find((entry) => entry.family === 'IPv4' || entry.family === 4);
+  if (listed) return listed.address;
+  if (!/^[A-Za-z0-9_.-]{1,15}$/.test(name)) return '';
+  for (const binary of ['ip', '/sbin/ip', '/usr/sbin/ip', '/bin/ip']) {
+    try {
+      const out = require('child_process').execFileSync(binary, ['-4', '-o', 'addr', 'show', 'dev', name], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+      const match = out.match(/inet (\d+\.\d+\.\d+\.\d+)\//);
+      if (match) return match[1];
+    } catch (_error) { /* not this binary, or no such interface */ }
+  }
+  return '';
+}
+function resolveListenHosts(value) {
+  const hosts = [];
+  for (const raw of String(value || '').split(/[,\s]+/)) {
+    const name = raw.trim();
+    if (!name) continue;
+    if (net.isIP(name)) { hosts.push(name); continue; }
+    const address = interfaceIpv4(name);
+    if (address) hosts.push(address);
+    else console.error(`[Listen] interface "${name}" has no IPv4 address here; skipped — whatever reaches the relay through it will be refused`);
+  }
+  return Array.from(new Set(hosts));
+}
+const LISTEN_HOSTS = resolveListenHosts(process.env.CHAT_LISTEN_HOSTS);
+/* One server, several addresses: a plain listener per extra address hands
+   its sockets to the real server, so every request and upgrade handler
+   attached to it sees them as its own. */
+function listenOn(target, port, fallbackHost, onReady) {
+  const hosts = LISTEN_HOSTS.length ? LISTEN_HOSTS : [fallbackHost];
+  const [first, ...rest] = hosts;
+  target.listen(port, first, onReady);
+  for (const host of rest) {
+    const extra = net.createServer((socket) => target.emit('connection', socket));
+    extra.on('error', (error) => console.warn(`[Listen] ${host}:${port} not available: ${error.code || error.message}`));
+    extra.listen(port, host);
+  }
+}
 const PORT = Number(process.env.CHAT_SIGNAL_PORT || 9000);
 const PRESENCE_PORT = Number(process.env.CHAT_PRESENCE_PORT || 9001);
 
@@ -111,6 +165,9 @@ const TRANSIT_PEERS = parseTransitPeers(process.env.CHAT_TRANSIT_PEERS || '');
    above makeIdentityFetcher. */
 const TRANSIT_VERIFY_TLS = process.env.CHAT_TRANSIT_INSECURE_TLS !== '1';
 const relayPrivate = relayPrivateKey(relayIdentity);
+/* The front door (scripts/lib/relay-front.js), set up just below. Declared
+   first because the link callbacks reach it. */
+let frontDoor = null;
 const relayPeers = createRelayPeers({
   identity: publicRelayIdentity(relayIdentity),
   privateKey: relayPrivate,
@@ -119,10 +176,39 @@ const relayPeers = createRelayPeers({
   WebSocketImpl: WebSocket,
   fetchIdentity: makeIdentityFetcher({ verifyTls: TRANSIT_VERIFY_TLS }),
   verifyTls: TRANSIT_VERIFY_TLS,
-  onFrame: (payload, link) => handleTransitFrame(payload, link),
+  onFrame: (payload, link) => {
+    if (frontDoor?.onFrame(payload, link)) return;
+    handleTransitFrame(payload, link);
+  },
+  onLinkUp: (link) => frontDoor?.linkUp(link),
   /* Function declarations below are hoisted, so this resolves at call time. */
-  onLinkDown: (link) => failTransitWaitsFor(link?.peerId),
+  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); },
 });
+/* CHAT_FRONTS on the relay people can reach: `<relay id>@<public origin>` for
+   each relay it answers for (nginx hands that origin's connections to
+   CHAT_FRONT_PORT, 9011 and up). CHAT_FRONT_DOORS on the relay behind it:
+   the ids of the relays allowed to carry its streams. Both need the transit
+   link between the two already configured. */
+const FRONTS = parseFronts(process.env.CHAT_FRONTS, process.env.CHAT_FRONT_PORT || 9011);
+const FRONT_DOORS = parseDoors(process.env.CHAT_FRONT_DOORS);
+/* Started at boot, below, once ALLOWED_ORIGINS exists. */
+function startFrontDoor() {
+  if (!FRONTS.length && !FRONT_DOORS.length) return;
+  frontDoor = createFrontDoor({
+    relayPeers,
+    fronts: FRONTS,
+    doors: FRONT_DOORS,
+    localPort: PORT,
+    listenHosts: LISTEN_HOSTS.length ? LISTEN_HOSTS : ['127.0.0.1'],
+    /* Only this relay's own names: origins listed for CORS or as mirrors are
+       other servers' names, and a client looking a door up by name must not
+       be sent here for a relay that is not this one. */
+    ownOrigins: ALLOWED_ORIGINS.filter((origin) => {
+      try { return /^https?:$/.test(new URL(origin).protocol) && (!DOMAIN || new URL(origin).hostname === String(DOMAIN).toLowerCase()); } catch (_error) { return false; }
+    }),
+  });
+  frontDoor.listen();
+}
 if (relayPeers.enabled()) {
   console.log(`[Transit] enabled for ${TRANSIT_PEERS.length} relay(s)`);
   /* Dialled once at start and redialled on its own backoff afterwards. An
@@ -4122,6 +4208,16 @@ app.post('/link-preview', async (req, res) => {
   }
 });
 
+/* The relays this one answers for at addresses of its own (CHAT_FRONTS), so a
+   client that cannot reach its relay directly can find the door. Public on
+   purpose: a client still proves the door leads to the relay it pinned (the
+   mirror proof) before sending anything through it. */
+app.get('/relay-fronts', (req, res) => {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  res.json({ ok: true, fronts: frontDoor ? frontDoor.listing() : [] });
+});
+
 app.get('/relay-mirrors', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   setNoStoreHeaders(res);
@@ -5885,8 +5981,11 @@ if (BOOTSTRAP_PORT > 0) {
   bootstrapServer.on('error', (error) => {
     console.warn(`[Bootstrap] installer not started on ${BOOTSTRAP_PORT}: ${error.code || error.message}`);
   });
-  bootstrapServer.listen(BOOTSTRAP_PORT, '0.0.0.0', () => {
-    console.log(`Bootstrap installer available at http://${HOST}:${BOOTSTRAP_PORT}/install`);
+  /* Behind nginx at /bootstrap/ (https) when CHAT_LISTEN_HOSTS keeps this
+     port off the internet; a plain-http installer piped into a shell is a
+     way to hand someone else's script to a new server. */
+  listenOn(bootstrapServer, BOOTSTRAP_PORT, '0.0.0.0', () => {
+    console.log(`Bootstrap installer available on port ${BOOTSTRAP_PORT}`);
   });
 }
 
@@ -8937,13 +9036,16 @@ setInterval(() => {
    seed. Called last, at boot, once everything it touches exists. */
 loadRuntimeTransitPeers();
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Poorija chat signal server listening on http://${HOST}:${PORT}`);
-  console.log(`Monitoring Dashboard available at http://${HOST}:${PORT}/Monitor_Server (v${MONITOR_VERSION})`);
+startFrontDoor();
+
+listenOn(server, PORT, '0.0.0.0', () => {
+  const where = LISTEN_HOSTS.length ? LISTEN_HOSTS.join(', ') : '0.0.0.0';
+  console.log(`Poorija chat signal server listening on port ${PORT} (${where})`);
+  console.log(`Monitoring Dashboard available at /Monitor_Server (v${MONITOR_VERSION})`);
 });
 
-presenceServer.listen(PRESENCE_PORT, HOST, () => {
-  console.log(`Poorija chat presence socket listening on ws://${HOST}:${PRESENCE_PORT}/chat-signal`);
+listenOn(presenceServer, PRESENCE_PORT, HOST, () => {
+  console.log(`Poorija chat presence socket listening on port ${PRESENCE_PORT}`);
 });
 
 /* ------------------------------------------------------------------
