@@ -262,6 +262,7 @@ function syncLinkPreviewToggle() {
     toggle.checked = linkPreviewsEnabled();
     toggle.disabled = local && Boolean(chatState.nativeProxyActive);
   }
+  if (typeof syncChatToggleStates === 'function') syncChatToggleStates();
   if (hint && available && !local) {
     hint.textContent = t('روشن: وقتی لینکی می‌نویسید، رلهٔ شما صفحه را باز می‌کند و عنوان و تصویر کوچکش رمزنگاری‌شده همراه پیام می‌رود؛ دستگاه گیرنده هرگز به آن سایت وصل نمی‌شود. چون این نسخه خودش نمی‌تواند صفحهٔ سایت دیگری را باز کند، رله لینک را می‌بیند (ولی پیام را نه) و سایت آدرس رله را می‌بیند، نه آدرس شما. رله چیزی را نگه نمی‌دارد. خاموش: هیچ صفحه‌ای باز نمی‌شود.',
       'On: when you type a link, your relay opens the page and its title and a small picture travel encrypted with the message; the recipient\'s device never contacts the site. Because this version cannot open another site\'s page itself, the relay sees the link (not the message) and the site sees the relay\'s address, not yours. The relay keeps nothing. Off: no page is opened.');

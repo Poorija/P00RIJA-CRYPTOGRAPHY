@@ -1,3 +1,27 @@
+# P00RIJA Cryptography 2.98.36
+
+Version 2.98.36 · build chat-v129
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## کلیدهای تنظیمات · Settings switches
+
+- **یک‌شکل** — کلید «پیش‌نمایش لینک» و دو کلید «حذف متادیتا» و «تبدیل HEIC» با روشن شدن
+  فقط دکمه‌شان جابه‌جا می‌شد و ردیفشان، برخلاف بقیهٔ کلیدها، رنگ و قاب «روشن» را نمی‌گرفت.
+  حالا هر سه دقیقاً مثل بقیه‌اند. یک آزمون هم اضافه شد که اگر کلید تازه‌ای این‌طور جا بماند،
+  شکست بخورد.
+
+- **One kind of switch**: the Link previews switch and the Strip metadata and Convert
+  HEIC switches moved only their knob when turned on; unlike every other switch,
+  their row never took the "on" colour and border. All three now match the rest,
+  and a test fails if a new switch is ever left out this way.
+
+---
+
 # P00RIJA Cryptography 2.98.35
 
 Version 2.98.35 · build chat-v128

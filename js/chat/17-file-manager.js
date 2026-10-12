@@ -2962,6 +2962,11 @@ chatPublicStun: ['STUN عمومی روشن است — آی‌پی شما به گ
    which read as "these two are different from the rest" on every device. */
 chatEnabledToggle: ['چت امن روشن است', 'Secure chat is on', 'چت امن خاموش است', 'Secure chat is off'],
 chatCrossRelayComm: ['ارتباط بین رله‌ها روشن است؛ پیام و تماس از مسیر رمزنگاری‌شدهٔ میان دو رله می‌رود', 'Cross-relay transit is on; messages and calls ride the encrypted link between the relays', 'ارتباط بین رله‌ها خاموش است؛ همه‌چیز از رلهٔ خودتان می‌رود', 'Cross-relay transit is off; everything goes through your own relay'],
+/* Added with their features and forgotten here, so their rows never took the
+   on-colour — only the knob moved, which read as a different kind of switch. */
+chatLinkPreviews: ['پیش‌نمایش لینک روشن است', 'Link previews are on', 'پیش‌نمایش لینک خاموش است — هیچ صفحه‌ای باز نمی‌شود', 'Link previews are off — no page is opened'],
+chatStripMetadataToggle: ['متادیتای فایل‌ها پیش از ارسال پاک می‌شود', 'File metadata is removed before sending', 'فایل‌ها با متادیتای خودشان فرستاده می‌شوند', 'Files are sent with their metadata'],
+chatConvertHeicToggle: ['پیش از ارسال عکس HEIC پرسیده می‌شود', 'You are asked before a HEIC photo is sent', 'عکس‌های HEIC همان‌طور که هستند فرستاده می‌شوند', 'HEIC photos are sent as they are'],
 };
 Object.entries(toggleMeta).forEach(([id, labels]) => {
 const input = document.getElementById(id);

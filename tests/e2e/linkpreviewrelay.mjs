@@ -22,6 +22,7 @@
  *     sent with a link carries a card.
  */
 import http from 'node:http';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { openApp, browser, waitFor } from './_chat-harness.mjs';
 import { startTwoStacks } from './_two-stacks.mjs';
@@ -37,6 +38,21 @@ const check = (name, ok, detail = '') => {
 };
 const section = (title) => console.log(`\n===== ${title} =====`);
 const refuses = (raw) => { try { checkedLink(raw); return false; } catch (_error) { return true; } };
+
+section('every settings switch is one kind of switch');
+{
+  /* A switch row takes the on-colour from syncChatToggleStates' list; a
+     switch left out of it moves only its knob, which is how the link preview
+     switch shipped. Every chat switch in the page must be on the list. */
+  const page = fs.readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  const script = fs.readFileSync(new URL('../../js/chat/17-file-manager.js', import.meta.url), 'utf8');
+  const listed = new Set([...script.slice(script.indexOf('const toggleMeta'), script.indexOf('Object.entries(toggleMeta)'))
+    .matchAll(/^\s*(\w+):\s*\[/gm)].map((m) => m[1]));
+  const switches = [...page.matchAll(/<label[^>]*class="[^"]*\bchat-toggle\b[^"]*"[^>]*>([\s\S]*?)<\/label>/g)]
+    .flatMap((m) => [...m[1].matchAll(/<input[^>]*\bid="([^"]+)"[^>]*type="checkbox"|<input[^>]*type="checkbox"[^>]*\bid="([^"]+)"/g)].map((i) => i[1] || i[2]));
+  const left = switches.filter((id) => !listed.has(id));
+  check('every chat switch gets the same on-colour as the rest', switches.length > 5 && left.length === 0, left.join(' ') || `${switches.length} switches`);
+}
 
 section('what a pasted link may not reach');
 const refused = [
@@ -127,6 +143,13 @@ try {
     openSavedMessages();
   });
   check('it turns on', await P.evaluate(() => linkPreviewsEnabled()));
+  const row = await P.evaluate(() => {
+    const own = document.getElementById('chatLinkPreviewsRow');
+    const other = document.getElementById('chatSendReceipts')?.closest('.chat-toggle');
+    const look = (el) => { const cs = getComputedStyle(el); return `${cs.backgroundColor}|${cs.borderColor}`; };
+    return { active: own.classList.contains('is-active'), same: look(own) === look(other), state: own.dataset.state };
+  });
+  check('and its row takes the on-colour, the same as the read-receipts row', row.active && row.same && row.state === 'on', JSON.stringify(row));
   await P.evaluate((link) => {
     const box = document.getElementById('chatComposer');
     box.value = `read this ${link}`;

@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.98.35';
+const APP_VERSION_SEMVER = '2.98.36';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v128';
+  return 'chat-v129';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -3927,6 +3927,7 @@ document.getElementById('chatStripMetadataToggle')?.addEventListener('change', (
     ? (state.language === 'en' ? 'Files will be cleaned before they are sent.' : 'فایل‌ها پیش از ارسال تمیز می‌شوند.')
     : (state.language === 'en' ? 'Files will be sent exactly as they are.' : 'فایل‌ها دقیقاً همان‌طور که هستند فرستاده می‌شوند.'),
     event.target.checked ? 'success' : 'warning');
+  window.syncChatToggleStates?.();
 });
 
 document.getElementById('chatConvertHeicToggle')?.addEventListener('change', (event) => {
@@ -3936,6 +3937,7 @@ document.getElementById('chatConvertHeicToggle')?.addEventListener('change', (ev
     ? (state.language === 'en' ? 'You will be asked before a HEIC photograph is sent.' : 'پیش از ارسال عکس HEIC از شما پرسیده می‌شود.')
     : (state.language === 'en' ? 'HEIC photographs go as they are, with their metadata.' : 'عکس‌های HEIC با متادیتای خودشان فرستاده می‌شوند.'),
     event.target.checked ? 'success' : 'warning');
+  window.syncChatToggleStates?.();
 });
 
 /* Both switches have to show what is actually stored, or a reader who turned
@@ -3946,6 +3948,8 @@ function syncMetadataToggles() {
   const settings = metadataSettings();
   if (strip) strip.checked = settings.stripOnSend;
   if (convert) convert.checked = settings.offerHeicConvert;
+  /* The rows take the on-colour from the switch state (js/chat/17). */
+  window.syncChatToggleStates?.();
 }
 window.addEventListener('poorija:tab-switched', (event) => {
   if (event.detail?.tabName === 'chat') syncMetadataToggles();
@@ -6594,7 +6598,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.35-chat-v128';
+const reloadKey = 'poorija-sw-reload-2.98.36-chat-v129';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6607,7 +6611,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.35-chat-v128', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.36-chat-v129', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
