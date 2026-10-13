@@ -789,6 +789,36 @@ const settingsPanel = await page.evaluate(async () => {
 check('the settings menu shows every section at once',
   settingsPanel?.menuRows === settingsPanel?.expectedTabs && settingsPanel?.menuFits === true,
   settingsPanel ? JSON.stringify(settingsPanel) : 'no panel');
+/* And on the shorter phones, where the profile card and nine rows cannot both
+   fit: an iPhone SE, and the 844px-tall phones most people carry. The card
+   steps aside while Settings is open and is back with the conversations. */
+const shortPhones = [];
+for (const [width, height] of [[375, 667], [390, 844]]) {
+  await page.setViewportSize({ width, height });
+  await page.waitForTimeout(700);
+  shortPhones.push(await page.evaluate(async (size) => {
+    const rail = document.querySelector('#content-chat .chat-rail');
+    const body = document.querySelector('#chatConnectionPanel .chat-settings-body');
+    const menu = body?.querySelector('.chat-settings-menu');
+    if (!rail || !body || !menu) return { size, missing: true };
+    syncRailChrome();
+    await new Promise((r) => setTimeout(r, 300));
+    const b = body.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    const fits = m.top >= b.top - 1 && m.bottom <= b.bottom + 1;
+    const cardInSettings = rail.querySelector('.chat-profile-card')?.getBoundingClientRect().height || 0;
+    document.querySelector('[data-chat-view="chats"]')?.click();
+    await new Promise((r) => setTimeout(r, 500));
+    const cardInChats = rail.querySelector('.chat-profile-card')?.getBoundingClientRect().height || 0;
+    document.querySelector('[data-chat-view="connection"]')?.click();
+    await new Promise((r) => setTimeout(r, 500));
+    return { size, fits, cardInSettings: Math.round(cardInSettings), cardInChats: Math.round(cardInChats) };
+  }, `${width}x${height}`));
+}
+await page.setViewportSize({ width: 430, height: 932 });
+await page.waitForTimeout(500);
+check('on an SE and an 844px phone every section fits too, and the profile card is back in the chats',
+  shortPhones.every((r) => r.fits && r.cardInSettings === 0 && r.cardInChats > 100), JSON.stringify(shortPhones));
 const settingsSection = await page.evaluate(async () => {
   document.querySelector('[data-settings-tab="connection"]')?.click();
   await new Promise((r) => setTimeout(r, 400));

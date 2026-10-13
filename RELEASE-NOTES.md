@@ -1,3 +1,27 @@
+# P00RIJA Cryptography 2.98.39
+
+Version 2.98.39 · build chat-v132
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## تنظیمات روی گوشی‌های کوتاه‌تر · Settings on shorter phones
+
+- روی گوشی‌های کوتاه‌تر، مثل iPhone SE و گوشی‌های رایج با ارتفاع ۸۴۴ پیکسل، کارت
+  پروفایل و نُه ردیف تنظیمات با هم جا نمی‌شدند. حالا تا وقتی تنظیمات باز است کارت
+  پروفایل کنار می‌رود و هر نُه بخش یک‌جا دیده می‌شوند. با برگشتن به گفتگوها کارت
+  دوباره سر جایش است. گوشی‌های بلندتر (از ۸۸۰ پیکسل به بالا) مثل قبل‌اند.
+
+- On shorter phones, such as an iPhone SE and the common 844px-tall phones, the
+  profile card and the nine settings rows did not fit together. The card now steps
+  aside while Settings is open, so all nine sections show at once, and it is back
+  with the conversations. Taller phones (880px and up) are unchanged.
+
+---
+
 # P00RIJA Cryptography 2.98.38
 
 Version 2.98.38 · build chat-v131
