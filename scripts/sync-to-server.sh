@@ -297,6 +297,21 @@ OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION
 # always restarted, though, when its key had to be repaired above: coturn
 # reads the key only at start.
 "${COMPOSE_CMD[@]}" up -d coturn cert-renewer || warn "coturn or the certificate renewer did not come up"
+# The renewer runs scripts/cert-renewer.sh from this tree through a file bind
+# mount, and a file mount holds the inode it was started with. rsync replaces
+# a changed file with a new one, so the running renewer went on executing the
+# old script after a deploy that fixed it. Restarted when the two differ;
+# a restart costs nothing — it checks the folder once and goes back to sleep.
+RENEWER_CONTAINER="Poorija-Cryptography_CertRenewer"
+if docker ps --format '{{.Names}}' | grep -Fxq "$RENEWER_CONTAINER"; then
+    running_sum="$(docker exec "$RENEWER_CONTAINER" md5sum /usr/local/bin/cert-renewer.sh 2>/dev/null | cut -d' ' -f1)"
+    tree_sum="$(md5sum scripts/cert-renewer.sh 2>/dev/null | cut -d' ' -f1)"
+    if [ -n "$tree_sum" ] && [ "$running_sum" != "$tree_sum" ]; then
+        docker restart "$RENEWER_CONTAINER" >/dev/null 2>&1 \
+            && ok "certificate renewer restarted onto the new script" \
+            || warn "could not restart the certificate renewer; it still runs the old script"
+    fi
+fi
 if ! docker exec Poorija-Cryptography_Coturn sh -c 'test -r /etc/coturn/certs/key.pem' 2>/dev/null \
     || docker logs Poorija-Cryptography_Coturn 2>&1 | head -80 | grep -q 'cannot start TLS and DTLS listeners'; then
     docker restart Poorija-Cryptography_Coturn >/dev/null 2>&1 && ok "coturn restarted to pick up its key"

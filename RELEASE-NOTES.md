@@ -20,6 +20,40 @@ Each section is Persian first, English after. Earlier changes follow below.
   their row never took the "on" colour and border. All three now match the rest,
   and a test fails if a new switch is ever left out this way.
 
+## سرتیفیکیت سرور · The server's certificate
+
+- **یک سرتیفیکیت، یک پوشه**: برنامه، سرور TURN و هر برنامهٔ دیگری روی همان سرور
+  (مثل 3X-UI) سرتیفیکیت را از یک پوشه می‌خوانند و دیگر کپی جداگانه‌ای در کار نیست.
+  روی هر دو سرور این پوشه همان `/root/cert/<domain>/` خودِ 3X-UI است. تمدید خودکار
+  ده روز مانده به انقضا انجام می‌شود و بعد از آن برنامه و 3X-UI دوباره راه‌اندازی
+  می‌شوند.
+- **3X-UI روی سرور ایران**: در پوشه‌اش یک گواهی تازه کنار کلید قدیمی مانده بود.
+  برای همین پنل بدون TLS روی http ساده بالا آمده بود و ورودی 443 اصلاً گواهی ارائه
+  نمی‌داد. درست شد، و تمدیدکننده حالا هر بار جفت بودن گواهی و کلید را بررسی می‌کند.
+- **نصب تازه** می‌پرسد که از قبل گواهی دارید یا نه. اگر دارید، پوشه‌اش را می‌دهید
+  و نصب‌کننده گواهی و کلیدِ هم‌جفت را خودش پیدا می‌کند؛ بعد انتخاب می‌کنید که همین
+  سرور تمدیدش کند یا همان برنامه‌ای که الان تمدیدش می‌کند. اگر ندارید، دامنه گواهی
+  Let's Encrypt می‌گیرد؛ IP عمومی هم گواهی شش‌روزهٔ Let's Encrypt می‌گیرد که خودکار
+  تمدید می‌شود؛ لوکال و شبکهٔ محلی هم گواهی خودامضا با همهٔ آدرس‌های ماشین می‌گیرند.
+- تغییری در اپ‌ها نیست؛ این تغییر فقط سمت سرور است.
+
+- **One certificate, one folder**: the app, the TURN server, and anything else on the
+  machine (3X-UI, for one) read the certificate from the same folder, with no
+  separate copies. On both servers that folder is 3X-UI's own
+  `/root/cert/<domain>/`. It is renewed automatically ten days before expiry,
+  after which the stack and 3X-UI are restarted.
+- **3X-UI on the server in Iran**: its folder held a new certificate beside an old
+  key. The panel had fallen back to plain http and the 443 inbound served no
+  certificate. This is fixed, and the renewer now checks that the certificate and
+  key belong together on every pass.
+- **A fresh install** asks whether you already have a certificate. If you do, you
+  give the folder, the installer finds the matching pair, and you choose whether
+  this server renews it or the program that already does. If you don't, a domain
+  gets Let's Encrypt, a public IP gets Let's Encrypt's six-day certificate,
+  renewed for you, and localhost or a LAN gets a self-signed certificate naming
+  every address the machine has.
+- Nothing changes in the apps. This is a server-side change.
+
 ---
 
 # P00RIJA Cryptography 2.98.35

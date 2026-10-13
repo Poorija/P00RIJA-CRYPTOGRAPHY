@@ -518,6 +518,21 @@ iOS no external link opened — an update's download included. Pinned to 2.5.3:
 desktop keeps fetching its own. `CHAT_LINK_PREVIEW_ALLOW_PRIVATE=1` exists for
 test stacks only.
 
+**One certificate folder per server** (`CERT_MODE`, `CERTS_DIR`, `CERT_FILE`,
+`KEY_FILE`; `scripts/cert-renewer.sh`). nginx, coturn and the relay read the pair
+in place; on both servers that is 3X-UI's `/root/cert/<domain>/`
+(fullchain.pem, privkey.pem), and the renewer restarts `x-ui` with the stack when
+3X-UI's database names that folder. Before this, the renewer wrote copies, and
+something replaced 3X-UI's fullchain.pem without its key. On the Iran server the
+panel then fell back to plain http and the 443 inbound served no certificate, with
+nothing in any log we read. `pair_ok` is the check that matters, not expiry. The
+key is owned by uid 65534, mode 0400, for coturn; root readers do not care. The
+renewer sets aside acme.sh entries that renew into the same folder
+(`.conf.removed`). It reaches the host (systemctl, /root/.acme.sh) through a
+privileged `nsenter` container, the same root the docker socket already is.
+`--status`, `--once` and `--renew-now` run through `docker exec`.
+`tests/e2e/certkeeper.mjs` runs it in the real image.
+
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted
 profile and reads as empty before unlock (`poorija_screen_guard` is).

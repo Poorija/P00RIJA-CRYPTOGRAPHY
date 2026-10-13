@@ -50,8 +50,11 @@ services:
       # with CHAT_FRONTS): a server without one opens nothing new.
       - "${APP_FRONT_BIND:-127.0.0.1}:${APP_FRONT_PORT:-8586}:8586"
     volumes:
-      - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/nginx/certs/fullchain.pem:ro
-      - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/nginx/certs/privkey.pem:ro
+      # The certificate folder (CERTS_DIR) is read in place, shared with
+      # anything else on the machine that serves the same name — 3X-UI reads
+      # /root/cert/<domain>/. See scripts/cert-renewer.sh.
+      - ${SSL_CERT_PATH:-${CERTS_DIR:-../certs}/${CERT_FILE:-cert.pem}}:/etc/nginx/certs/fullchain.pem:ro
+      - ${SSL_KEY_PATH:-${CERTS_DIR:-../certs}/${KEY_FILE:-key.pem}}:/etc/nginx/certs/privkey.pem:ro
     extra_hosts:
       - "chat-signal:host-gateway"
     networks:
@@ -124,7 +127,7 @@ services:
       CHAT_FRONT_DOORS: ${CHAT_FRONT_DOORS:-}
       CHAT_FRONT_PORT: ${CHAT_FRONT_PORT:-9011}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
-      CHAT_TLS_CERT_PATH: /etc/certs/cert.pem
+      CHAT_TLS_CERT_PATH: /etc/certs/${CERT_FILE:-cert.pem}
       # ---- the monitor's machine half (3.33) ----
       # The install tree and backups directory as the DOCKER HOST sees them.
       # Passed through from the environment sync-to-server.sh sets when it
@@ -199,8 +202,8 @@ services:
       - --external-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
       - --relay-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
     volumes:
-      - ${SSL_CERT_PATH:-../certs/cert.pem}:/etc/coturn/certs/cert.pem:ro
-      - ${SSL_KEY_PATH:-../certs/key.pem}:/etc/coturn/certs/key.pem:ro
+      - ${SSL_CERT_PATH:-${CERTS_DIR:-../certs}/${CERT_FILE:-cert.pem}}:/etc/coturn/certs/cert.pem:ro
+      - ${SSL_KEY_PATH:-${CERTS_DIR:-../certs}/${KEY_FILE:-key.pem}}:/etc/coturn/certs/key.pem:ro
     restart: unless-stopped
 
   cert-renewer:
@@ -215,14 +218,28 @@ services:
     entrypoint: ["/bin/sh", "/usr/local/bin/cert-renewer.sh"]
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      EXTERNAL_IP: ${EXTERNAL_IP:-}
+      # letsencrypt | existing | self-signed; empty follows DOMAIN (a name is
+      # letsencrypt, localhost or an address is self-signed).
+      CERT_MODE: ${CERT_MODE:-}
+      CERT_SANS: ${CERT_SANS:-}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
       CERT_DEPLOY_DIR: /deploy-certs
+      CERT_FILE: ${CERT_FILE:-cert.pem}
+      KEY_FILE: ${KEY_FILE:-key.pem}
+      # The folder and files as the host names them: how 3X-UI's settings and
+      # acme.sh refer to them, and what nginx and coturn were handed.
+      CERTS_DIR_ON_HOST: ${CERTS_DIR:-../certs}
+      SSL_CERT_PATH_ON_HOST: ${SSL_CERT_PATH:-${CERTS_DIR:-../certs}/${CERT_FILE:-cert.pem}}
+      SSL_KEY_PATH_ON_HOST: ${SSL_KEY_PATH:-${CERTS_DIR:-../certs}/${KEY_FILE:-key.pem}}
       LETSENCRYPT_DIR: /etc/letsencrypt
-      # Let's Encrypt, renewed automatically when ten days are left.
+      # Renewed automatically when ten days are left (a third of its life, for
+      # a six-day certificate on an IP address).
       RENEW_BEFORE_DAYS: ${CERT_RENEW_BEFORE_DAYS:-10}
       CHECK_INTERVAL_SECONDS: ${CERT_CHECK_INTERVAL_SECONDS:-21600}
       APP_CONTAINER: Poorija-Cryptography_App
       COTURN_CONTAINER: Poorija-Cryptography_Coturn
+      RENEWER_CONTAINER: Poorija-Cryptography_CertRenewer
       COTURN_KEY_UID: ${COTURN_KEY_UID:-65534}
     network_mode: host
     volumes:
@@ -231,12 +248,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # The script from this tree rather than the copy baked into the image,
       # so a fix to it reaches the server with an ordinary deploy instead of
-      # an image rebuild that has to reach PyPI for certbot.
+      # an image rebuild that has to reach PyPI for certbot. A file mount
+      # keeps the inode it started with, so sync-to-server.sh restarts the
+      # renewer when its copy differs from the tree.
       - ../scripts/cert-renewer.sh:/usr/local/bin/cert-renewer.sh:ro
-      # The one certificate this machine serves, shared by this stack and
-      # 3X-UI alike: both read the same pair from /root/cert/ so a renewal
-      # is one event, not two divergent ones.
-      - /root/cert:/root-cert
     restart: unless-stopped
 
 networks:

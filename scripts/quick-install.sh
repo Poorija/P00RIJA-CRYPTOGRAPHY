@@ -13,6 +13,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/quick-install.sh | bash
 #   curl -fsSL .../quick-install.sh | bash -s -- --domain chat.example.com --letsencrypt --email you@example.com
 #
+# Certificates: a public domain (or a public IP given as --domain) gets Let's
+# Encrypt, renewed ten days before expiry; anything else gets a self-signed
+# one. --self-signed forces that. A certificate the server already has is
+# served in place and shared:
+#   ... --domain chat.example.com --cert-dir /root/cert/chat.example.com               # its owner renews it
+#   ... --domain chat.example.com --cert-dir /root/cert/chat.example.com --letsencrypt # this server renews it there
+#
 # Clones (or updates) the repository, checks the prerequisites, and hands over
 # to scripts/setup.sh --quick, which does the actual work. Everything here is
 # about getting to that point safely from a bare machine.

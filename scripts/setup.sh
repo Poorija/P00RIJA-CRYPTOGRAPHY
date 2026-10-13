@@ -14,6 +14,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=lib/cert-folder.sh
+. "$ROOT/scripts/lib/cert-folder.sh"
 
 COMPOSE_FILE="$ROOT/config/docker-compose.yaml"
 ENV_FILE="$ROOT/.env"
@@ -30,7 +32,9 @@ QUICK_INSTALL=false
 QUICK_DOMAIN=""
 QUICK_EMAIL=""
 QUICK_MONITOR_PASS=""
-QUICK_CERT="self-signed"
+# Empty means "Let's Encrypt for a public domain name, self-signed otherwise".
+QUICK_CERT=""
+QUICK_CERT_DIR=""
 QUICK_START=true
 # Relays this one may carry for, as "<id>@<origin>" separated by commas. Empty
 # is the default and means this relay carries for nobody, which is the only safe
@@ -46,6 +50,11 @@ if [[ "${1:-}" == "--quick" || "${1:-}" == "quick" ]]; then
             --email)    QUICK_EMAIL="${2:-}"; shift 2 ;;
             --password) QUICK_MONITOR_PASS="${2:-}"; shift 2 ;;
             --letsencrypt) QUICK_CERT="letsencrypt"; shift ;;
+            --self-signed) QUICK_CERT="self-signed"; shift ;;
+            # A folder that already holds this server's certificate (3X-UI's
+            # /root/cert/<domain>/, say): served from there, shared. With
+            # --letsencrypt this server also renews it there.
+            --cert-dir) QUICK_CERT_DIR="${2:-}"; shift 2 ;;
             --peers)    QUICK_PEERS="${2:-}"; shift 2 ;;
             --no-start) QUICK_START=false; shift ;;
             *) echo "Unknown option for --quick: $1" >&2; exit 2 ;;
@@ -95,6 +104,17 @@ if [[ "$NONINTERACTIVE_UPDATE" != "true" ]] && ! command -v whiptail >/dev/null 
         exit 1
     fi
 fi
+
+# What .env says about the certificate. Every part of the stack reads the
+# pair in place from CERTS_DIR, and scripts/cert-renewer.sh keeps it there:
+# CERT_MODE=letsencrypt issues and renews it, existing follows whoever else
+# renews it, self-signed makes it (and makes it again before it runs out).
+CERT_MODE="self-signed"
+CERTS_DIR_SETTING="$ROOT/certs"
+CERT_FILE="cert.pem"
+KEY_FILE="key.pem"
+CERT_SANS=""
+CERTBOT_EMAIL=""
 
 # Colors for terminal output
 INFO='\033[1;34m'
@@ -387,8 +407,16 @@ write_env_file() {
 DOMAIN=$DOMAIN
 EXTERNAL_IP=$EXT_IP
 APP_PORT=${APP_PORT:-8585}
-SSL_CERT_PATH=$ROOT/certs/cert.pem
-SSL_KEY_PATH=$ROOT/certs/key.pem
+# The certificate: one folder, read in place by nginx, the TURN server and the
+# relay, and kept by the cert-renewer container. See scripts/cert-renewer.sh.
+CERT_MODE=$CERT_MODE
+CERTS_DIR=$CERTS_DIR_SETTING
+CERT_FILE=$CERT_FILE
+KEY_FILE=$KEY_FILE
+SSL_CERT_PATH=$CERTS_DIR_SETTING/$CERT_FILE
+SSL_KEY_PATH=$CERTS_DIR_SETTING/$KEY_FILE
+CERT_SANS=$CERT_SANS
+CERTBOT_EMAIL=$CERTBOT_EMAIL
 MONITOR_PASSWORD=$MONITOR_PASS
 TURN_USER=$turn_user
 TURN_PASSWORD=$TURN_PASS
@@ -475,95 +503,121 @@ detect_ips() {
     fi
 }
 
+# Every name and address a self-signed certificate should answer for:
+# localhost, the host itself, the public address, and each address this
+# machine has on its networks — a phone on the same Wi-Fi types one of those.
+default_sans() {
+    local host="$1" ip
+    {
+        echo "DNS:localhost"
+        echo "IP:127.0.0.1"
+        if [[ -n "$host" && "$host" != "localhost" ]]; then
+            if [[ "$host" =~ ^[0-9.]+$ || "$host" == *:* ]]; then echo "IP:$host"; else echo "DNS:$host"; fi
+        fi
+        [[ -n "${EXT_IP:-}" && "$EXT_IP" != "0.0.0.0" ]] && echo "IP:$EXT_IP"
+        for ip in $(detect_ips); do echo "IP:$ip"; done
+    } | awk 'NF && !seen[$0]++ { out = out (out == "" ? "" : ",") $0 } END { print out }'
+}
+
+# A self-signed certificate in the stack's own folder. Also the placeholder a
+# Let's Encrypt install starts with: the containers need a certificate to
+# start, and the renewer replaces this one on its first pass.
 generate_self_signed() {
     local cn="$1"
     local sans="$2"
     local cert_dir="$ROOT/certs"
     mkdir -p "$cert_dir"
-    
-    local tmp_conf
-    tmp_conf="$(mktemp)"
-
-    cat > "$tmp_conf" <<EOF
-[req]
-default_bits = 4096
-prompt = no
-default_md = sha256
-distinguished_name = dn
-x509_extensions = v3_req
-
-[dn]
-CN = $cn
-O = P00RIJA Cryptography
-
-[v3_req]
-basicConstraints = CA:FALSE
-keyUsage = digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth
-subjectAltName = $sans
-EOF
-
-    openssl req -x509 -nodes -newkey rsa:4096 \
+    openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
         -days 825 \
+        -subj "/CN=$cn/O=P00RIJA Cryptography" \
+        -addext "subjectAltName=$sans" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -addext "keyUsage=critical,digitalSignature" \
+        -addext "extendedKeyUsage=serverAuth" \
         -keyout "$cert_dir/key.pem" \
-        -out "$cert_dir/cert.pem" \
-        -config "$tmp_conf"
-    
-    rm -f "$tmp_conf"
+        -out "$cert_dir/cert.pem" >/dev/null 2>&1
     chmod 644 "$cert_dir/cert.pem"
     chmod 600 "$cert_dir/key.pem"
+    CERTS_DIR_SETTING="$cert_dir"
+    CERT_FILE="cert.pem"
+    KEY_FILE="key.pem"
 }
 
-handle_existing_certs() {
-    local input_path
-    local cert_file=""
-    local key_file=""
-    
-    input_path=$(input_box "SSL Configuration" "Enter the path to your certificate file OR the directory containing them:" "")
-    
-    if [[ -z "$input_path" ]]; then
-        return 1
+ask_certbot_email() {
+    local email
+    email=$(input_box "Let's Encrypt" "An email for expiry notices from Let's Encrypt (optional; leave empty for none):" "${CERTBOT_EMAIL:-}") || email=""
+    if [[ -n "$email" ]] && ! validate_env_value "Email" "$email"; then
+        email=""
     fi
+    CERTBOT_EMAIL="$email"
+}
 
-    if [[ -d "$input_path" ]]; then
-        # It's a directory, try to auto-detect
-        for f in "fullchain.pem" "cert.pem" "ssl.crt" "server.crt"; do
-            if [[ -f "$input_path/$f" ]]; then
-                cert_file="$input_path/$f"
-                break
-            fi
-        done
-        for f in "privkey.pem" "key.pem" "ssl.key" "server.key"; do
-            if [[ -f "$input_path/$f" ]]; then
-                key_file="$input_path/$f"
-                break
-            fi
-        done
-        
-        if [[ -n "$cert_file" && -n "$key_file" ]]; then
-            msg_box "Auto-Detected" "Found certificates in directory:\nCert: $(basename "$cert_file")\nKey: $(basename "$key_file")"
-        else
-            msg_box "Error" "Could not auto-detect both certificate and key in: $input_path\nLooking for fullchain.pem/cert.pem and privkey.pem/key.pem"
-            return 1
-        fi
-    elif [[ -f "$input_path" ]]; then
-        cert_file="$input_path"
-        key_file=$(input_box "Private Key" "Enter the path to your private key file:" "$(dirname "$cert_file")/privkey.pem")
-        if [[ ! -f "$key_file" ]]; then
-            msg_box "Error" "Key file not found at: $key_file"
-            return 1
-        fi
-    else
-        msg_box "Error" "Path not found: $input_path"
+# Let's Encrypt for a name or a public address: the renewer asks for it when
+# the stack starts, and until it arrives a self-signed placeholder is served.
+use_letsencrypt() {
+    local host="$1"
+    CERT_MODE="letsencrypt"
+    ask_certbot_email
+    generate_self_signed "$host" "$(default_sans "$host")"
+}
+
+# The certificate this server already has — 3X-UI's, certbot's, a CA's — is
+# served from where it is, not copied: whatever renews it there renews it for
+# this stack too, and the stack restarts when it changes. Returns 2 when the
+# person backs out, 1 to ask again.
+use_existing_cert_folder() {
+    local host="$1" suggested="" dir
+    if [[ -n "$host" && "$host" != "localhost" ]] && cert_folder_exists "/root/cert/$host"; then
+        suggested="/root/cert/$host"
+    fi
+    dir=$(input_box "Existing Certificate" "The folder holding the certificate and its private key.\n3X-UI keeps one in /root/cert/<domain>/. Cancel to choose another way." "$suggested") || return 2
+    [[ -n "$dir" ]] || return 2
+    dir="${dir%/}"
+    if [[ -f "$dir" ]] || { [[ "$dir" == *.pem || "$dir" == *.crt || "$dir" == *.cer ]] && ! cert_folder_exists "$dir"; }; then
+        dir="$(dirname "$dir")"
+    fi
+    if [[ "$dir" != /* || "$dir" =~ [[:space:]] || "$dir" == *'$'* ]]; then
+        msg_box "Folder" "Give the folder as an absolute path, without spaces or a dollar sign."
         return 1
     fi
-    
-    mkdir -p "$ROOT/certs"
-    cp "$cert_file" "$ROOT/certs/cert.pem"
-    cp "$key_file" "$ROOT/certs/key.pem"
-    chmod 644 "$ROOT/certs/cert.pem"
-    chmod 600 "$ROOT/certs/key.pem"
+    if ! cert_find_pair "$dir" "$host"; then
+        whiptail --backtitle "$BACKTITLE" --title "No Certificate Found" --msgbox "$CERT_PAIR_REASON" 14 78
+        return 1
+    fi
+    local note=""
+    [[ "$CERT_PAIR_COVERS" == "no" ]] && note="$note\n\nWARNING: it does not name $host; browsers will refuse it there."
+    [[ "$CERT_PAIR_DAYS" == "expired" ]] && note="$note\n\nWARNING: it has expired."
+    whiptail --backtitle "$BACKTITLE" --title "Certificate Found" --yesno "Folder:       $dir\nCertificate:  $CERT_PAIR_CERT\nKey:          $CERT_PAIR_KEY\nFor:          $CERT_PAIR_SUBJECT\nIssued by:    $CERT_PAIR_ISSUER\nExpires:      $CERT_PAIR_END ($CERT_PAIR_DAYS days)$note\n\nServe this certificate from this folder?" 20 80 || return 1
+    CERTS_DIR_SETTING="$dir"
+    CERT_FILE="$CERT_PAIR_CERT"
+    KEY_FILE="$CERT_PAIR_KEY"
+    CERT_MODE="existing"
+    if cert_publicly_certifiable "$host"; then
+        local who
+        who=$(whiptail --backtitle "$BACKTITLE" --title "Who Renews It" --menu "Who keeps this certificate renewed?" 15 80 2 \
+            "1" "This server: Let's Encrypt, 10 days before expiry, in this folder" \
+            "2" "Another program already does; follow its renewals" \
+            3>&1 1>&2 2>&3) || who="2"
+        if [[ "$who" == "1" ]]; then
+            CERT_MODE="letsencrypt"
+            ask_certbot_email
+            whiptail --backtitle "$BACKTITLE" --title "One Certificate, One Owner" --msgbox "This server now renews the certificate in $dir, ten days before it expires, and restarts what reads it — 3X-UI too, when 3X-UI reads this folder.\n\nIf acme.sh (3X-UI's own renewer) also renews into this folder, its entry is set aside — renamed to .conf.removed, nothing deleted — so the folder has one owner and one key." 15 80
+        fi
+    fi
     return 0
+}
+
+# Asks whether a certificate already exists and, if so, where. True when one
+# was taken.
+offer_existing_cert() {
+    local host="$1" question="$2" rc
+    yes_no "SSL Certificate" "$question" || return 1
+    while true; do
+        rc=0
+        use_existing_cert_folder "$host" || rc=$?
+        [[ $rc -eq 0 ]] && return 0
+        [[ $rc -eq 2 ]] && return 1
+    done
 }
 
 factory_reset() {
@@ -698,16 +752,10 @@ main() {
         "1") # Local
             DOMAIN="localhost"
             EXT_IP="127.0.0.1"
-            if yes_no "SSL Certificate" "Do you already have an SSL certificate and key for this setup?" ; then
-                while ! handle_existing_certs; do :; done
-            else
-                msg_box "Local Setup" "Generating self-signed certificates for local access."
-                IPS=$(detect_ips)
-                SANS="DNS:localhost,IP:127.0.0.1"
-                for ip in $IPS; do
-                    SANS="$SANS,IP:$ip"
-                done
-                generate_self_signed "localhost" "$SANS"
+            if ! offer_existing_cert "localhost" "Do you already have an SSL certificate and key for this machine?"; then
+                msg_box "Local Setup" "Generating a self-signed certificate for localhost and every address this machine has on its networks. It is made again automatically before it runs out."
+                CERT_MODE="self-signed"
+                generate_self_signed "localhost" "$(default_sans localhost)"
             fi
             ;;
         "2") # Domain
@@ -724,38 +772,18 @@ main() {
                 fi
             fi
             
-            CERT_METHOD=$(whiptail --title "SSL Certificate" --menu "How would you like to handle SSL for $DOMAIN?" 15 60 3 \
-                "1" "Use existing certificates (folder or file)" \
-                "2" "Get new certificate with Let's Encrypt" \
-                "3" "Generate self-signed certificate" \
-                3>&1 1>&2 2>&3)
-
-            case "$CERT_METHOD" in
-                "1")
-                    while ! handle_existing_certs; do :; done
-                    ;;
-                "2")
-                    EMAIL=$(input_box "Let's Encrypt" "Enter your email for Let's Encrypt:" "admin@$DOMAIN")
-                    echo -e "${INFO}Running Certbot...${NC}"
-                    if command -v certbot >/dev/null 2>&1; then
-                        certbot certonly --standalone --agree-tos --non-interactive -m "$EMAIL" -d "$DOMAIN" --cert-name "poorija-$DOMAIN"
-                        CERT_PATH="/etc/letsencrypt/live/poorija-$DOMAIN/fullchain.pem"
-                        KEY_PATH="/etc/letsencrypt/live/poorija-$DOMAIN/privkey.pem"
-                        mkdir -p "$ROOT/certs"
-                        cp "$CERT_PATH" "$ROOT/certs/cert.pem"
-                        cp "$KEY_PATH" "$ROOT/certs/key.pem"
-                        chmod 644 "$ROOT/certs/cert.pem"
-                        chmod 600 "$ROOT/certs/key.pem"
-                    else
-                        msg_box "Error" "Certbot not found. Please install certbot or use self-signed certificates."
-                        exit 1
-                    fi
-                    ;;
-                "3")
-                    msg_box "Self-Signed Domain" "Generating self-signed certificate for $DOMAIN"
-                    generate_self_signed "$DOMAIN" "DNS:$DOMAIN,IP:$EXT_IP"
-                    ;;
-            esac
+            if ! offer_existing_cert "$DOMAIN" "Do you already have a certificate for $DOMAIN?\n\n3X-UI, for one, keeps it in /root/cert/$DOMAIN/. It is served from where it is, so both use the same one."; then
+                CERT_METHOD=$(whiptail --backtitle "$BACKTITLE" --title "SSL Certificate" --menu "How should $DOMAIN get its certificate?" 15 80 2 \
+                    "1" "Let's Encrypt: free, trusted, renewed 10 days before expiry" \
+                    "2" "Self-signed: browsers warn once" \
+                    3>&1 1>&2 2>&3) || CERT_METHOD="2"
+                if [[ "$CERT_METHOD" == "1" ]]; then
+                    use_letsencrypt "$DOMAIN"
+                else
+                    CERT_MODE="self-signed"
+                    generate_self_signed "$DOMAIN" "$(default_sans "$DOMAIN")"
+                fi
+            fi
             ;;
         "3") # Public IP
             echo -e "${INFO}Detecting Public IP...${NC}"
@@ -770,11 +798,21 @@ main() {
                 EXT_IP=$(input_box "IP Setup" "Enter your public IP address:" "1.2.3.4")
             fi
             DOMAIN="$EXT_IP"
-            if yes_no "SSL Certificate" "Do you already have an SSL certificate and key for this IP?" ; then
-                while ! handle_existing_certs; do :; done
-            else
-                msg_box "IP Setup" "Generating self-signed certificate for IP: $EXT_IP"
-                generate_self_signed "$EXT_IP" "IP:$EXT_IP"
+            if ! offer_existing_cert "$EXT_IP" "Do you already have a certificate for $EXT_IP?"; then
+                CERT_METHOD="2"
+                if cert_publicly_certifiable "$EXT_IP"; then
+                    CERT_METHOD=$(whiptail --backtitle "$BACKTITLE" --title "SSL Certificate" --menu "How should $EXT_IP get its certificate?" 16 80 2 \
+                        "1" "Let's Encrypt for the address: 6-day certificates, renewed for you" \
+                        "2" "Self-signed: browsers warn once" \
+                        3>&1 1>&2 2>&3) || CERT_METHOD="2"
+                fi
+                if [[ "$CERT_METHOD" == "1" ]]; then
+                    msg_box "Let's Encrypt for an Address" "Let's Encrypt certifies an IP address for six days at a time; the renewer renews it with two days left. Port 80 on $EXT_IP must reach this server for that."
+                    use_letsencrypt "$EXT_IP"
+                else
+                    CERT_MODE="self-signed"
+                    generate_self_signed "$EXT_IP" "$(default_sans "$EXT_IP")"
+                fi
             fi
             ;;
         "4") # Update installed server
@@ -874,25 +912,45 @@ quick_install() {
     TURN_PASS="$(generate_secret)"
     validate_env_value "TURN password" "$TURN_PASS" || exit 1
 
-    if [[ -s "$ROOT/certs/cert.pem" && -s "$ROOT/certs/key.pem" ]]; then
+    # Let's Encrypt for anything it can certify — a public name or a public
+    # address — unless --self-signed says otherwise; self-signed for the rest.
+    local want="$QUICK_CERT"
+    if [[ -z "$want" ]]; then
+        want="self-signed"
+        cert_publicly_certifiable "$DOMAIN" && want="letsencrypt"
+    fi
+    if [[ "$want" == "letsencrypt" ]] && ! cert_publicly_certifiable "$DOMAIN"; then
+        echo "Let's Encrypt cannot certify $DOMAIN: it is not a public name or address." >&2
+        exit 1
+    fi
+    CERTBOT_EMAIL="$QUICK_EMAIL"
+    validate_env_value "Email" "$CERTBOT_EMAIL" || exit 1
+    if [[ -n "$QUICK_CERT_DIR" ]]; then
+        if ! cert_find_pair "${QUICK_CERT_DIR%/}" "$DOMAIN"; then
+            echo "$CERT_PAIR_REASON" >&2
+            exit 1
+        fi
+        CERTS_DIR_SETTING="${QUICK_CERT_DIR%/}"
+        CERT_FILE="$CERT_PAIR_CERT"
+        KEY_FILE="$CERT_PAIR_KEY"
+        # Renewed here only when asked to; otherwise its owner renews it.
+        CERT_MODE="existing"
+        [[ "$QUICK_CERT" == "letsencrypt" ]] && CERT_MODE="letsencrypt"
+        ok_log "Serving $CERT_FILE from $CERTS_DIR_SETTING ($CERT_MODE; expires $CERT_PAIR_END)"
+        [[ "$CERT_PAIR_COVERS" == "no" ]] && warn_log "That certificate does not name $DOMAIN."
+    elif [[ -s "$ROOT/certs/cert.pem" && -s "$ROOT/certs/key.pem" ]]; then
         ok_log "Existing certificate kept."
-    elif [[ "$QUICK_CERT" == "letsencrypt" ]]; then
-        [[ -z "$QUICK_EMAIL" ]] && { echo "--letsencrypt needs --email." >&2; exit 1; }
-        command -v certbot >/dev/null 2>&1 || { echo "certbot is not installed." >&2; exit 1; }
-        step_log "Requesting a certificate for $DOMAIN"
-        certbot certonly --standalone --agree-tos --non-interactive -m "$QUICK_EMAIL" -d "$DOMAIN" --cert-name "poorija-$DOMAIN"
-        mkdir -p "$ROOT/certs"
-        cp "/etc/letsencrypt/live/poorija-$DOMAIN/fullchain.pem" "$ROOT/certs/cert.pem"
-        cp "/etc/letsencrypt/live/poorija-$DOMAIN/privkey.pem" "$ROOT/certs/key.pem"
-        chmod 644 "$ROOT/certs/cert.pem"; chmod 600 "$ROOT/certs/key.pem"
+        CERT_MODE="$want"
+    elif [[ "$want" == "letsencrypt" ]]; then
+        step_log "Let's Encrypt: the renewer asks for $DOMAIN's certificate as the stack starts"
+        CERT_MODE="letsencrypt"
+        generate_self_signed "$DOMAIN" "$(default_sans "$DOMAIN")"
     else
         step_log "Generating a self-signed certificate"
-        local sans="DNS:$DOMAIN"
-        [[ "$DOMAIN" == "localhost" ]] && sans="DNS:localhost,IP:127.0.0.1"
-        [[ "$DOMAIN" == "$EXT_IP" ]] && sans="IP:$EXT_IP"
-        [[ "$DOMAIN" != "localhost" && "$DOMAIN" != "$EXT_IP" ]] && sans="DNS:$DOMAIN,IP:$EXT_IP"
-        generate_self_signed "$DOMAIN" "$sans"
+        CERT_MODE="self-signed"
+        generate_self_signed "$DOMAIN" "$(default_sans "$DOMAIN")"
     fi
+    validate_env_value "Certificate folder" "$CERTS_DIR_SETTING" || exit 1
 
     write_env_file
     build_display_urls

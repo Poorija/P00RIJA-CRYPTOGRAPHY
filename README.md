@@ -214,6 +214,10 @@ With a real domain and a real certificate:
 curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/quick-install.sh | bash -s -- --domain chat.example.com --letsencrypt --email you@example.com
 ```
 
+With a certificate the server already has, 3X-UI's for example, add
+`--cert-dir /root/cert/chat.example.com`. See [Certificates](#certificates)
+below.
+
 Piping a script from the internet into a shell deserves the caution it gets.
 Read [`scripts/quick-install.sh`](scripts/quick-install.sh) first, or do it by hand:
 
@@ -224,6 +228,48 @@ bash scripts/setup.sh
 ```
 
 `scripts/setup.sh` with no arguments opens the full wizard: local, domain or
+public-IP deployment, existing certificates or Let's Encrypt or self-signed,
+plus update-in-place, container rebuild and factory reset. `--quick` runs the
+same steps with no questions.
+
+When it finishes it prints the application URL, the monitor URL and a generated
+monitor password. The password exists only in `.env`.
+
+### Certificates
+
+A server serves **one certificate from one folder**. nginx, the TURN server and
+the relay all read it where it is, and so can anything else on the machine that
+answers for the same name. 3X-UI, for one, reads `/root/cert/<domain>/`. The
+installer asks first whether you already have one:
+
+- **You do.** Give it the folder. It finds the certificate and the key that
+  belong together by their public key, whatever the files are called, and checks
+  the name and the expiry. Then you choose who renews it:
+  - **this server**: Let's Encrypt, ten days before expiry, written into that
+    same folder, after which the stack and 3X-UI are restarted;
+  - **the program that already does**: the stack restarts when the files
+    change and warns as the expiry nears.
+
+  If acme.sh (3X-UI's own renewer) also renews into that folder, the first
+  choice sets its entry aside (renamed to `.conf.removed`; nothing deleted), so
+  the folder has one owner and one key.
+- **You don't.**
+  - **A domain** gets Let's Encrypt, renewed ten days before expiry.
+  - **A public IP address** can too: Let's Encrypt now certifies addresses, six
+    days at a time on its short-lived profile, and the renewer renews it with
+    two days left. Port 80 must reach the server.
+  - **localhost or a LAN** gets a self-signed certificate. It names every
+    address the machine has and is made again before it runs out. Browsers warn
+    once, and accepting that on your own machine is safe.
+
+`CERT_MODE` in `.env` says which (`letsencrypt`, `existing`, `self-signed`), and
+`CERTS_DIR`, `CERT_FILE` and `KEY_FILE` say where. To see what a server holds,
+or to renew now:
+
+```bash
+docker exec Poorija-Cryptography_CertRenewer sh /usr/local/bin/cert-renewer.sh --status
+docker exec Poorija-Cryptography_CertRenewer sh /usr/local/bin/cert-renewer.sh --renew-now
+```
 
 ### Quick install — desktop and phone
 
@@ -239,22 +285,6 @@ signed with an Apple, Microsoft or Google certificate, so macOS, Windows and
 Android each show one first-run warning — [INSTALL.md](INSTALL.md) walks through
 all three, and through verifying the download.
 
-### Self-signed certificates
-
-Certificates for an **IP address** are always self-signed: public certificate
-authorities (Let's Encrypt included) do not issue certificates for bare IPs —
-that is a rule of the CA system, not of this installer. The wizard generates
-them automatically with every LAN IP baked in. A **domain** pointed at the
-server can get a free, trusted Let's Encrypt certificate through the same
-wizard (option 2 under Domain setup). Self-signed installs show a one-time
-browser warning; accepting it is safe on your own machine.
-public-IP deployment, existing certificates or Let's Encrypt or self-signed,
-plus update-in-place, container rebuild and factory reset. `--quick` runs the
-same steps with no questions.
-
-When it finishes it prints the application URL, the monitor URL and a generated
-monitor password. The password exists only in `.env`.
-
 ### Manual install — server, step by step
 
 The wizard does exactly this; run it by hand if you would rather see every step.
@@ -264,18 +294,20 @@ The wizard does exactly this; run it by hand if you would rather see every step.
 git clone https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY.git
 cd P00RIJA-CRYPTOGRAPHY
 
-# 2. a certificate. Self-signed is fine for a LAN or an IP address:
+# 2. a certificate for the containers to start with. The renewer replaces it
+#    with Let's Encrypt's when CERT_MODE is letsencrypt:
 mkdir -p certs
-openssl req -x509 -newkey rsa:4096 -nodes -days 825 \
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
   -keyout certs/key.pem -out certs/cert.pem -subj "/CN=$(hostname -f)"
-# ...or point SSL_CERT_PATH/SSL_KEY_PATH at a real one (Let's Encrypt, a CA).
 
 # 3. the environment. Every value is read by config/docker-compose.yaml:
 cat > .env <<'ENV'
 DOMAIN=chat.example.com          # or the machine's IP
 EXTERNAL_IP=203.0.113.10         # what clients will reach; used by coturn
-SSL_CERT_PATH=./certs/cert.pem
-SSL_KEY_PATH=./certs/key.pem
+CERT_MODE=letsencrypt            # or existing, or self-signed
+CERTS_DIR=../certs               # relative to config/; or /root/cert/chat.example.com
+CERT_FILE=cert.pem               # fullchain.pem in a 3X-UI or certbot folder
+KEY_FILE=key.pem                 # privkey.pem there
 MONITOR_PASSWORD=at-least-12-characters
 TURN_PASSWORD=another-long-secret
 CHAT_ALLOWED_ORIGINS=https://chat.example.com:8585
@@ -1005,6 +1037,9 @@ curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/s
 curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/quick-install.sh | bash -s -- --domain chat.example.com --letsencrypt --email you@example.com
 ```
 
+اگر سرور از قبل گواهی دارد (مثلاً گواهی 3X-UI)، `--cert-dir /root/cert/chat.example.com`
+را اضافه کنید. بخش «گواهی‌ها» در پایین توضیح می‌دهد.
+
 ریختن یک اسکریپت از اینترنت داخل شل، شایستهٔ همان احتیاطی است که برمی‌انگیزد.
 اول [`scripts/quick-install.sh`](scripts/quick-install.sh) را بخوانید، یا دستی انجام دهید:
 
@@ -1019,14 +1054,41 @@ bash scripts/setup.sh
 بازسازی کانتینرها و بازگردانی به تنظیمات کارخانه. `--quick` همان کارها را بدون
 هیچ سؤالی انجام می‌دهد.
 
-### نصب گواهی — IP و دامنه
+### گواهی‌ها
 
-- **IP عمومی**: گواهی همیشه **خودامضا** است — مراجع گواهی (از جمله Let's
-  Encrypt) برای IP خالی گواهی صادر نمی‌کنند؛ قانون سیستم CA است، نه نصب‌کننده.
-  ویزارد خودش گواهی را با همهٔ IPهای سرور می‌سازد؛ مرورگر یک هشدار یک‌باره
-  می‌دهد که روی سرور خودتان پذیرفتنش امن است.
-- **دامنه**: اگر دامنه به سرور اشاره کند، گواهی رایگان و مورد اعتماد Let's
-  Encrypt از داخل همان ویزارد (گزینهٔ ۲ در بخش Domain) صادر می‌شود.
+هر سرور **یک گواهی را از یک پوشه** سرو می‌کند. nginx، سرور TURN و رله همه آن را
+همان‌جا می‌خوانند، و هر برنامهٔ دیگری روی همان ماشین هم که برای همان نام جواب
+می‌دهد می‌تواند همین کار را بکند؛ مثلاً 3X-UI که از `/root/cert/<domain>/` می‌خواند.
+نصب‌کننده اول می‌پرسد که از قبل گواهی دارید یا نه:
+
+- **دارید**: پوشه را بدهید. نصب‌کننده گواهی و کلیدی را که به هم تعلق دارند، با
+  کلید عمومی‌شان و هر نامی که داشته باشند، پیدا می‌کند و نام و تاریخ انقضا را هم
+  بررسی می‌کند. بعد انتخاب می‌کنید چه کسی تمدیدش کند:
+  - **همین سرور**: Let's Encrypt، ده روز مانده به انقضا، در همان پوشه؛ بعد از آن
+    برنامه و 3X-UI دوباره راه‌اندازی می‌شوند؛
+  - **همان برنامه‌ای که الان تمدیدش می‌کند**: با هر تغییر فایل‌ها برنامه دوباره
+    راه‌اندازی می‌شود و نزدیک انقضا هشدار می‌دهد.
+
+  اگر acme.sh (تمدیدکنندهٔ خودِ 3X-UI) هم در همان پوشه تمدید کند، در انتخاب اول
+  ورودی‌اش کنار گذاشته می‌شود (نامش به `.conf.removed` تغییر می‌کند و چیزی حذف
+  نمی‌شود)، تا پوشه یک صاحب و یک کلید داشته باشد.
+- **ندارید**:
+  - **دامنه**: Let's Encrypt می‌گیرد و ده روز مانده به انقضا تمدید می‌شود.
+  - **IP عمومی**: آن هم Let's Encrypt می‌گیرد. Let's Encrypt حالا برای آدرس IP هم
+    گواهی می‌دهد، هر بار شش‌روزه (پروفایل کوتاه‌عمر)، و تمدیدکننده وقتی دو روز
+    مانده تمدیدش می‌کند. پورت ۸۰ باید به سرور برسد.
+  - **localhost یا شبکهٔ محلی**: گواهی خودامضا می‌گیرد. این گواهی همهٔ آدرس‌های
+    ماشین را دارد و پیش از تمام شدن دوباره ساخته می‌شود. مرورگر یک‌بار هشدار
+    می‌دهد، و پذیرفتنش روی ماشین خودتان امن است.
+
+در `.env`، `CERT_MODE` حالت را می‌گوید (`letsencrypt`، `existing` یا `self-signed`)
+و `CERTS_DIR` و `CERT_FILE` و `KEY_FILE` جای فایل‌ها را. برای دیدن وضعیت گواهی یا
+تمدید فوری:
+
+```bash
+docker exec Poorija-Cryptography_CertRenewer sh /usr/local/bin/cert-renewer.sh --status
+docker exec Poorija-Cryptography_CertRenewer sh /usr/local/bin/cert-renewer.sh --renew-now
+```
 
 ### نصب سریع — دسکتاپ و موبایل
 
@@ -1059,18 +1121,20 @@ npx p00rija-cryptography@latest
 git clone https://github.com/Poorija/P00RIJA-CRYPTOGRAPHY.git
 cd P00RIJA-CRYPTOGRAPHY
 
-# ۲. یک گواهی. برای شبکهٔ محلی یا آی‌پی، خودامضا کافی است:
+# ۲. یک گواهی تا کانتینرها بالا بیایند. اگر CERT_MODE برابر letsencrypt باشد،
+#    تمدیدکننده آن را با گواهی Let's Encrypt عوض می‌کند:
 mkdir -p certs
-openssl req -x509 -newkey rsa:4096 -nodes -days 825 \
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
   -keyout certs/key.pem -out certs/cert.pem -subj "/CN=$(hostname -f)"
-# ...یا SSL_CERT_PATH/SSL_KEY_PATH را به گواهی واقعی اشاره دهید.
 
 # ۳. متغیرهای محیطی. همهٔ این‌ها را config/docker-compose.yaml می‌خواند:
 cat > .env <<'ENV'
 DOMAIN=chat.example.com          # یا آی‌پی ماشین
 EXTERNAL_IP=203.0.113.10         # آدرسی که کلاینت‌ها می‌بینند؛ برای coturn
-SSL_CERT_PATH=./certs/cert.pem
-SSL_KEY_PATH=./certs/key.pem
+CERT_MODE=letsencrypt            # یا existing یا self-signed
+CERTS_DIR=../certs               # نسبت به config/؛ یا /root/cert/chat.example.com
+CERT_FILE=cert.pem               # در پوشهٔ 3X-UI یا certbot: fullchain.pem
+KEY_FILE=key.pem                 # و آن‌جا: privkey.pem
 MONITOR_PASSWORD=حداقل-۱۲-کاراکتر
 TURN_PASSWORD=یک-راز-طولانی-دیگر
 CHAT_ALLOWED_ORIGINS=https://chat.example.com:8585
