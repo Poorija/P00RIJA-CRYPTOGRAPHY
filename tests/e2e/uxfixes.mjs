@@ -789,11 +789,15 @@ const settingsPanel = await page.evaluate(async () => {
 check('the settings menu shows every section at once',
   settingsPanel?.menuRows === settingsPanel?.expectedTabs && settingsPanel?.menuFits === true,
   settingsPanel ? JSON.stringify(settingsPanel) : 'no panel');
-/* And on the shorter phones, where the profile card and nine rows cannot both
-   fit: an iPhone SE, and the 844px-tall phones most people carry. The card
-   steps aside while Settings is open and is back with the conversations. */
+/* And on the shorter phones. How much of the profile card stays above the
+   menu is measured, not decided by the screen's height — a 932pt Pro Max is
+   only 873 tall as an installed app, and a height threshold hid the card
+   there with room to spare. The full card where it fits, one row where it
+   does not, nothing only on an SE; every section in view either way, the
+   choice made once rather than flapping, and the full card back in the
+   chats. */
 const shortPhones = [];
-for (const [width, height] of [[375, 667], [390, 844]]) {
+for (const [width, height] of [[430, 873], [390, 844], [375, 667]]) {
   await page.setViewportSize({ width, height });
   await page.waitForTimeout(700);
   shortPhones.push(await page.evaluate(async (size) => {
@@ -801,24 +805,35 @@ for (const [width, height] of [[375, 667], [390, 844]]) {
     const body = document.querySelector('#chatConnectionPanel .chat-settings-body');
     const menu = body?.querySelector('.chat-settings-menu');
     if (!rail || !body || !menu) return { size, missing: true };
-    syncRailChrome();
-    await new Promise((r) => setTimeout(r, 300));
-    const b = body.getBoundingClientRect();
-    const m = menu.getBoundingClientRect();
-    const fits = m.top >= b.top - 1 && m.bottom <= b.bottom + 1;
-    const cardInSettings = rail.querySelector('.chat-profile-card')?.getBoundingClientRect().height || 0;
     document.querySelector('[data-chat-view="chats"]')?.click();
     await new Promise((r) => setTimeout(r, 500));
     const cardInChats = rail.querySelector('.chat-profile-card')?.getBoundingClientRect().height || 0;
+    let flips = 0;
+    const watch = new MutationObserver((list) => { flips += list.filter((m) => m.attributeName === 'data-settings-card').length; });
+    watch.observe(rail, { attributes: true });
     document.querySelector('[data-chat-view="connection"]')?.click();
-    await new Promise((r) => setTimeout(r, 500));
-    return { size, fits, cardInSettings: Math.round(cardInSettings), cardInChats: Math.round(cardInChats) };
+    await new Promise((r) => setTimeout(r, 1500));
+    watch.disconnect();
+    const b = body.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    return {
+      size,
+      state: rail.dataset.settingsCard || '',
+      fits: m.top >= b.top - 1 && m.bottom <= b.bottom + 1,
+      cardInSettings: Math.round(rail.querySelector('.chat-profile-card')?.getBoundingClientRect().height || 0),
+      cardInChats: Math.round(cardInChats),
+      flips,
+    };
   }, `${width}x${height}`));
 }
 await page.setViewportSize({ width: 430, height: 932 });
 await page.waitForTimeout(500);
-check('on an SE and an 844px phone every section fits too, and the profile card is back in the chats',
-  shortPhones.every((r) => r.fits && r.cardInSettings === 0 && r.cardInChats > 100), JSON.stringify(shortPhones));
+check('on shorter phones every section fits, the card stays (whole or in one row), and only on an SE does it go',
+  shortPhones.every((r) => r.fits && r.cardInChats > 100 && r.flips <= 2)
+  && ['full', 'compact'].includes(shortPhones[0].state) && shortPhones[0].cardInSettings > 40
+  && ['full', 'compact'].includes(shortPhones[1].state) && shortPhones[1].cardInSettings > 40
+  && ['hidden', 'tight'].includes(shortPhones[2].state) && shortPhones[2].cardInSettings === 0,
+  JSON.stringify(shortPhones));
 const settingsSection = await page.evaluate(async () => {
   document.querySelector('[data-settings-tab="connection"]')?.click();
   await new Promise((r) => setTimeout(r, 400));

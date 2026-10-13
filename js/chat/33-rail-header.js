@@ -77,6 +77,9 @@ function syncRailChrome() {
        the summary left ~360px of settings hanging past the panel's own box. */
     const bodyOffset = settingsBody.getBoundingClientRect().top - settings.getBoundingClientRect().top;
     const available = settings.clientHeight - bodyOffset - 4;
+    /* A different card changes all of the above; the observer on the card
+       brings this back round with the new measurements. */
+    if (fitSettingsCard(rail, settingsBody, available)) return;
     if (available > 120) {
       settingsBody.style.setProperty('max-height', `${Math.round(available)}px`, 'important');
       settingsBody.style.setProperty('overflow-y', 'auto', 'important');
@@ -87,6 +90,64 @@ function syncRailChrome() {
     }
     void summary;
   }
+}
+
+/* How much of the profile card fits above Settings on a phone.
+ *
+ * The nine sections and the card share the rail, and whether both fit is a
+ * measurement, not a screen size: one 932pt phone is 932 tall in the browser
+ * and 873 as an installed app under the status bar, and a height threshold hid
+ * the card on that phone with room to spare. So the menu is measured against
+ * the room the body would have under the full card, then under the one-row
+ * card, and the card takes the first that leaves every section in view —
+ * "hidden" only when even one row is too much (an iPhone SE).
+ *
+ * Both card heights are remembered once seen, so the answer does not depend on
+ * which state the card happens to be in while it is asked: the decision is
+ * the same from every side, and the rail does not flap between two of them.
+ * Returns true when it changed the card, so the caller measures again. */
+const SETTINGS_CARD_COMPACT_GUESS_PX = 64;
+function fitSettingsCard(rail, settingsBody, available) {
+  const header = rail.querySelector(':scope > .chat-profile-card');
+  const menu = settingsBody.querySelector('.chat-settings-menu');
+  const inSettings = rail.getAttribute('data-view') === 'connection';
+  const phone = window.matchMedia('(max-width: 767px)').matches;
+  if (!inSettings || !phone || !header || !menu) {
+    if (rail.dataset.settingsCard) {
+      delete rail.dataset.settingsCard;
+      return true;
+    }
+    return false;
+  }
+  /* A section open on its own page keeps whatever the menu was given, so
+     going in and out of one does not move the card. */
+  if (menu.offsetParent === null || !menu.offsetHeight) return false;
+  const state = rail.dataset.settingsCard || 'full';
+  if (header.offsetHeight) {
+    if (state === 'full') rail.dataset.cardFullH = String(header.offsetHeight);
+    if (state === 'compact') rail.dataset.cardCompactH = String(header.offsetHeight);
+  }
+  const fullH = Number(rail.dataset.cardFullH) || header.offsetHeight || 0;
+  const compactH = Number(rail.dataset.cardCompactH) || SETTINGS_CARD_COMPACT_GUESS_PX;
+  const gap = parseFloat(getComputedStyle(rail).rowGap) || 0;
+  const cardNow = header.offsetHeight ? header.offsetHeight + gap : 0;
+  /* The body's own room with no card at all, and what the menu needs of it. */
+  const room = available + cardNow;
+  const style = getComputedStyle(settingsBody);
+  const measured = menu.offsetHeight + (parseFloat(getComputedStyle(menu).marginTop) || 0)
+    + (parseFloat(style.paddingTop) || 0) + 2;
+  /* "tight" is the last resort, and the only one that changes the menu: its
+     rows get shorter. What the menu needs is therefore remembered from its
+     ordinary rows, or being tight would make it look as if it fitted. */
+  if (state !== 'tight') rail.dataset.menuNeed = String(measured);
+  const need = state === 'tight' ? (Number(rail.dataset.menuNeed) || measured) : measured;
+  let next = 'tight';
+  if (need <= room - (fullH + gap)) next = 'full';
+  else if (need <= room - (compactH + gap)) next = 'compact';
+  else if (need <= room) next = 'hidden';
+  if (next === state && rail.dataset.settingsCard) return false;
+  rail.dataset.settingsCard = next;
+  return next !== state;
 }
 
 const CHAT_RAIL_WIDTH_KEY = 'poorija_chat_rail_width';

@@ -1,3 +1,32 @@
+# P00RIJA Cryptography 2.98.40
+
+Version 2.98.40 · build chat-v133
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## کارت پروفایل بالای تنظیمات · The profile card above Settings
+
+- نسخهٔ قبل در تنظیمات، روی هر گوشی کوتاه‌تر از ۸۸۰ پیکسل کارت پروفایل را پنهان
+  می‌کرد. iPhone 15 Pro Max وقتی برنامه نصب شده باشد، زیر نوار وضعیت فقط ۸۷۳ پیکسل
+  ارتفاع دارد؛ پس کارت روی یک گوشی بزرگ هم، با جای خالی فراوان، پنهان می‌شد. حالا
+  جا اندازه گرفته می‌شود: اگر کارت کامل جا شود کامل می‌ماند، وگرنه به یک ردیف جمع
+  می‌شود (آواتار، نام، وضعیت اتصال و سه دکمه). فقط روی کوچک‌ترین گوشی‌ها مثل iPhone
+  SE کنار می‌رود. هر نُه بخش تنظیمات همیشه بدون اسکرول دیده می‌شوند.
+
+- 2.98.39 hid the profile card in Settings on any phone under 880px tall. An
+  installed app on an iPhone 15 Pro Max is only 873 tall under the status bar, so
+  the card vanished on a large phone with plenty of room. The space is now
+  measured: the card stays whole when it fits and otherwise folds to one row
+  (avatar, name, connection, and the three buttons). It steps aside only on the
+  smallest phones, such as an iPhone SE. All nine settings sections always show
+  without scrolling.
+
+---
+
 # P00RIJA Cryptography 2.98.39
 
 Version 2.98.39 · build chat-v132
