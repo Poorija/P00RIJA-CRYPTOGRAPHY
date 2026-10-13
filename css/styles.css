@@ -22967,6 +22967,19 @@ html body #mainApp #content-chat #chatConnectionPanel > .chat-settings-body {
   padding-top: 0.85rem !important;
 }
 html body #mainApp #content-chat .chat-settings-menu { margin-top: 0.15rem; }
+/* Nine sections on a phone, under the profile card and the section switcher.
+   At 3.1rem a row the ninth one sat below the panel's edge on a 932px-tall
+   phone, so Settings opened as a list you had to scroll to see the end of.
+   44px is the height a finger needs and no more; the text was never what
+   made a row tall. */
+@media (max-width: 767px) {
+  html body #mainApp #content-chat .chat-settings-menu { gap: 0.3rem; }
+  html body #mainApp #content-chat .chat-settings-menu button {
+    min-height: 2.75rem;
+    padding-block: 0.4rem;
+    line-height: 1.3;
+  }
+}
 @media (min-width: 768px) {
   html body #mainApp #content-chat #chatConnectionPanel > .chat-settings-body {
     padding-top: 1rem !important;

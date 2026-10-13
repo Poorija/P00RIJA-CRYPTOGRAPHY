@@ -1,3 +1,25 @@
+# P00RIJA Cryptography 2.98.38
+
+Version 2.98.38 · build chat-v131
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## منوی تنظیمات · The settings menu
+
+- روی گوشی، هر نُه بخش تنظیمات چت حالا یک‌جا و بدون اسکرول دیده می‌شوند. ردیف
+  آخر («ابزارها») زیر لبهٔ پنل می‌رفت. ارتفاع هر ردیف روی گوشی ۴۴ پیکسل شد؛
+  همان اندازه‌ای که انگشت لازم دارد.
+
+- On a phone, all nine chat settings sections now show at once, with no scrolling.
+  The last row (Tools) used to sit below the panel's edge. Each row is now 44px
+  tall on a phone, the height a finger needs.
+
+---
+
 # P00RIJA Cryptography 2.98.37
 
 Version 2.98.37 · build chat-v130

@@ -51,8 +51,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 2.98.37
-        CFBundleVersion: "2.98.37"
+        CFBundleShortVersionString: 2.98.38
+        CFBundleVersion: "2.98.38"
     entitlements:
       path: p00rija-cryptography_iOS/p00rija-cryptography_iOS.entitlements
     scheme:
