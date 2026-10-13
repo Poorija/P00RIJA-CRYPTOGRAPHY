@@ -539,11 +539,19 @@ async function editMood() {
     { defaultValue: current, placeholder: t('مثلاً: سر کار', 'e.g. At work') },
   );
   if (next === null) return;
-  chatState.profile = { ...chatState.profile, mood: String(next).trim().slice(0, 40) };
+  chatState.profile = {
+    ...chatState.profile,
+    mood: String(next).trim().slice(0, 40),
+    /* A new version, or the card never goes out: contacts on this relay saw
+       the change through presence, and contacts on another relay — whom
+       only the card reaches — never saw it at all. */
+    updatedAt: new Date().toISOString(),
+  };
   saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
   renderMoodChip();
   /* Contacts learn about it the same way they learn your name. */
   broadcastHello();
+  announceProfileToContacts();
   notify(t('وضعیت شما به‌روزرسانی شد.', 'Your status is updated.'), 'success');
 }
 
@@ -1369,9 +1377,85 @@ if (chatState.pendingAvatarData) {
 notify(t('تغییرات آواتار آماده است؛ برای اعمال نهایی ذخیره را بزنید.', 'Avatar changes are ready; press Save to apply them.'), 'info');
 }
 }
-function savePendingAvatar() {
+/* Every picture that becomes somebody's avatar is redrawn here before it is
+   kept: decoded, cropped to a square, painted onto a fresh canvas and
+   exported as a JPEG. A canvas export carries pixels and nothing else — no
+   EXIF (camera, lens, the moment it was taken, the GPS position), no XMP, no
+   ICC profile, no embedded thumbnail with the uncropped original inside — so
+   this is where a photograph's metadata ends, whatever format it came in.
+   It is also where a preset or generated avatar stops being SVG, which
+   sanitizeAvatarData refuses on every contact's device, and where an
+   original of several megabytes becomes a picture a profile card can carry.
+
+   Saving straight after choosing used to keep the original file untouched:
+   the editor's crop was optional, and without it the chosen photograph —
+   EXIF and all — was what every contact received. */
+async function cleanAvatarImage(source, { size = AVATAR_EXPORT_PX } = {}) {
+const src = String(source || '');
+if (!src) return '';
+const image = await new Promise((resolve) => {
+const img = new Image();
+img.decoding = 'async';
+img.onload = () => resolve(img);
+img.onerror = () => resolve(null);
+img.src = src;
+});
+const width = image?.naturalWidth || 0;
+const height = image?.naturalHeight || 0;
+if (!width || !height) return '';
+/* A drawing has no pixels of its own to run out of; a photograph is never
+   blown up past what it has. */
+const vector = /^data:image\/svg|\.svg(?:[?#]|$)/i.test(src);
+const side = Math.min(width, height);
+const out = Math.max(1, Math.round(vector ? size : Math.min(size, side)));
+const canvas = document.createElement('canvas');
+canvas.width = out;
+canvas.height = out;
+const ctx = canvas.getContext('2d');
+if (!ctx) return '';
+ctx.fillStyle = '#020617';
+ctx.fillRect(0, 0, out, out);
+ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, 0, 0, out, out);
+try {
+const data = canvas.toDataURL('image/jpeg', AVATAR_EXPORT_QUALITY);
+return sanitizeAvatarData(data);
+} catch (error) {
+console.warn('Avatar redraw failed:', error);
+return '';
+}
+}
+/* An avatar kept by an older build may be the original photograph, EXIF
+   included, or an SVG no contact could display. It is redrawn once, and
+   the new version goes to contacts the next time each of them is here.
+   Only the avatar is touched: the profile form may not be filled yet at
+   unlock, so nothing else of the profile is rebuilt from it. */
+async function cleanStoredAvatarIfNeeded() {
+const data = String(chatState.profile?.avatarData || '');
+if (!data || Number(chatState.profile?.avatarClean || 0) >= AVATAR_CLEAN_VERSION) return false;
+const clean = await cleanAvatarImage(data);
+chatState.profile = {
+...chatState.profile,
+/* What cannot be redrawn is not kept either: it is either not a picture
+   or one no contact's device would show. */
+avatarData: clean,
+avatarClean: AVATAR_CLEAN_VERSION,
+updatedAt: new Date().toISOString(),
+};
+saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+renderStaticUi();
+if (chatState.ws?.readyState === WebSocket.OPEN) broadcastHello();
+announceProfileToContacts();
+return true;
+}
+async function savePendingAvatar() {
 if (!chatState.pendingAvatarData) return;
-setProfileAvatarData(chatState.pendingAvatarData);
+const clean = await cleanAvatarImage(chatState.pendingAvatarData);
+if (!clean) {
+notify(t('این تصویر آماده نشد؛ تصویر دیگری انتخاب کنید.', 'That picture could not be prepared; choose another one.'), 'error');
+return;
+}
+setProfileAvatarData(clean);
 chatState.pendingAvatarData = '';
 renderStaticUi();
 toggleAvatarChooser(false);
@@ -1424,6 +1508,8 @@ chatState.profile = {
 ...chatState.profile,
 ...buildProfileDraft(),
 avatarData,
+/* Only ever called with a redrawn picture or with nothing. */
+avatarClean: AVATAR_CLEAN_VERSION,
 /* The version contacts' cards are compared against; see
    announceProfileCardIfStale. Without a bump here an avatar change reached
    nobody who already had any avatar at all. */
@@ -1453,6 +1539,13 @@ try {
 notify(describeImageFailure(error), 'error');
 return;
 }
+/* Redrawn like a profile avatar: the original went to every member with
+   its EXIF inside, in every space record pushed after it. */
+dataUrl = await cleanAvatarImage(dataUrl, { size: 256 });
+if (!dataUrl) {
+notify(t('این تصویر باز نشد.', 'That image could not be opened.'), 'error');
+return;
+}
 {
 space.avatarData = dataUrl;
 space.members = normalizeSpaceMembers(space.members);
@@ -1480,26 +1573,24 @@ renderStaticUi();
 }
 }
 }
+/* The presets are SVG files of this application's own, and an SVG avatar is
+   one sanitizeAvatarData refuses on every contact's device — so a preset
+   used to be a picture only its owner ever saw. Drawn from its own address
+   (same origin, so the canvas stays readable) into the stored JPEG. */
 async function selectPresetAvatar(url) {
 if (!url) return;
-try {
-const response = await fetch(url, { cache: 'force-cache' });
-if (!response.ok) throw new Error('Avatar preset not found');
-const blob = await response.blob();
-const reader = new FileReader();
-reader.onloadend = () => {
 chatState.avatarEditor = null;
 setAvatarEditorVisible(false);
-setPendingAvatarData(String(reader.result || ''));
-};
-reader.readAsDataURL(blob);
-} catch (error) {
-console.warn('Failed to load avatar preset:', error);
-chatState.avatarEditor = null;
-setAvatarEditorVisible(false);
-setPendingAvatarData(url);
+const clean = await cleanAvatarImage(url);
+if (!clean) {
+console.warn('Failed to load avatar preset:', url);
+notify(t('این تصویر آماده نشد؛ تصویر دیگری انتخاب کنید.', 'That picture could not be prepared; choose another one.'), 'error');
+return;
 }
+setPendingAvatarData(clean);
 }
+/* The initial on a gradient. Painted straight onto a canvas: it used to be an
+   SVG, which this device showed and no contact's device ever would. */
 function generatedAvatarData(seed = 'cyan', label = '') {
 const palettes = {
 cyan: ['#0ea5e9', '#14b8a6'],
@@ -1512,17 +1603,32 @@ slate: ['#334155', '#64748b'],
 teal: ['#0f766e', '#2dd4bf'],
 };
 const [a, b] = palettes[seed] || palettes.cyan;
-const initial = String(label || seed || 'P').trim().slice(0, 1).toUpperCase() || 'P';
-const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
-<rect width="128" height="128" rx="38" fill="url(#g)"/>
-<circle cx="92" cy="34" r="26" fill="rgba(255,255,255,.16)"/>
-<circle cx="36" cy="96" r="34" fill="rgba(2,6,23,.18)"/>
-<text x="64" y="78" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="48" font-weight="900" fill="white">${app().escapeHTML(initial)}</text>
-</svg>
-`;
-return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+const initial = Array.from(String(label || seed || 'P').trim())[0]?.toUpperCase() || 'P';
+const size = 512;
+const canvas = document.createElement('canvas');
+canvas.width = size;
+canvas.height = size;
+const ctx = canvas.getContext('2d');
+if (!ctx) return '';
+const gradient = ctx.createLinearGradient(0, 0, size, size);
+gradient.addColorStop(0, a);
+gradient.addColorStop(1, b);
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, size, size);
+ctx.fillStyle = 'rgba(255,255,255,.16)';
+ctx.beginPath();
+ctx.arc(size * 0.72, size * 0.27, size * 0.2, 0, Math.PI * 2);
+ctx.fill();
+ctx.fillStyle = 'rgba(2,6,23,.18)';
+ctx.beginPath();
+ctx.arc(size * 0.28, size * 0.75, size * 0.27, 0, Math.PI * 2);
+ctx.fill();
+ctx.fillStyle = '#ffffff';
+ctx.font = `900 ${Math.round(size * 0.38)}px Inter, Vazirmatn, Arial, sans-serif`;
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillText(initial, size / 2, size * 0.53);
+return canvas.toDataURL('image/jpeg', AVATAR_EXPORT_QUALITY);
 }
 function supportedAudioMimeType() {
 if (!window.MediaRecorder) return '';

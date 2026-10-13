@@ -133,6 +133,10 @@ status: String(peer.status || 'offline'),
 avatarData: sanitizeAvatarData(peer.avatarData),
 /* What they say they are doing, in their own words, from their hello. */
 mood: String(peer.mood || '').slice(0, 40),
+/* Which save of their profile the photograph and status above came from
+   (their card's version). Kept so an older card arriving late, even after a
+   reload, cannot put back what they replaced. */
+profileVersion: String(peer.profileVersion || '').slice(0, 40),
 conversationId: isReservedConversationKey(peer.conversationId) ? '' : (peer.conversationId || ''),
 /* Kept with its provenance rather than flattened to an address: the merge
    below has to know which channel it came on to decide whether it may
@@ -421,12 +425,27 @@ pendingFingerprint: keyConflict ? (normalized.fingerprint || '') : (existing.pen
 /* Never set by a record arriving from outside — only by the conflict above,
    and cleared only by resolveKeyChange. */
 keyChangeWasVerified: Boolean(existing.keyChangeWasVerified),
-avatarData: normalized.avatarData || existing.avatarData,
+/* A photograph comes from the contact's own card (options.profile), which is
+   their word on it: empty there means they removed it. Anything else that
+   arrives without one — presence, which never carries one, a pasted card —
+   leaves the one already kept. A card's photograph this device will not
+   display (SVG, oversized) changes nothing rather than blanking it. */
+avatarData: options.profile
+? (String(options.profile.avatarData || '') === '' ? '' : (normalized.avatarData || existing.avatarData))
+: (normalized.avatarData || existing.avatarData),
+profileVersion: existing.profileVersion || normalized.profileVersion || '',
 /* Ranked, not overwritten. A record arriving without one -- an identity card
    pasted by hand, a hello from an older build -- must not blank what a card
    established, which is the same mistake the prekey fields above had. */
 homeRelay: betterHomeRelay(existing.homeRelay, normalized.homeRelay),
-mood: normalized.mood !== undefined && normalized.mood !== '' ? normalized.mood : existing.mood,
+/* The status is said in two places, and both are its owner's own word: the
+   card, and the presence record the relay repeats from their hello. From
+   either, an empty one means they cleared it — which used to be ignored, so
+   a cleared status stayed on every contact's screen for good. Any other
+   record without one leaves it as it was. */
+mood: (options.profile || options.moodFromPresence)
+? String((options.profile ? options.profile.mood : normalized.mood) || '').slice(0, 40)
+: (normalized.mood !== undefined && normalized.mood !== '' ? normalized.mood : existing.mood),
 username: normalized.username || existing.username,
 name: normalized.name || existing.name,
 members: normalized.members || existing.members,

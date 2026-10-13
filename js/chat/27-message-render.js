@@ -1342,6 +1342,15 @@ const peer = getActiveConversation();
  * contact on this relay costs nothing: transitRouteFor returns null and it
  * stops there. */
 if (peer && !peer.type && typeof askIfPeerIsThere === 'function') askIfPeerIsThere(peer);
+/* And, wherever they live, the open conversation is where each side's
+   photograph and status should already be: this account's card goes to
+   them if they have not had this version, and theirs is asked for if this
+   device has never had one with a version. Both throttle themselves, so the
+   re-render a card's arrival causes asks nothing. */
+if (peer && !peer.type && typeof announceProfileCardIfStale === 'function') {
+announceProfileCardIfStale(peer);
+askForProfileIfMissing(peer, { minMs: PROFILE_ASK_OPEN_MS });
+}
 /* The thread menu speaks with the voice of whatever is open: a group gets
    group calls, a group lock, search in the group and group-history delete;
    a conversation keeps the one-to-one wording. Called on every render, so a

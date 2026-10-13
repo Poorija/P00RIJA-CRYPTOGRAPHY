@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.36**
+نسخهٔ این پکیج: **2.98.37**
 
 </div>
 
@@ -532,6 +532,21 @@ renewer sets aside acme.sh entries that renew into the same folder
 privileged `nsenter` container, the same root the docker socket already is.
 `--status`, `--once` and `--renew-now` run through `docker exec`.
 `tests/e2e/certkeeper.mjs` runs it in the real image.
+
+**Avatars travel on the signed profile card only** (2.98.37). There are four
+rules:
+- `cleanAvatarImage` (34-sheets-profile-clocks.js) redraws every chosen picture
+  to a JPEG of at most 640 px. A canvas export carries no EXIF, which makes it the
+  metadata stripper.
+- hello sends `avatarData: ''`, the relay keeps none, and the peers merge strips
+  any photo. The relay's copy was cut at 100,000 characters and overwrote the
+  real one.
+- `isProfileAudience` decides who gets the card: contacts, shared-group members,
+  and the open chat. It never goes to relay strangers or unanswered requests.
+- `noteProfileCard` checks the signature against the pinned key and drops stale
+  versions (`profileVersion`). An empty photo or status on a believed card means
+  "removed". A reply to `pleaseReply` never goes by transit to this device's own
+  relay. `tests/e2e/profilesync.mjs` covers all of it on two real relays.
 
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted

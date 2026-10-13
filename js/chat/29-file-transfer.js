@@ -954,6 +954,9 @@ const profileCardSentAt = new Map();
 function myProfileCard(askForTheirs = false) {
   return {
     type: 'profile-card',
+    /* Which save of the profile this is. A card older than the one already
+       kept is ignored, so a late one cannot put back an old photograph. */
+    version: String(chatState.profile.updatedAt || ''),
     /* Named the way the presence record names them, so the receiving side can
        hand the whole thing to mergePeerRecord untouched. */
     username: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
@@ -970,8 +973,61 @@ function myProfileCard(askForTheirs = false) {
   };
 }
 
+/* Who this account's photograph, name and status go to on a card: the people
+ * it chose. The relay lists everybody connected to it, and every one of them
+ * becomes a record here — that is how the online list is built — so sending
+ * the card to "every peer who is here" sent the photograph to every stranger
+ * on the relay, which is exactly what keeping avatars out of the presence
+ * table was meant to stop. A contact, somebody this account has written to,
+ * a member of a shared group, or the conversation open right now; never a
+ * message request this account has not answered, and never a blocked one. */
+function isProfileAudience(peer) {
+  if (!peer || peer.type || peer.system || peer.blocked) return false;
+  if (typeof isSelfPeerRecord === 'function' && isSelfPeerRecord(peer)) return false;
+  if (typeof isMessageRequest === 'function' && isMessageRequest(peer)) return false;
+  if (chatState.activeConversationId && chatState.activeConversationId === getConversationKey(peer)) return true;
+  return typeof isStoredContact === 'function'
+    ? isStoredContact(peer)
+    : Boolean(peer.manual || peer.accepted || peer.pinned || peer.groupMember);
+}
+
+/* The bytes a card's owner vouches for. Everything a receiver acts on is in
+ * them: whose card it is, who it is for, the name, the status, the whole
+ * photograph and the version. Signed with the identity key, the same as an
+ * offline envelope, so a card can only change what a contact looks like on
+ * this device if that contact wrote it. Before, a card naming somebody's
+ * fingerprint was believed whoever sent it: anybody on the relay could give
+ * a contact another face and another name. */
+function profileCardSignBytes(card) {
+  return new TextEncoder().encode([
+    'profile-card/1',
+    String(card?.fingerprint || ''),
+    String(card?.peerId || ''),
+    String(card?.to || ''),
+    String(card?.username || ''),
+    String(card?.mood || ''),
+    String(card?.avatarData || ''),
+    String(card?.version || ''),
+    String(card?.createdAt || ''),
+  ].join('\n'));
+}
+async function signProfileCard(card) {
+  try {
+    const key = await importIdentitySigningKey();
+    const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, profileCardSignBytes(card));
+    card.sig = app().arrayBufferToBase64(signature);
+    card.sigv = 1;
+  } catch (error) {
+    /* Unsigned still travels; a receiver that has this account's key pinned
+       will not let it change anything, which is the safe way round. */
+    console.warn('[Chat] could not sign the profile card:', error);
+  }
+  return card;
+}
+
 function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaRoute = null } = {}) {
   if (!peerRecord?.fingerprint && !peerRecord?.clientId) return false;
+  if (!isProfileAudience(peerRecord)) return false;
   const known = transitRouteFor(peerRecord);
   /* viaRoute is for the REPLY, and only for the reply.
    *
@@ -984,7 +1040,14 @@ function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaR
    * stop an unproved claim becoming durable. What a forged one would receive is a
    * display name, a photograph and a prekey -- the same things the card says to
    * anybody who asks. */
-  const route = known || viaRoute;
+  /* Unless the road it names is this device's own relay: a card asking for
+     ours from somebody on the same relay names that relay as its home, and
+     the answer was sealed to it as transit — to the relay it was already
+     on, which does not carry to itself — and never arrived. That was a new
+     conversation on one server opening without the other person's photograph. */
+  const ownRelay = typeof relayPinFor === 'function' ? (relayPinFor(chatServerOrigin())?.id || '') : '';
+  const reply = viaRoute && !(ownRelay && viaRoute.id === ownRelay) ? viaRoute : null;
+  const route = known || reply;
   /* A contact on THIS relay is somebody to reach too. The presence table
      stopped carrying avatars (it says who is here, not what they look like),
      which made the card the only carrier of a photograph — and this guard
@@ -998,14 +1061,23 @@ function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaR
   if (!force && Date.now() - last < PROFILE_CARD_MIN_MS) return false;
   profileCardSentAt.set(key, Date.now());
   const card = myProfileCard(askForTheirs);
-  if (known || !route) return sendRelayEnvelope(peerRecord, card);
-  sendViaTransit({
-    type: 'relay',
-    toClientId: peerRecord.clientId || '',
-    toFingerprint: peerRecord.fingerprint || '',
-    payload: card,
-    persist: false,
-  }, route, peerRecord);
+  card.to = String(peerRecord.fingerprint || '');
+  /* Signing is asynchronous and the callers want an answer now; what they
+     are told is that the card has been taken on, the promise every send
+     path here makes. */
+  signProfileCard(card).then(() => {
+    if (known || !route) {
+      sendRelayEnvelope(peerRecord, card);
+      return;
+    }
+    sendViaTransit({
+      type: 'relay',
+      toClientId: peerRecord.clientId || '',
+      toFingerprint: peerRecord.fingerprint || '',
+      payload: card,
+      persist: false,
+    }, route, peerRecord);
+  });
   return true;
 }
 
@@ -1013,17 +1085,64 @@ function sendProfileCard(peerRecord, { askForTheirs = false, force = false, viaR
    the name and the prekey land where every part of the interface already looks
    for them -- and the key lands through the same pinning. Status is deliberately
    NOT touched: whether they are there is answered by their relay, not claimed by
-   them. */
-function noteProfileCard(payload, peerRecord) {
-  if (!payload) return;
+   them.
+
+   Before any of it is believed, the card has to be the named contact's own:
+   - a relay that vouches for the sender (this relay, for somebody connected to
+     it) must vouch for the fingerprint the card names;
+   - the key it presents must be the one that fingerprint is the hash of;
+   - a signature must verify against the key pinned for that contact, or for a
+     first contact against the key presented — a bad one drops the card;
+   - an unsigned card that nobody vouches for changes nothing about a contact
+     whose key is pinned (an older build, over transit), and is believed for a
+     first contact only, the way a hello is.
+   The card is also the profile's own word on it, so an empty photograph or an
+   empty status means "removed" rather than "not said" — unless an older card
+   arrives after a newer one, in which case it changes nothing. */
+async function noteProfileCard(payload, peerRecord, { relayFingerprint = '' } = {}) {
+  if (!payload || typeof payload !== 'object') return;
+  const claimed = String(payload.fingerprint || '');
+  if (!/^[a-f0-9]{16,128}$/i.test(claimed)) return;
+  const mine = String(chatState.identity?.fingerprint || '');
+  if (claimed === mine) return;
+  if (payload.to && mine && payload.to !== mine) return;
+  if (relayFingerprint && relayFingerprint !== claimed) return;
+  const presentedKey = String(payload.publicKeyData || '');
+  if (presentedKey) {
+    let computed = '';
+    try { computed = await sha256Hex(app().base64ToArrayBuffer(presentedKey)); } catch (_error) { computed = ''; }
+    if (computed !== claimed) return;
+  }
+  const record = (chatState.peers || []).find((peer) => (
+    !peer.type && (peer.fingerprint === claimed || peer.trustedFingerprint === claimed)
+  )) || null;
+  const pinnedKey = String(record?.trustedKey || record?.publicKeyData || '');
+  let signed = false;
+  if (payload.sig) {
+    const key = pinnedKey || presentedKey;
+    if (!key) return;
+    try {
+      signed = await verifyIdentitySignature(key, app().base64ToArrayBuffer(String(payload.sig)), profileCardSignBytes(payload));
+    } catch (_error) {
+      signed = false;
+    }
+    if (!signed) return;
+  }
+  const attested = Boolean(relayFingerprint) && relayFingerprint === claimed;
+  const believed = signed || attested || !pinnedKey;
+  const version = String(payload.version || '').slice(0, 40);
+  const stale = Boolean(version && record?.profileVersion && version < record.profileVersion);
+  const takeProfile = believed && !stale;
+  const avatarData = String(payload.avatarData || '');
+  const mood = String(payload.mood || '').slice(0, 40);
   const merged = mergePeerRecord({
     peerId: payload.peerId || peerRecord?.peerId || '',
     clientId: peerRecord?.clientId || payload.peerId || '',
-    username: payload.username || peerRecord?.username || '',
-    publicKeyData: payload.publicKeyData || peerRecord?.publicKeyData || '',
-    fingerprint: payload.fingerprint || peerRecord?.fingerprint || '',
-    avatarData: payload.avatarData || '',
-    mood: payload.mood || '',
+    username: takeProfile ? (payload.username || peerRecord?.username || '') : '',
+    publicKeyData: presentedKey || peerRecord?.publicKeyData || '',
+    fingerprint: claimed,
+    avatarData: takeProfile ? avatarData : '',
+    mood: takeProfile ? mood : '',
     /* Deliberately no prekey. One arriving here is ignored rather than stored:
        acting on a prekey whose freshness nothing guarantees is what silently
        swallowed every cross-relay message. */
@@ -1033,20 +1152,52 @@ function noteProfileCard(payload, peerRecord) {
        something routable, betterHomeRelay keeps that. */
     homeRelaySource: 'presence',
     status: peerRecord?.status || 'offline',
-  }, { online: false });
+  }, { online: false, profile: takeProfile ? { avatarData, mood } : null });
+  if (merged && takeProfile && version) merged.profileVersion = version;
   saveContacts();
   renderPeers?.();
   renderActivePeer?.();
   /* Answer once, so the two sides end up knowing the same amount -- and answer it
      down the road the card itself named, since on a first contact there is no
      other. normalizeHomeRelay is what decides the claim is even shaped like a
-     route; it returns null for anything that is not. */
-  if (payload.pleaseReply && merged) {
+     route; it returns null for anything that is not. Only somebody this account
+     shares its profile with is answered: asking is not a way for a stranger to
+     collect photographs. */
+  if (payload.pleaseReply && merged && believed && isProfileAudience(merged)) {
     const replyRoute = typeof normalizeHomeRelay === 'function'
       ? normalizeHomeRelay(payload.homeRelay, 'session')
       : null;
     sendProfileCard(merged, { askForTheirs: false, force: true, viaRoute: replyRoute });
   }
+}
+
+/* Their card, asked for when it is missing.
+ *
+ * Opening a conversation is the moment a missing photograph is noticed. The
+ * relay's presence table never carries one, and a contact's own device only
+ * pushes its card to the people it shares its profile with, so a conversation
+ * this account has just started showed initials until the other side happened
+ * to save their profile again. Asking hands over this account's card too, with
+ * pleaseReply; the other side answers if this account is somebody it shares
+ * its profile with. Once per contact until a card with a version has come
+ * back, and never more than every few minutes. */
+const PROFILE_ASK_MIN_MS = 5 * 60 * 1000;
+/* The conversation somebody is looking at asks sooner: that is where a
+   missing photograph is noticed, and an answer lost on the way should not
+   leave it missing for five minutes. */
+const PROFILE_ASK_OPEN_MS = 30 * 1000;
+const profileAskedAt = new Map();
+function askForProfileIfMissing(peer, { minMs = PROFILE_ASK_MIN_MS } = {}) {
+  if (!peer || peer.type || peer.system) return false;
+  if (peer.profileVersion) return false;
+  if (!isProfileAudience(peer)) return false;
+  if (typeof peerLooksOnline === 'function' && !peerLooksOnline(peer)) return false;
+  const key = getConversationKey(peer);
+  if (!key) return false;
+  const last = profileAskedAt.get(key) || 0;
+  if (Date.now() - last < minMs) return false;
+  profileAskedAt.set(key, Date.now());
+  return sendProfileCard(peer, { askForTheirs: true, force: true });
 }
 
 /* Asking the other relay whether somebody is there.
@@ -1104,9 +1255,7 @@ function askIfPeerIsThere(peerRecord, { force = false } = {}) {
      reply until they return, is a thousand-odd envelopes a day landing in
      their mailbox and evicting the mail that was real. Their presence
      answer is what says they are there; the card follows it. */
-  if (!peerRecord.avatarData && typeof peerLooksOnline === 'function' && peerLooksOnline(peerRecord)) {
-    sendProfileCard(peerRecord, { askForTheirs: true });
-  }
+  askForProfileIfMissing(peerRecord);
   /* And ours, whenever it changed since this contact last heard it — the
      presence question is already the once-every-twelve-seconds moment this
      contact is thought about, which is cheap enough to piggyback the
@@ -1184,6 +1333,9 @@ if (!conversationKey || !version) return false;
    nothing. Their presence is what says the room is occupied — and when it
    later does, this is called again and the version still disagrees. */
 if (typeof peerLooksOnline === 'function' && !peerLooksOnline(peerRecord)) return false;
+/* Only to the people this profile is shared with — not the strangers the
+   relay lists beside them. */
+if (!isProfileAudience(peerRecord)) return false;
 if (profileCardVersionSent.get(conversationKey) === version) return false;
 profileCardVersionSent.set(conversationKey, version);
 return sendProfileCard(peerRecord, { askForTheirs: false, force: true });
@@ -2854,7 +3006,13 @@ username: chatState.profile.name || t('کاربر P00RIJA', 'P00RIJA User'),
 peerId: chatState.peerId,
 publicKeyData: identity?.publicKeyData || '',
 fingerprint: identity?.fingerprint || '',
-avatarData: chatState.profile.avatarData || '',
+/* Never the photograph. The relay keeps no use for it — the presence table
+   does not carry avatars — and the copy it kept was cut at 100,000
+   characters and then handed to anybody who asked for the peer list, where
+   it overwrote the whole picture a profile card had delivered: half a
+   photograph on every contact's screen, and everybody's photograph for
+   strangers on the same relay. Avatars travel on the profile card only. */
+avatarData: '',
 mood: String(chatState.profile.mood || '').slice(0, 40),
 prekeyId: prekey?.id || '',
 prekeyPublic: prekey?.publicKeyData || '',

@@ -115,6 +115,15 @@ const CHAT_PREFS_STORAGE_KEY = 'poorija_chat_prefs';
    a sane size. The limit exists for the INPUT, so a 40MB sensor dump is still
    refused before it is ever read into memory. */
 const MAX_PROFILE_AVATAR_BYTES = 20 * 1024 * 1024;
+/* What a stored avatar is: a square JPEG no larger than this, redrawn from
+   whatever was chosen (cleanAvatarImage, 34-sheets-profile-clocks.js). Big
+   enough to be worth opening full-frame, small enough that a profile card
+   to every contact costs tens of kilobytes rather than megabytes. */
+const AVATAR_EXPORT_PX = 640;
+const AVATAR_EXPORT_QUALITY = 0.86;
+/* Bumped when the redraw itself changes; a stored avatar written by an
+   older rule is redrawn once at unlock (cleanStoredAvatarIfNeeded). */
+const AVATAR_CLEAN_VERSION = 1;
 const SESSION_READY_TIMEOUT_MS = 8000;
 /* How long a phone rings before the call gives up. The same number on both
    sides, and on group calls: a ring that never stops is worse than a missed

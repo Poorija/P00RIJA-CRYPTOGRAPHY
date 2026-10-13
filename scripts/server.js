@@ -8115,7 +8115,6 @@ function snapshotPeers() {
       peerId: client.peerId,
       publicKeyData: client.publicKeyData || '',
       fingerprint: client.fingerprint || '',
-      avatarData: client.avatarData || '',
       /* Whatever they wrote about what they are doing. Short, free text, and
          no more sensitive than the display name beside it — but it has to
          travel with the presence record or the other side never sees it. */
@@ -8634,7 +8633,13 @@ wsServer.on('connection', (ws, req) => {
       record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
       noteKnownIdentity(record.fingerprint);
-      record.avatarData = String(message.avatarData || '').slice(0, 100000);
+      /* Not kept. The relay has no use for a photograph — the presence table
+         never carries one — and the copy it kept here was cut at 100,000
+         characters and then handed to anybody who asked for the peer list:
+         half a picture over the whole one a contact's card had delivered,
+         and everybody's photograph for every stranger on the relay. Avatars
+         travel on the profile card, between the people concerned. */
+      record.avatarData = '';
       record.mood = String(message.mood || '').slice(0, 40);
       /* The prekey is a public value and the relay only forwards it. It is
          what lets somebody write to this device while it is offline without

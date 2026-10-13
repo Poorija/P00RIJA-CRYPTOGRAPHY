@@ -340,6 +340,10 @@ unreadableChatStores.clear();
 const savedProfile = loadEncrypted(CHAT_PROFILE_STORAGE_KEY, null);
 if (savedProfile) {
 chatState.profile = { ...chatState.profile, ...savedProfile };
+/* An avatar kept by an older build may still be the original photograph. */
+if (typeof cleanStoredAvatarIfNeeded === 'function') {
+cleanStoredAvatarIfNeeded().catch((error) => console.warn('[chat] avatar redraw at unlock failed:', error));
+}
 } else {
 /* A fresh profile takes the shell's hinted relay. It must NEVER take
    window.location.origin: in the native shells that is the webview's own
@@ -572,10 +576,18 @@ try { storeHistory(); } catch (_error) { /* persisted on the next change */ }
 }
 return merged;
 }
-function saveProfile() {
+async function saveProfile() {
 const profile = buildProfileDraft();
 if (chatState.pendingAvatarData) {
-profile.avatarData = chatState.pendingAvatarData;
+/* Redrawn first, the same as the avatar's own Save: the pending picture may
+   still be the chosen original, EXIF and all (cleanAvatarImage). */
+const clean = await cleanAvatarImage(chatState.pendingAvatarData);
+if (!clean) {
+notify(t('این تصویر آماده نشد؛ تصویر دیگری انتخاب کنید.', 'That picture could not be prepared; choose another one.'), 'error');
+return;
+}
+profile.avatarData = clean;
+profile.avatarClean = AVATAR_CLEAN_VERSION;
 chatState.pendingAvatarData = '';
 }
 /* Bumped on every save so contacts can compare cards against it; see

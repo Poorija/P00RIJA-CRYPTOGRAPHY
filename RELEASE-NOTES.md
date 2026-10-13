@@ -1,3 +1,66 @@
+# P00RIJA Cryptography 2.98.37
+
+Version 2.98.37 · build chat-v130
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## عکس پروفایل و وضعیت · Profile photo and status
+
+- **بدون EXIF**: هر عکسی که برای پروفایل یا گروه انتخاب شود (عکس دوربین، HEIC،
+  تصویر آماده یا حرف اول نام) پیش از ذخیره دوباره روی بوم کشیده می‌شود و به یک JPEG
+  مربعی حداکثر ۶۴۰ پیکسلی تبدیل می‌شود که هیچ متادیتایی ندارد: نه مدل دوربین، نه
+  زمان عکس و نه موقعیت GPS. قبلاً اگر بدون «اعمال کراپ» ذخیره می‌زدید، خود فایل اصلی
+  با تمام EXIF برای همهٔ مخاطبان فرستاده می‌شد. آواتاری که از قبل ذخیره شده بود هم
+  یک‌بار هنگام باز کردن قفل تمیز می‌شود و نسخهٔ تمیزش برای مخاطبان می‌رود.
+- **عکس نصفه یا نیامدن عکس**: رله نسخه‌ای از عکس را که در hello می‌آمد بریده‌شده در
+  ۱۰۰ هزار نویسه نگه می‌داشت و با فهرست کاربران به همه می‌داد. همین نسخهٔ نصفه جای
+  عکس کامل را می‌گرفت، مخصوصاً در شروع برنامه. حالا عکس فقط با کارت پروفایل جابه‌جا
+  می‌شود و رله آن را نه نگه می‌دارد و نه پخش می‌کند.
+- **شروع چت**: وقتی گفتگویی را باز می‌کنید و عکس طرف مقابل را ندارید، برنامه آن را
+  می‌خواهد. جواب کسی که روی همان سرور بود اشتباهی از مسیر رلهٔ دیگر می‌رفت و هرگز
+  نمی‌رسید؛ درست شد.
+- **در لحظه**: تغییر وضعیت حالا به مخاطبانِ سرور دیگر هم می‌رسد. پاک کردن وضعیت یا
+  حذف عکس هم به همه می‌رسد؛ قبلاً مقدار خالی نادیده گرفته می‌شد و نسخهٔ قدیمی
+  همیشه می‌ماند. عکس‌های آماده و حرف اول نام قبلاً SVG بودند و مخاطبان اصلاً
+  نمی‌دیدندشان؛ حالا آن‌ها هم JPEG هستند.
+- **امنیت**:
+  - کارت پروفایل حالا با کلید هویت امضا می‌شود. کسی نمی‌تواند با جعل اثر انگشتِ یک
+    مخاطب، نام و عکس او را روی گوشی شما عوض کند.
+  - عکس، نام و وضعیت فقط برای مخاطبان، اعضای گروه‌های مشترک و گفتگوی باز فرستاده
+    می‌شود. قبلاً برای هر کسی که روی همان رله آنلاین بود هم می‌رفت.
+  - غریبه‌ای که فقط درخواست عکس بدهد، تا وقتی او را اضافه نکرده‌اید جوابی نمی‌گیرد.
+
+- **No EXIF**: every picture chosen for a profile or a group (a camera photo, HEIC,
+  a preset, or a generated initial) is redrawn on a canvas before it is kept. It
+  becomes a square JPEG of at most 640 pixels with no metadata in it: no camera,
+  no time, and no GPS position. Saving without "Apply crop" used to send the
+  original file, EXIF and all, to every contact. An avatar stored by an earlier
+  build is cleaned once at unlock, and the clean copy goes out.
+- **Half a photograph, or none**: the relay kept its own copy of the picture from
+  the hello, cut at 100,000 characters, and handed it out with the peer list. That
+  half copy replaced the whole one, most often when the app started. Photographs
+  now travel only on the profile card; the relay neither keeps nor hands them out.
+- **Starting a chat**: opening a conversation without the other person's
+  photograph asks for it. The answer from someone on the same server used to be
+  sent by way of another relay and never arrived. That is fixed.
+- **Live**: a status change now reaches contacts on the other server too. Clearing
+  a status or removing a photograph reaches everyone; an empty value used to be
+  ignored, so the old one stayed for good. Presets and initials used to be SVG,
+  which no contact could display; they are JPEG now.
+- **Security**:
+  - The profile card is signed with the identity key, so nobody can change a
+    contact's name or photograph on your device by naming their fingerprint.
+  - The photograph, name, and status go to contacts, members of shared groups,
+    and the open conversation only. Before, they also went to everyone online on
+    the same relay.
+  - A stranger who only asks for your photograph gets nothing until you add them.
+
+---
+
 # P00RIJA Cryptography 2.98.36
 
 Version 2.98.36 · build chat-v129

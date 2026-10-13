@@ -472,7 +472,11 @@ peer.status = 'offline';
 	chatState.presenceFingerprints = new Map(verified
 	.filter((peer) => peer.peerId && peer.fingerprint)
 	.map((peer) => [String(peer.peerId), String(peer.fingerprint)]));
-	verified.forEach((peer) => mergePeerRecord(peer, { online: true }));
+	/* Never a photograph from here: the presence table does not carry one, and
+   what an older relay still sent was its own copy cut at 100,000 characters,
+   which replaced the whole picture a card had delivered with half of one.
+   The status, though, is the person's own word repeated by their relay. */
+verified.forEach((peer) => mergePeerRecord({ ...peer, avatarData: '' }, { online: true, moodFromPresence: true }));
 	chatState.peers = chatState.peers.filter((peer) => !isSelfPeerRecord(peer));
 	dropStaleSessionChannels();
 	saveContacts();
@@ -481,7 +485,12 @@ peer.status = 'offline';
 	   contact becomes known to be here. That is the moment a card held back
 	   for an absent contact may finally go out: the version map inside makes
 	   this a no-op once each contact is current. */
-	(chatState.peers || []).forEach((peer) => { announceProfileCardIfStale(peer); });
+	(chatState.peers || []).forEach((peer) => {
+	announceProfileCardIfStale(peer);
+	/* A contact here without a photograph on this device is asked for one;
+	   the version map and the ask's own throttle keep this to once. */
+	if (!peer.avatarData) askForProfileIfMissing(peer);
+	});
 	renderPeers();
 	renderActivePeer();
 	/* The live device list just changed: the strip count follows it, an
@@ -722,7 +731,10 @@ return;
    across. */
 if (payload.type === 'profile-card') {
 const known = findPeerByAnyKey(payload.fingerprint || payload.peerId || message.fromClientId || '');
-noteProfileCard(payload, known);
+/* The relay's own word on who sent it, where it has one (a sender connected
+   to this relay); blank over transit, where the card's signature has to say. */
+noteProfileCard(payload, known, { relayFingerprint: String(message.fromFingerprint || '') })
+.catch((error) => console.warn('[chat] profile card could not be read:', error));
 ackRelayMessage(message.relayId);
 return;
 }

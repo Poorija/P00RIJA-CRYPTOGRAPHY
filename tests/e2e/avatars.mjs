@@ -98,7 +98,7 @@ console.log('\n===== who gets told about a new photograph =====');
        same closure — exactly the shape the page has. */
     const state = { profile: { updatedAt: 'v1' } };
     const card = new Function('profileCardVersionSent', 'getConversationKey', 'peerLooksOnline',
-      'sendProfileCard', 'chatState', `
+      'sendProfileCard', 'chatState', 'isProfileAudience', `
       ${source.slice(start, end)}
       return announceProfileCardIfStale;
     `)(
@@ -107,8 +107,13 @@ console.log('\n===== who gets told about a new photograph =====');
       (peer) => online.has(peer.peerId),
       (peer) => { sent.push(peer.peerId); return true; },
       state,
+      (peer) => Boolean(peer.manual),
     );
-    const peer = { peerId: 'far-friend', type: '' };
+    const peer = { peerId: 'far-friend', type: '', manual: true };
+    const stranger = { peerId: 'just-online', type: '' };
+    online.add('just-online');
+    check('somebody the relay merely lists is never sent the card',
+      card(stranger) === false && sent.length === 0, JSON.stringify(sent));
 
     check('an absent contact is not sent a card — and not stamped as if it had been',
       card(peer) === false && sent.length === 0, JSON.stringify(sent));
@@ -202,9 +207,9 @@ try {
   await page.waitForFunction(() => { try { return Boolean(chatState?.avatarEditor); } catch (_error) { return false; } },
     null, { timeout: 15000 }).catch(() => {});
   check('a PNG of any size opens the editor', Boolean(await page.evaluate(() => chatState?.avatarEditor)), '');
-  const saved = await page.evaluate(() => {
+  const saved = await page.evaluate(async () => {
     applyAvatarEditor();
-    savePendingAvatar();
+    await savePendingAvatar();
     const data = chatState.profile.avatarData || '';
     return { head: data.slice(0, 30), length: data.length, updatedAt: chatState.profile.updatedAt || '' };
   });
@@ -230,17 +235,21 @@ try {
 
   /* 3. Same-relay fan-out: the stub socket is the relay; a card must come
         out of it for a contact who is HERE, once per profile version. */
-  const fanout = await page.evaluate(() => {
+  const fanout = await page.evaluate(async () => {
     window.__sentFrames = [];
     chatState.ws = { readyState: 1, send: (raw) => window.__sentFrames.push(JSON.parse(raw)) };
     const peer = {
       peerId: 'same-relay-friend', clientId: 'same-relay-friend',
-      fingerprint: 'a'.repeat(64), username: 'هم‌رله', status: 'online',
+      fingerprint: 'a'.repeat(64), username: 'هم‌رله', status: 'online', manual: true,
     };
     chatState.peers.push(peer);
+    /* The card is signed before it goes, so it leaves a moment later. */
+    const settle = () => new Promise((r) => setTimeout(r, 600));
     announceProfileToContacts();
+    await settle();
     const firstOut = window.__sentFrames.filter((frame) => frame.type === 'relay');
     announceProfileToContacts();
+    await settle();
     return {
       firstCount: firstOut.length,
       card: firstOut[0] || null,
@@ -253,12 +262,18 @@ try {
   check('the card carries the photograph itself',
     String(fanout.card?.payload?.avatarData || '').startsWith('data:image/jpeg'), '');
   check('and it is addressed to them', fanout.card?.toFingerprint === 'a'.repeat(64), fanout.card?.toFingerprint || '');
+  /* Signed too, with the identity key — which this page, never connected to a
+     relay, does not have; profilesync.mjs checks the signature end to end. */
+  check('for them, with the version of the profile it carries',
+    fanout.card?.payload?.to === 'a'.repeat(64) && Boolean(fanout.card?.payload?.version),
+    JSON.stringify({ to: String(fanout.card?.payload?.to || '').slice(0, 8), version: fanout.card?.payload?.version || '' }));
   check('the same version is not pushed twice', fanout.stillAfterSecondCall === 1, `${fanout.stillAfterSecondCall} frames`);
 
-  const reannounce = await page.evaluate((key) => {
+  const reannounce = await page.evaluate(async (key) => {
     window.__sentFrames = [];
     chatState.profile.updatedAt = new Date().toISOString();
     for (const peer of chatState.peers) announceProfileCardIfStale(peer);
+    await new Promise((r) => setTimeout(r, 600));
     return window.__sentFrames.filter((frame) => frame.type === 'relay').length;
   }, fanout.key);
   check('a changed version goes out again without being asked', reannounce === 1, `${reannounce} frames`);
