@@ -618,11 +618,19 @@ return t('RSA-OAEP-3072 + AES-256-GCM', 'RSA-OAEP-3072 + AES-256-GCM');
    flight, red only once nothing is. The label already distinguishes them, so
    the state is read from it rather than threaded through twenty call sites. */
 const CONNECTING_LABEL = /connect|restor|reclaim|updat|در حال|به‌روزرسان/i;
+/* The label comes as [Persian, English] and is kept that way, so a language
+   switch can say the same state again in the other language
+   (relabelConnectionState). Said once as a string, it stayed in the language
+   it was said in — and the element's own data-i18n then reset it to
+   "disconnected" beside a green dot. A plain string is still accepted, for a
+   label that is rebuilt by its own code on a switch (the restriction one). */
 function setConnectionState(connected, label) {
 chatState.connected = connected;
+chatState.connectionLabel = label;
+const text = Array.isArray(label) ? t(label[0], label[1]) : String(label || '');
 const dot = document.getElementById('chatConnectionDot');
 const status = document.getElementById('chatConnectionStatus');
-const state = connected ? 'online' : (CONNECTING_LABEL.test(String(label || '')) ? 'connecting' : 'offline');
+const state = connected ? 'online' : (CONNECTING_LABEL.test(text) ? 'connecting' : 'offline');
 chatState.connectionState = state;
 if (dot) {
 dot.style.background = '';
@@ -634,12 +642,26 @@ dot.classList.toggle('offline', state === 'offline');
 /* The collapsed header shows only the dot, so it carries the state too — an
    avatar with a coloured ring is the whole status indicator up there. */
 document.querySelector('#content-chat .chat-profile-avatar-stack')?.setAttribute('data-connection', state);
-/* The card's own status line follows the same state. */
-if (typeof renderProfileSummary === 'function') renderProfileSummary();
 if (status) {
-status.textContent = label || (connected ? t('متصل', 'Connected') : t('عدم اتصال', 'Disconnected'));
-status.title = label || '';
+/* The live state owns this element from now on; the markup's data-i18n
+   is only for the moment before the first state arrives. */
+status.removeAttribute('data-i18n');
+status.textContent = text || (connected ? t('متصل', 'Connected') : t('عدم اتصال', 'Disconnected'));
+status.title = text;
 }
+/* The card's own status line follows the same state — read after the pill
+   is written, not before: it copies the pill, and copying it first left the
+   card one state behind ("connecting…" under a name already connected). */
+if (typeof renderProfileSummary === 'function') renderProfileSummary();
+}
+/* The same state, said again in the language now in force. */
+function relabelConnectionState() {
+if (chatState.serverRestriction && typeof renderRestrictionStatus === 'function') {
+renderRestrictionStatus();
+return;
+}
+if (chatState.connectionLabel === undefined) return;
+setConnectionState(chatState.connected, chatState.connectionLabel);
 }
 function syncComposerDirection() {
 const composer = document.getElementById('chatComposer');

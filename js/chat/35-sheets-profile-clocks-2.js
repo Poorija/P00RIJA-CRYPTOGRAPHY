@@ -2148,6 +2148,9 @@ renderStaticUi();
 renderPeers();
 renderActivePeer();
 setChatView(chatState.activeView);
+/* The connection line was said in the old language, and updateLanguage()'s
+   data-i18n sweep had just reset it to "disconnected" — beside a green dot. */
+relabelConnectionState();
 /* The lists rebuild themselves from t() above, but the settings menu and the
    profile menu are each built once and then kept, so their labels would stay
    in the language they were born in. */

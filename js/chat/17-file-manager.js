@@ -1061,7 +1061,7 @@ function applyChatEnabled(on, { silent = false } = {}) {
       try { deadPeer.destroy(); } catch (_error) { /* already gone */ }
     }
     chatState.connected = false;
-    setConnectionState(false, t('چت امن خاموش است', 'Secure chat is off'));
+    setConnectionState(false, ['چت امن خاموش است', 'Secure chat is off']);
   }
   renderStaticUi();
   return true;
@@ -1444,7 +1444,7 @@ async function importPortableProfileFile(file) {
     applyChatEnabled(true, { silent: true });
   } else {
     chatState.profile.chatEnabled = false;
-    setConnectionState(false, t('چت امن خاموش است', 'Secure chat is off'));
+    setConnectionState(false, ['چت امن خاموش است', 'Secure chat is off']);
     renderStaticUi();
   }
 }
@@ -1632,7 +1632,7 @@ clearReconnectTimer();
 startRestrictionWatchers(restriction);
 } else if (!chatState.connected) {
 clearRestrictionTimers();
-setConnectionState(false, t('آفلاین', 'Offline'));
+setConnectionState(false, ['آفلاین', 'Offline']);
 } else {
 clearRestrictionTimers();
 }
@@ -2650,7 +2650,7 @@ if (!ensureChatTransportRetried) {
 }
 ensureChatTransportRetried = 0;
 chatState.shouldReconnect = false;
-setConnectionState(false, t('سرور رله تنظیم نشده', 'Relay server is not configured'));
+setConnectionState(false, ['سرور رله تنظیم نشده', 'Relay server is not configured']);
 notify(
 t('برای چت و تماس، آدرس رله/TURN معتبر وارد کنید یا دکمه کشف محلی را بزنید.', 'Enter a valid relay/TURN server or use local discovery before starting chat/calls.'),
 'warning'

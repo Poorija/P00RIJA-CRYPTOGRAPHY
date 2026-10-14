@@ -1,3 +1,29 @@
+# P00RIJA Cryptography 2.98.41
+
+Version 2.98.41 · build chat-v134
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## وضعیت اتصال · Connection status
+
+- بعد از عوض کردن زبان، متن اتصال در کارت پروفایل «عدم اتصال» می‌شد، در حالی که
+  نقطهٔ کنارش سبز بود و اتصال برقرار. حالا همان وضعیت به زبان تازه دوباره نوشته
+  می‌شود.
+- خط زیر نام همیشه یک وضعیت عقب‌تر بود: مثلاً «در حال اتصال...» نشان می‌داد در
+  حالی که اتصال برقرار شده بود. حالا هم‌زمان به‌روز می‌شود.
+
+- After switching language, the connection line on the profile card read
+  "Disconnected" beside a green dot while connected. The same state is now said
+  again in the new language.
+- The line under the name was always one state behind, for example "Connecting..."
+  after the connection was up. It now updates at once.
+
+---
+
 # P00RIJA Cryptography 2.98.40
 
 Version 2.98.40 · build chat-v133

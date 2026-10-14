@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.40**
+نسخهٔ این پکیج: **2.98.41**
 
 </div>
 
@@ -533,7 +533,7 @@ privileged `nsenter` container, the same root the docker socket already is.
 `--status`, `--once` and `--renew-now` run through `docker exec`.
 `tests/e2e/certkeeper.mjs` runs it in the real image.
 
-**Avatars travel on the signed profile card only** (2.98.40). There are four
+**Avatars travel on the signed profile card only** (2.98.41). There are four
 rules:
 - `cleanAvatarImage` (34-sheets-profile-clocks.js) redraws every chosen picture
   to a JPEG of at most 640 px. A canvas export carries no EXIF, which makes it the

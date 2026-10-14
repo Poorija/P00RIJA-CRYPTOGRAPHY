@@ -587,7 +587,7 @@ if (!peer.type) peer.status = 'offline';
 });
 saveContacts();
 endCurrentCall();
-setConnectionState(false, t('آفلاین', 'Offline'));
+setConnectionState(false, ['آفلاین', 'Offline']);
 renderStaticUi();
 renderPeers();
 renderActivePeer();

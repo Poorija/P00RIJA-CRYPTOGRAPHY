@@ -203,12 +203,12 @@ connectChatTransport().catch(console.error);
 } else if (chatState.ws.readyState === WebSocket.OPEN && chatState.peer?.open) {
 // Both sockets rode out the interruption; just drop the offline label.
 chatState.lastInboundAt = Date.now();
-setConnectionState(true, t('متصل به سرور چت', 'Connected to chat server'));
+setConnectionState(true, ['متصل به سرور چت', 'Connected to chat server']);
 }
 });
 window.addEventListener('offline', () => {
 if (!chatState.shouldReconnect) return;
-setConnectionState(false, t('شبکه در دسترس نیست', 'Network unavailable'));
+setConnectionState(false, ['شبکه در دسترس نیست', 'Network unavailable']);
 });
 window.addEventListener('pagehide', flushHistoryStore);
 /* Browsers cannot block a screenshot, but they can make one worthless: the
@@ -369,14 +369,14 @@ return;
 }
 if (chatState.manualOffline) return;
 chatState.ws = new WebSocket(wsUrl());
-setConnectionState(false, t('در حال اتصال...', 'Connecting...'));
+setConnectionState(false, ['در حال اتصال...', 'Connecting...']);
 chatState.ws.addEventListener('open', () => {
 clearReconnectTimer();
 chatState.reconnectAttempt = 0;
 chatState.lastInboundAt = Date.now();
 chatState.lastTransportNoticeAt = 0;
 chatState.serverReachable = true;
-setConnectionState(true, t('متصل به سرور چت', 'Connected to chat server'));
+setConnectionState(true, ['متصل به سرور چت', 'Connected to chat server']);
 renderStaticUi();
 startHeartbeat();
 retryQueuedMessages();
@@ -925,7 +925,7 @@ if (payload.type === 'server-draining') {
    Obeying its jitter is the whole point: every peer reconnecting the instant
    the socket drops is a self-inflicted stampede on whatever replaces it. */
 const delay = Math.max(250, Math.min(30000, Number(payload.reconnectAfterMs) || 1500));
-setConnectionState(false, t('سرور در حال به‌روزرسانی است…', 'The server is updating…'));
+setConnectionState(false, ['سرور در حال به‌روزرسانی است…', 'The server is updating…']);
 chatState.shouldReconnect = true;
 clearReconnectTimer();
 chatState.reconnectTimer = setTimeout(() => {
@@ -1069,7 +1069,7 @@ renderRestrictionStatus();
 if (chatState.heartbeatTimer) clearInterval(chatState.heartbeatTimer);
 return;
 }
-setConnectionState(false, t('ارتباط با سرور چت قطع شد', 'Chat server disconnected'));
+setConnectionState(false, ['ارتباط با سرور چت قطع شد', 'Chat server disconnected']);
 chatState.serverReachable = false;
 /* Whose presence this socket may speak for: its own relay's clients and
    nobody else's. The peers broadcast applies the same rule when it marks
@@ -1097,7 +1097,7 @@ renderRestrictionStatus();
 return;
 }
 chatState.serverReachable = false;
-setConnectionState(false, t('سرور چت در دسترس نیست', 'Chat server is unreachable'));
+setConnectionState(false, ['سرور چت در دسترس نیست', 'Chat server is unreachable']);
 });
 }
 // Overlapping builds were racing each other: the second call reached the
@@ -1137,7 +1137,7 @@ return;
  * auto-connect triggers, the reconnect timers, the manual buttons — funnels
  * through here, and when it is off nothing dials, whatever asked. */
 if (chatState.profile.chatEnabled === false) {
-setConnectionState(false, t('چت امن خاموش است', 'Secure chat is off'));
+setConnectionState(false, ['چت امن خاموش است', 'Secure chat is off']);
 return;
 }
 await ensureIdentity();
@@ -1202,7 +1202,7 @@ try { deadPeer.destroy(); } catch (_error) { /* already gone */ }
 if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) {
 connectPresence();
 } else {
-setConnectionState(true, t('متصل به سرور چت', 'Connected to chat server'));
+setConnectionState(true, ['متصل به سرور چت', 'Connected to chat server']);
 }
 if (!chatState.p2pNoticeShown) {
 chatState.p2pNoticeShown = true;
@@ -1243,7 +1243,7 @@ connectPresence();
 // connectPresence() is a no-op when the presence socket is already up, so it
 // would leave the status stuck on "restoring" after every successful heal.
 if (chatState.ws?.readyState === WebSocket.OPEN) {
-setConnectionState(true, t('متصل به سرور چت', 'Connected to chat server'));
+setConnectionState(true, ['متصل به سرور چت', 'Connected to chat server']);
 }
 broadcastHello();
 });
@@ -1287,7 +1287,7 @@ const errorText = String(`${error?.type || ''} ${error?.message || error || ''}`
 const missingPeer = errorText.match(/Could not connect to peer\s+([A-Za-z0-9_-]+)/i)?.[1];
 if (missingPeer || /peer-unavailable/i.test(errorText)) {
 markPeerUnavailable(missingPeer || activePeer()?.peerId || '', t('Peer انتخاب‌شده آنلاین نیست یا دیگر در دسترس نیست؛ فهرست را به‌روزرسانی کردیم.', 'The selected peer is not online or is no longer reachable; the list was refreshed.'));
-setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('متصل به رله؛ Peer مقصد در دسترس نیست', 'Relay connected; target peer is unreachable'));
+setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['متصل به رله؛ Peer مقصد در دسترس نیست', 'Relay connected; target peer is unreachable']);
 return;
 }
 	if (errorText.includes('unavailable-id')) {
@@ -1316,7 +1316,7 @@ return;
 	chatState.peerIdRetryAttempt += 1;
 	if (chatState.peerIdRetryAttempt <= 3) {
 	console.warn(`Peer ID busy, retrying the same id (${chatState.peerIdRetryAttempt}/3)...`);
-	setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('در حال بازیابی شناسه...', 'Reclaiming identity...'));
+	setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['در حال بازیابی شناسه...', 'Reclaiming identity...']);
 	setTimeout(() => rebuildPeerTransport(), 4000 * chatState.peerIdRetryAttempt);
 	return;
 	}
@@ -1350,7 +1350,7 @@ try { deadPeer.destroy(); } catch (_error) { /* already gone */ }
 if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) {
 connectPresence();
 } else {
-setConnectionState(true, t('متصل به سرور چت', 'Connected to chat server'));
+setConnectionState(true, ['متصل به سرور چت', 'Connected to chat server']);
 }
 if (!chatState.p2pNoticeShown) {
 chatState.p2pNoticeShown = true;
@@ -1362,7 +1362,7 @@ return;
 }
 if (/network|socket-error|socket-closed|server-error/i.test(errorText)) {
 console.warn('[Transport] Transient peer error, healing:', errorText);
-setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('در حال بازیابی اتصال...', 'Restoring connection...'));
+setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['در حال بازیابی اتصال...', 'Restoring connection...']);
 healPeerTransport(errorText);
 return;
 }
@@ -1372,7 +1372,7 @@ console.warn('[Transport] WebRTC error during a call:', errorText);
 return;
 }
 notifyTransportTrouble(t('اتصال PeerJS با خطا مواجه شد', 'PeerJS connection failed'));
-setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('رله متصل است؛ لایه P2P خطا دارد', 'Relay connected; P2P layer has an error'));
+setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['رله متصل است؛ لایه P2P خطا دارد', 'Relay connected; P2P layer has an error']);
 scheduleReconnect();
 });
 // PeerJS fires this the moment the signalling socket closes. This is the state
@@ -1382,7 +1382,7 @@ scheduleReconnect();
 peer.on('disconnected', () => {
 if (chatState.peer !== peer) return;
 console.warn('[Transport] Peer signalling socket closed; reconnecting.');
-setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), t('در حال بازیابی اتصال...', 'Restoring connection...'));
+setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['در حال بازیابی اتصال...', 'Restoring connection...']);
 healPeerTransport('peer-disconnected');
 });
 peer.on('close', () => {
