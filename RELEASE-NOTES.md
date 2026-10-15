@@ -1,10 +1,28 @@
-# P00RIJA Cryptography 2.98.45
+# P00RIJA Cryptography 2.98.46
 
-Version 2.98.45 · build chat-v138
+Version 2.98.46 · build chat-v139
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## گزینه‌های کوتاه‌تر در پرسش حذف · Shorter answers when deleting
+
+- **«فقط حذف گفتگو»**: گزینهٔ اول پرسش حذف گفتگو به‌جای «حذف گفتگو — مخاطب
+  می‌ماند» حالا «فقط حذف گفتگو» است و کنار گزینهٔ دیگر در یک خط جا می‌شود. در گروه
+  هم «فقط پاک کردن تاریخچه» جای «پاک کردن تاریخچه — در گروه می‌مانید» را گرفته است.
+- **"Delete only the conversation"**: the delete question's first answer, which
+  was "Delete the conversation - keep the contact", now reads "Delete only the
+  conversation" and fits on one line beside the other. In a group, "Delete only
+  the history" replaces "Delete the history - stay in the group".
+
+---
+
+# P00RIJA Cryptography 2.98.45
+
+Version 2.98.45 · build chat-v138
 
 ---
 

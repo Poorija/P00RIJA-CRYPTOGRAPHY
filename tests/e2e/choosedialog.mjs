@@ -49,7 +49,7 @@ try {
     const ask = () => page.evaluate(() => {
       window.__answer = 'pending';
       PoorijaDialogs.choose('گفتگو پاک شود؟', [
-        { value: 'keep', label: 'حذف گفتگو — مخاطب می‌ماند' },
+        { value: 'keep', label: 'فقط حذف گفتگو' },
         { value: 'remove', label: 'حذف گفتگو و مخاطب' },
       ], { cancelLabel: 'انصراف', danger: true }).then((value) => { window.__answer = value; });
     });
@@ -94,6 +94,13 @@ try {
       check('the two answers sit side by side, with a gap between them', look.sideBySide && look.gap >= 6, JSON.stringify(look));
     }
     check('the answers of a destructive question are drawn in red', /^rgb\(239, 68, 68\)/.test(look.choice.color), JSON.stringify(look.choice));
+    if (label !== 'small phone') {
+      const lines = await page.evaluate(() => [...document.querySelectorAll('.poorija-dialog-choice')].map((b) => {
+        const range = document.createRange(); range.selectNodeContents(b);
+        return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+      }));
+      check('each answer fits on one line', lines.every((n) => n === 1), JSON.stringify(lines));
+    }
     check('Cancel is filled in a colour neither answer has', look.cancel.bg !== look.choice.bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(look.cancel.bg) && look.cancel.color !== look.choice.color, JSON.stringify(look.cancel));
     await page.click('.poorija-dialog-cancel');
     check('Cancel backs out', (await answer()) === null);

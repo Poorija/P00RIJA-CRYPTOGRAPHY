@@ -746,7 +746,7 @@ const choice = isGroup
 t(`تاریخچهٔ گروه «${label}» از همهٔ دستگاه‌های شما پاک شود؟ برای بقیهٔ اعضا چیزی پاک نمی‌شود.`,
   `Delete the history of "${label}" from all your devices? Nothing is deleted for the other members.`),
 [
-{ value: 'keep', label: t('پاک کردن تاریخچه — در گروه می‌مانید', 'Delete the history - stay in the group') },
+{ value: 'keep', label: t('فقط پاک کردن تاریخچه', 'Delete only the history') },
 { value: 'leave', label: t('پاک کردن تاریخچه و خروج از گروه', 'Delete the history and leave the group') },
 ],
 { cancelLabel: t('انصراف', 'Cancel'), danger: true })
@@ -754,7 +754,7 @@ t(`تاریخچهٔ گروه «${label}» از همهٔ دستگاه‌های ش
 t(`گفتگوی «${label}» از همهٔ دستگاه‌های شما پاک شود؟ پیام‌ها، فایل‌ها، تماس‌ها و کلیدهای این گفتگو حذف می‌شوند؛ برای «${label}» چیزی پاک نمی‌شود و خبری هم به او نمی‌رسد.`,
   `Delete the conversation with "${label}" from all your devices? Its messages, files, calls and keys go; nothing is deleted for "${label}", and they are not told.`),
 [
-{ value: 'keep', label: t('حذف گفتگو — مخاطب می‌ماند', 'Delete the conversation - keep the contact') },
+{ value: 'keep', label: t('فقط حذف گفتگو', 'Delete only the conversation') },
 { value: 'remove', label: t('حذف گفتگو و مخاطب', 'Delete the conversation and the contact') },
 ],
 { cancelLabel: t('انصراف', 'Cancel'), danger: true });
