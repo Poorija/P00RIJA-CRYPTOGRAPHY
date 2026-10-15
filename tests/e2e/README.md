@@ -84,6 +84,7 @@ about 25 minutes; a single suite is 2–6.
 | `scroll` / `scrollmob` | 20 + 20 | the thread keeps its place across re-renders, desktop and phone |
 | `calls` / `callvideo` / `callfix` | 20 + 10 + 27 | placing, answering, the call chrome, every dock control |
 | `stickers` | 27 | four import paths, sending, sharing a pack |
+| `gifstickers` | 38 | GIFs and keyboard stickers: a GIF or sticker pasted or dropped into the message box is sent (a large photo asks first; text and document copies paste as text), the rich keyboard box reads back a picture the keyboard writes in (WebKit's way) and hands typed text to the message box, a lost U+FFFC is cleaned up, the GIF shelf saves, dedupes, sends and survives a reload apart from the sticker packs, the bookmark on a sticker adds it to "My stickers", and Android Chrome alone marks the textarea `-webkit-user-modify: read-write` |
 | `persist` | 16 | the encrypted media vault survives a reload |
 | `batch4` | 24 | polls, location, contact cards |
 | `final3` | 25 | Argon2id master password, encrypted vault backup and restore, swipe-to-reply, multi-select |
