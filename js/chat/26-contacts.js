@@ -290,7 +290,7 @@ async function shareContactRecord(peerId) {
       { value: 'json', label: t('JSON — برای ابزار دیگر', 'JSON - for another tool') },
       { value: 'plain', label: t('متن ساده — برای خواندن', 'Plain text - to read') },
     ],
-    { okLabel: t('انصراف', 'Cancel') },
+    { cancelLabel: t('انصراف', 'Cancel') },
   );
   if (!choice) return;
   const text = shapes[choice] || shapes.card;

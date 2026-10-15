@@ -19786,7 +19786,7 @@ html body .poorija-dialog-message {
 html body .poorija-dialog-message.hidden,
 html body :is(.poorija-dialog-input, .poorija-dialog-confirm-input).hidden,
 html body .poorija-dialog-error.hidden,
-html body .poorija-dialog-cancel.hidden {
+html body :is(.poorija-dialog-cancel, .poorija-dialog-ok).hidden {
   display: none !important;
 }
 html body :is(.poorija-dialog-input, .poorija-dialog-confirm-input) {

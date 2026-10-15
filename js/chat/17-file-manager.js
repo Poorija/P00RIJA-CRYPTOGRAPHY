@@ -1379,7 +1379,6 @@ async function importPortableProfileFile(file) {
   try {
     choice = await window.PoorijaDialogs.choose(confirmText, [
       { value: 'yes', label: replacing ? t('جایگزین کن', 'Replace') : t('فعال‌سازی', 'Activate') },
-      { value: 'no', label: t('انصراف', 'Cancel') },
     ], { title: t('پروفایل همراه', 'Portable Profile') });
   } catch (_error) {
     return;

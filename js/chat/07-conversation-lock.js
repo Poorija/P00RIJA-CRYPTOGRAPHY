@@ -547,7 +547,7 @@ async function askForConversationLock(conversationId) {
       { value: '60', label: t('۱ ساعت', 'One hour') },
       { value: '0', label: t('فقط با بستن برنامه', 'Only when the app closes'), hint: t('تا وقتی برنامه باز است، باز می‌ماند', 'stays open while the app is') },
     ],
-    { okLabel: t('انصراف', 'Cancel') },
+    { cancelLabel: t('انصراف', 'Cancel') },
   );
   if (minutes === null) return;
   if (!await setConversationLock(conversationId, pin, Number(minutes))) return;
@@ -574,7 +574,7 @@ async function askForConversationLock(conversationId) {
       { value: 'later', label: t('فعلاً باز بماند', 'Leave it open for now'),
         hint: t('طبق زمانی که انتخاب کردید قفل می‌شود', 'it locks on the timer you chose') },
     ],
-    { okLabel: t('انصراف', 'Cancel') },
+    { cancelLabel: t('انصراف', 'Cancel') },
   );
   if (when === 'now') {
     lockConversationNow(conversationId);

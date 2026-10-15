@@ -261,7 +261,7 @@ async function sendDisguisedVoiceDraft() {
       label: t(mode.fa, mode.en),
       hint: t(...(VOICE_DISGUISE_HINTS[mode.id] || ['', ''])),
     })),
-    { okLabel: t('انصراف', 'Cancel') },
+    { cancelLabel: t('انصراف', 'Cancel') },
   );
   if (!choice) return;
   await sendVoiceDraft(choice);

@@ -1881,7 +1881,7 @@ async function offerJpegConversion(file, formatLabel) {
       { value: 'convert', label: t('تبدیل به JPEG و ارسال', 'Convert to JPEG and send'), hint: t('متادیتا کامل می‌رود', 'nothing carries over') },
       { value: 'asis', label: t('همین‌طور بفرست', 'Send it as it is'), hint: t('متادیتا دست‌نخورده می‌ماند', 'metadata stays in the file') },
     ],
-    { okLabel: t('انصراف', 'Cancel') },
+    { cancelLabel: t('انصراف', 'Cancel') },
   );
   if (choice !== 'convert') {
     if (choice === 'asis') {

@@ -104,6 +104,10 @@
     okBtn.textContent = config.okLabel || text('ok');
     cancelBtn.textContent = config.cancelLabel || text('cancel');
     cancelBtn.classList.toggle('hidden', config.kind === 'alert');
+    /* A question with answers has nothing to confirm: each answer is its own
+       button, and the only other thing to do is back out. One Cancel, not an
+       OK relabelled Cancel beside the real one. */
+    okBtn.classList.toggle('hidden', config.kind === 'choose');
     okBtn.classList.toggle('is-danger', Boolean(config.danger));
 
     /* A question with a fixed set of answers. Rendered as buttons rather than a
@@ -277,6 +281,8 @@
         if (wantsInput) {
           input.focus();
           input.select?.();
+        } else if (config.kind === 'choose') {
+          cancelBtn.focus();
         } else {
           okBtn.focus();
         }
@@ -314,7 +320,7 @@
     },
     /* Resolves to the chosen value, or null if the reader backed out. */
     choose(message, choices, options) {
-      return queue({ ...normalize(options, 'choose'), message, choices, okLabel: (options && options.cancelLabel) || undefined });
+      return queue({ ...normalize(options, 'choose'), message, choices });
     },
     /* True when the platform's own dialogs are unusable, which is what makes
        these replacements mandatory rather than cosmetic. */

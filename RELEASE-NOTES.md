@@ -1,10 +1,36 @@
-# P00RIJA Cryptography 2.98.43
+# P00RIJA Cryptography 2.98.44
 
-Version 2.98.43 · build chat-v136
+Version 2.98.44 · build chat-v137
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## یک دکمهٔ انصراف · One Cancel button
+
+- **پرسش‌های چندگزینه‌ای فقط یک «انصراف» دارند**: پنجره‌ای که چند پاسخ پیشنهاد
+  می‌دهد، مثل حذف گفتگو، دو دکمهٔ «انصراف» نشان می‌داد، یا یک «انصراف» و یک
+  «تأیید» که آن هم فقط پنجره را می‌بست. حالا گزینه‌ها و فقط یک «انصراف» دیده
+  می‌شوند، و همان هنگام باز شدن انتخاب‌شده است؛ پس زدن Enter در پرسش حذف چیزی را
+  پاک نمی‌کند. این اصلاح همهٔ پرسش‌های این شکلی را می‌گیرد، از جمله حذف گفتگو و
+  تاریخچهٔ گروه، قالب کارت مخاطب، زمان قفل گفتگو، تغییر صدا و فعال‌سازی پروفایل
+  همراه.
+- **Questions with answers have one Cancel**: a window offering several answers,
+  such as deleting a conversation, showed two Cancel buttons, or a Cancel and an
+  OK that also only closed it. It now shows the answers and a single Cancel,
+  which has the focus when it opens, so pressing Enter on a delete question
+  deletes nothing. The fix covers every question of this kind, among them
+  deleting a conversation or a group's history, the contact card's format, the
+  conversation lock's timing, the voice changer, and activating a portable
+  profile.
+
+---
+
+# P00RIJA Cryptography 2.98.43
+
+Version 2.98.43 · build chat-v136
 
 ---
 
