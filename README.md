@@ -403,8 +403,8 @@ The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA Cryptography_2.98.43_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA Cryptography_2.98.43_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA.Cryptography_2.98.43_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA.Cryptography_2.98.43_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
@@ -1229,8 +1229,8 @@ sudo bash scripts/setup.sh --quick --domain chat.example.com \
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA Cryptography_2.98.43_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA Cryptography_2.98.43_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA.Cryptography_2.98.43_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA.Cryptography_2.98.43_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |

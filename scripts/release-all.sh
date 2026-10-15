@@ -221,6 +221,14 @@ fi
 say "Package and collect"
 step "npm-package" bash scripts/build-npm-package.sh
 step "export"      bash scripts/export-artifacts.sh
+# What is uploaded to the GitHub release: every installer under the name GitHub
+# gives it, and the SHA256SUMS.txt a download can be checked against. A
+# desktop-only build has no phone package, and that is not a failure.
+if [ "$SKIP_MOBILE" -eq 1 ]; then
+    step "github-files" bash scripts/github-release-files.sh --allow-missing
+else
+    step "github-files" bash scripts/github-release-files.sh
+fi
 echo
 
 # ---------------------------------------------------------------------------
@@ -245,6 +253,18 @@ if [ -f Export/SHA256SUMS.txt ]; then
         FAILED+=("checksums")
     fi
 fi
+# The release's own list, checked the way somebody who downloaded the files
+# will check it: flat, under the names GitHub gives them.
+if [ -f Export/GitHub/SHA256SUMS.txt ]; then
+    gh_ok=$( (cd Export/GitHub && shasum -a 256 -c SHA256SUMS.txt 2>/dev/null | grep -c ': OK') )
+    gh_bad=$( (cd Export/GitHub && shasum -a 256 -c SHA256SUMS.txt 2>&1 | grep -c 'FAILED') )
+    if [ "$gh_bad" -eq 0 ]; then
+        good "$gh_ok release files in Export/GitHub/ match their SHA256SUMS.txt"
+    else
+        bad "$gh_bad release file(s) in Export/GitHub/ do not match"
+        FAILED+=("github-checksums")
+    fi
+fi
 echo
 
 # ---------------------------------------------------------------------------
@@ -258,6 +278,9 @@ if [ -d Export ]; then
         | awk '{printf "  %-8s %s\n", $5, $NF}' | sed "s|Export/||" | sort -k2
     echo "  ───"
     echo "  $(find Export -type f | wc -l | tr -d ' ') files, $(du -sh Export 2>/dev/null | cut -f1) total"
+    if [ -d Export/GitHub ]; then
+        echo "  For the GitHub release: everything in Export/GitHub/ ($(find Export/GitHub -type f | wc -l | tr -d ' ') files, SHA256SUMS.txt included)"
+    fi
 fi
 echo
 
