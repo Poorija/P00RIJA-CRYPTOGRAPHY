@@ -1,10 +1,35 @@
-# P00RIJA Cryptography 2.98.44
+# P00RIJA Cryptography 2.98.45
 
-Version 2.98.44 · build chat-v137
+Version 2.98.45 · build chat-v138
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## ظاهر پرسش‌های چندگزینه‌ای · How a question with answers looks
+
+- **«انصراف» از گزینه‌ها جداست**: دکمهٔ «انصراف» تنها دکمهٔ پررنگ پنجره است، به
+  رنگ اصلی برنامه، و دیگر شبیه گزینه‌هایی نیست که از آن‌ها برمی‌گردد.
+- **گزینه‌های حذف قرمزند**: در پرسش حذف گفتگو و حذف تاریخچهٔ گروه، گزینه‌ها به رنگ
+  هشدار نشان داده می‌شوند.
+- **دو گزینه کنار هم**: وقتی پرسش دو پاسخ دارد، دو دکمه کنار هم و با فاصله از هم
+  قرار می‌گیرند. روی گوشی‌های خیلی باریک (۳۲۰ پیکسل) باز زیر هم می‌آیند تا متن
+  کلمه‌به‌کلمه نشکند.
+- **Cancel stands apart**: Cancel is the dialog's one filled button, in the
+  app's accent, and no longer looks like the answers it backs out of.
+- **Delete answers are red**: deleting a conversation or a group's history
+  draws its answers in the danger colour.
+- **Two answers side by side**: a question with two answers puts them in one
+  row with a gap between them; on the narrowest phones (320 px) they stack
+  again, so no label breaks word by word.
+
+---
+
+# P00RIJA Cryptography 2.98.44
+
+Version 2.98.44 · build chat-v137
 
 ---
 

@@ -27588,3 +27588,52 @@ html:not(.dark) body #mainApp #content-chat .chat-format-btn[aria-pressed="true"
   html body #mainApp #content-chat #chatFormatBar { width: max-content; }
   html body #mainApp #content-chat .chat-format-btn { flex: 0 0 2.6rem; min-width: 2.6rem; }
 }
+
+
+/* ============================================================================
+   A question with answers: Cancel stands apart, two answers share a row
+   ----------------------------------------------------------------------------
+   Cancel was a grey button under grey answers, the same weight as the things
+   it backs out of. It is now the dialog's one filled button, in the accent,
+   and the answers of a question that destroys something are drawn in the
+   danger colour. Two answers without a second line sit side by side with a
+   gap between them; on the narrowest phones they stack again, where half the
+   width would break every word.
+   ========================================================================== */
+html body .poorija-dialog-choices:not(.hidden) {
+  margin-bottom: 0.85rem;
+}
+html body .poorija-dialog-choices.is-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+html body .poorija-dialog-choices.is-pair .poorija-dialog-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  text-align: center;
+  text-wrap: balance;
+  line-height: 1.5;
+}
+html body .poorija-dialog-choices.is-danger .poorija-dialog-choice {
+  color: var(--app-danger, #ef4444);
+  border-color: color-mix(in srgb, var(--app-danger, #ef4444) 45%, transparent);
+  background: color-mix(in srgb, var(--app-danger, #ef4444) 10%, transparent);
+  font-weight: 600;
+}
+html body .poorija-dialog-choices.is-danger .poorija-dialog-choice:hover {
+  background: color-mix(in srgb, var(--app-danger, #ef4444) 18%, transparent);
+}
+html body .poorija-dialog-cancel.is-primary {
+  background: var(--app-accent, #14b8a6) !important;
+  color: #fff !important;
+}
+html body .poorija-dialog-cancel.is-primary:hover {
+  background: color-mix(in srgb, var(--app-accent, #14b8a6) 86%, #000) !important;
+}
+@media (max-width: 339px) {
+  html body .poorija-dialog-choices.is-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

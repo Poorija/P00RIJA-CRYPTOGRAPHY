@@ -18,6 +18,10 @@
  *   - Cancel, Escape and the backdrop each resolve to null, an answer to its
  *     value;
  *   - Cancel has the focus, so Enter on a destructive question backs out;
+ *   - Cancel is filled in a colour neither answer has, the answers of a
+ *     destructive question are drawn in the danger colour, and two answers
+ *     sit side by side with a gap between them — stacked again on a 320 px
+ *     phone, where half the width would break every word;
  *   - confirm and prompt still show OK and Cancel.
  */
 import { chromium } from 'playwright';
@@ -33,7 +37,7 @@ const check = (name, ok, detail = '') => {
 
 const browser = await chromium.launch();
 try {
-  for (const [label, viewport] of [['phone', { width: 390, height: 844 }], ['desktop', { width: 1280, height: 800 }]]) {
+  for (const [label, viewport] of [['phone', { width: 390, height: 844 }], ['small phone', { width: 320, height: 568 }], ['desktop', { width: 1280, height: 800 }]]) {
     console.log(`\n===== ${label} =====`);
     const page = await browser.newPage({ viewport });
     const errors = [];
@@ -47,7 +51,7 @@ try {
       PoorijaDialogs.choose('گفتگو پاک شود؟', [
         { value: 'keep', label: 'حذف گفتگو — مخاطب می‌ماند' },
         { value: 'remove', label: 'حذف گفتگو و مخاطب' },
-      ], { cancelLabel: 'انصراف' }).then((value) => { window.__answer = value; });
+      ], { cancelLabel: 'انصراف', danger: true }).then((value) => { window.__answer = value; });
     });
     const answer = async () => {
       await page.waitForFunction(() => window.__answer !== 'pending', null, { timeout: 3000 }).catch(() => {});
@@ -71,6 +75,26 @@ try {
     check('both answers are shown', first.choices.length === 2, JSON.stringify(first.choices));
     check('with exactly one Cancel, carrying the caller\'s label', first.actions.length === 1 && first.cancels === 1, JSON.stringify(first.actions));
     check('Cancel has the focus', first.focused.includes('poorija-dialog-cancel'), first.focused);
+    const look = await page.evaluate(() => {
+      const [a, b] = [...document.querySelectorAll('.poorija-dialog-choice')];
+      const cancel = document.querySelector('.poorija-dialog-cancel');
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const paint = (node) => { const style = getComputedStyle(node); return { bg: style.backgroundColor, color: style.color }; };
+      return {
+        sideBySide: Math.abs(ra.top - rb.top) < 1 && Math.abs(ra.height - rb.height) < 1,
+        stacked: Math.abs(ra.left - rb.left) < 1 && rb.top > ra.bottom,
+        gap: Math.round(ra.left > rb.left ? ra.left - rb.right : rb.left - ra.right),
+        rowGap: Math.round(rb.top - ra.bottom),
+        choice: paint(a), cancel: paint(cancel),
+      };
+    });
+    if (label === 'small phone') {
+      check('on a 320 px phone the answers stack, apart', look.stacked && look.rowGap >= 6, JSON.stringify(look));
+    } else {
+      check('the two answers sit side by side, with a gap between them', look.sideBySide && look.gap >= 6, JSON.stringify(look));
+    }
+    check('the answers of a destructive question are drawn in red', /^rgb\(239, 68, 68\)/.test(look.choice.color), JSON.stringify(look.choice));
+    check('Cancel is filled in a colour neither answer has', look.cancel.bg !== look.choice.bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(look.cancel.bg) && look.cancel.color !== look.choice.color, JSON.stringify(look.cancel));
     await page.click('.poorija-dialog-cancel');
     check('Cancel backs out', (await answer()) === null);
 

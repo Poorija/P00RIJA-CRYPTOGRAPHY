@@ -116,6 +116,12 @@
        textContent: they can carry names that came from other people. */
     const wantsChoices = config.kind === 'choose' && Array.isArray(config.choices) && config.choices.length;
     choicesEl.classList.toggle('hidden', !wantsChoices);
+    /* Two short answers sit side by side, a question that destroys something
+       colours its answers as it does, and Cancel is the one filled button, so
+       backing out never looks like another answer. */
+    choicesEl.classList.toggle('is-pair', Boolean(wantsChoices && config.choices.length === 2 && config.choices.every((choice) => !choice.hint)));
+    choicesEl.classList.toggle('is-danger', Boolean(wantsChoices && config.danger));
+    cancelBtn.classList.toggle('is-primary', config.kind === 'choose');
     choicesEl.innerHTML = '';
     if (wantsChoices) {
       config.choices.forEach((choice, index) => {
