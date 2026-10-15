@@ -292,28 +292,28 @@ function shareCurrentLocation() {
    one becomes a single multi-megabyte message on a data channel that expects
    kilobytes: it neither arrives nor errors, it just sits at "queued". A card
    needs a thumbnail, so make one. */
-const CONTACT_CARD_AVATAR_PX = 96;
+/* 160px rather than 96: the card's circle is drawn at up to 3x on a phone,
+   and 96 pixels across that is a blur. Still a few kilobytes. */
+const CONTACT_CARD_AVATAR_PX = 160;
+/* The text card someone pastes is smaller again: it is text, and every
+   kilobyte of photograph is a kilobyte more to select and copy. */
+const CONTACT_SHARE_TEXT_AVATAR_PX = 96;
 const RICH_MESSAGE_MAX_BYTES = 40 * 1024;
 
-async function thumbnailDataUrl(dataUrl, size = CONTACT_CARD_AVATAR_PX) {
-  if (!dataUrl || typeof createImageBitmap !== 'function') return '';
+/* Always redrawn, never passed through: the photograph on a contact's record
+   may be one an older build received with its EXIF still inside, or an SVG
+   no other device will draw, and a small one used to go out untouched. The
+   same redraw the profile avatar gets (cleanAvatarImage) — square, JPEG,
+   nothing but pixels. */
+async function contactCardAvatar(dataUrl, size = CONTACT_CARD_AVATAR_PX) {
+  if (!dataUrl || typeof cleanAvatarImage !== 'function') return '';
   try {
-    const blob = await (await fetch(dataUrl)).blob();
-    if (blob.size <= 12 * 1024) return dataUrl;
-    const bitmap = await createImageBitmap(blob);
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const scale = Math.max(size / bitmap.width, size / bitmap.height);
-    const width = bitmap.width * scale;
-    const height = bitmap.height * scale;
-    canvas.getContext('2d').drawImage(bitmap, (size - width) / 2, (size - height) / 2, width, height);
-    bitmap.close?.();
-    return canvas.toDataURL('image/webp', 0.8);
+    return await cleanAvatarImage(dataUrl, { size });
   } catch (_error) {
     return '';
   }
 }
+
 
 function shareableContacts() {
   const activeKey = getConversationKey(getActiveConversation());
@@ -327,6 +327,9 @@ function shareableContacts() {
       peerId: record.peerId,
       publicKeyData: record.publicKeyData || '',
       avatarData: record.avatarData || '',
+      /* Where they can be reached, so a contact on the other relay can be
+         written to by whoever adds them from the card. */
+      homeRelay: typeof shareableHomeRelay === 'function' ? shareableHomeRelay(record) : null,
     }));
 }
 
@@ -351,35 +354,64 @@ async function adoptSharedContact(entryId, { openChat = false } = {}) {
     notify(t('این کارت کلید عمومی ندارد و قابل افزودن نیست.', 'This card carries no public key, so it cannot be added.'), 'warning');
     return;
   }
-  if (rich.fingerprint === chatState.identity?.fingerprint) {
+  /* The fingerprint is what the safety number is computed from and the key is
+     what messages are sealed to, so a card whose two disagree is a card that
+     would pass a safety-number check while somebody else read every message.
+     It was added as it came; the fingerprint is now worked out from the key. */
+  const checked = typeof checkedIdentity === 'function' ? await checkedIdentity(rich) : { ok: true, identity: rich };
+  if (!checked.ok) {
+    notify(t('اثرانگشت این کارت با کلیدش جور نیست؛ اضافه نشد.', "This card's fingerprint does not match its key, so it was not added."), 'error');
+    return;
+  }
+  const fingerprint = checked.identity.fingerprint;
+  if (fingerprint === chatState.identity?.fingerprint) {
     notify(t('این کارت خود شماست.', 'That card is you.'), 'info');
     return;
   }
-  const existing = chatState.peers.find((peer) => peer.fingerprint === rich.fingerprint);
-  if (existing) {
-    if (openChat) {
-      await openConversationWithFingerprint(rich.fingerprint);
-      return;
-    }
-    notify(t('این مخاطب از قبل در لیست شماست.', 'That contact is already in your list.'), 'info');
+  const existing = chatState.peers.find((peer) => peer.fingerprint === fingerprint);
+  /* Somebody else's id with this key is not "the same person with a new key",
+     however the card puts it: that is the key-change path, and a card handed
+     on by a third person is not where it may start. */
+  const sameIdOtherKey = rich.peerId && chatState.peers.find((peer) => (
+    peer.peerId === rich.peerId && peer.fingerprint && peer.fingerprint !== fingerprint
+  ));
+  if (sameIdOtherKey) {
+    notify(t('این شناسه در مخاطبین شما به کلید دیگری تعلق دارد؛ کارت اضافه نشد.', 'That id belongs to a different key in your contacts, so the card was not added.'), 'warning');
     return;
   }
-  chatState.peers.push(normalizePeerRecord({
-    peerId: rich.peerId,
-    clientId: '',
-    username: rich.name,
-    fingerprint: rich.fingerprint,
+  /* Through the same door as every other record, so the key is pinned the way
+     it is for a scanned card (a record pushed in by hand had no pin at all)
+     and the relay it names is filed on the ladder like a pasted card's. A
+     photograph only fills an empty frame: their own card is their word on
+     what they look like, a friend's copy is not. */
+  const record = mergePeerRecord({
+    peerId: rich.peerId || fingerprint,
+    clientId: existing?.clientId || '',
+    username: existing?.username || rich.name,
+    fingerprint,
     publicKeyData: rich.publicKeyData,
-    avatarData: rich.avatarData || '',
-    status: 'offline',
+    avatarData: existing?.avatarData ? '' : (rich.avatarData || ''),
+    homeRelay: rich.homeRelay || null,
+    homeRelaySource: rich.homeRelay ? 'card' : '',
+    status: existing?.status || 'offline',
     /* Same flag "Start chat" sets. Without it shouldShowConversation hides a
        contact that has no history and no key yet, so tapping Add would look
        like it did nothing at all. */
     manual: true,
-  }));
+  }, { online: false });
+  if (!record) {
+    notify(t('این کارت قابل افزودن نیست.', 'This card cannot be added.'), 'warning');
+    return;
+  }
+  record.manual = true;
   saveContacts();
   renderPeers();
   renderMessages();
+  if (existing) {
+    if (openChat) await openConversationWithFingerprint(fingerprint);
+    else notify(t('این مخاطب از قبل در لیست شماست.', 'That contact is already in your list.'), 'info');
+    return;
+  }
   notify(t(`«${rich.name}» به مخاطبین اضافه شد.`, `"${rich.name}" was added to your contacts.`), 'success');
-  if (openChat) await openConversationWithFingerprint(rich.fingerprint);
+  if (openChat) await openConversationWithFingerprint(fingerprint);
 }

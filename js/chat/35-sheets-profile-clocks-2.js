@@ -1365,7 +1365,11 @@ name: contact.name,
 fingerprint: contact.fingerprint,
 peerId: contact.peerId,
 publicKeyData: contact.publicKeyData,
-avatarData: await thumbnailDataUrl(contact.avatarData),
+/* The relay too: without it a contact on the other server was added with
+   nowhere to send to, and every message to them went to a relay that had
+   never heard of them. */
+homeRelay: contact.homeRelay || null,
+avatarData: await contactCardAvatar(contact.avatarData),
 });
 } catch (error) {
 console.error('[Contact] share failed', error);

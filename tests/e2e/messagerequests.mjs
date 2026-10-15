@@ -98,6 +98,35 @@ try {
     pendingSeen: Object.values(chatState.history).flat().filter((e) => e.direction === 'in' && !e.seenAckSent).length,
   }));
   check('the request bar offers accept, block and delete', opened.bar === true);
+  /* Centred over the messages, whole, with every button where a finger can
+     reach it — on a phone and on a desktop. It used to sit in the composer's
+     footer, which cut its buttons in half. */
+  const placement = async (width, height) => {
+    await HOST.setViewportSize({ width, height });
+    await sleep(700);
+    return HOST.evaluate(() => {
+      const bar = document.getElementById('chatRequestBar');
+      const panel = document.getElementById('chatMessages');
+      const b = bar.getBoundingClientRect();
+      const p = panel.getBoundingClientRect();
+      const buttons = [...bar.querySelectorAll('[data-request-action]')].map((button) => {
+        const r = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { action: button.dataset.requestAction, whole: r.height > 20 && r.bottom <= b.bottom + 1 && r.top >= b.top - 1, tappable: Boolean(hit && button.contains(hit)) };
+      });
+      return {
+        inside: b.top >= p.top - 1 && b.bottom <= p.bottom + 1 && b.left >= p.left - 1 && b.right <= p.right + 1,
+        centred: Math.abs((b.top + b.bottom) / 2 - (p.top + p.bottom) / 2) <= 4 && Math.abs((b.left + b.right) / 2 - (p.left + p.right) / 2) <= 4,
+        buttons,
+      };
+    });
+  };
+  for (const [width, height, label] of [[390, 844, 'on a phone'], [1440, 900, 'on a desktop']]) {
+    const placed = await placement(width, height);
+    check(`${label} the request sits in the middle of the messages, every button whole and tappable`,
+      placed.inside && placed.centred && placed.buttons.length === 3 && placed.buttons.every((button) => button.whole && button.tappable),
+      JSON.stringify(placed));
+  }
   const status = await STRANGER.evaluate((value) => Object.values(chatState.history).flat().find((e) => e.text === value)?.status, first);
   check('reading it sends no read receipt', status !== 'seen', status);
 

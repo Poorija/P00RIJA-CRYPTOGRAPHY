@@ -663,11 +663,13 @@ const identity = message.payload.identity || {};
 if (identity.fingerprint || identity.peerId) {
 const known = findPeerByAnyKey(identity.fingerprint || identity.peerId);
 if (!known) {
-addIdentityAsConversation(identity, { startSession: false });
+addIdentityAsConversation(identity, { startSession: false }).then((record) => {
+if (!record) return;
 notify(t(
 `${identity.name || 'یک مخاطب'} در نبود شما درخواست گفتگو داده بود.`,
 `${identity.name || 'Someone'} asked to start a conversation while you were away.`,
 ), 'info');
+}).catch(console.error);
 	} else {
 	/* The key in a session-offer used to be written straight onto the known
 	   record, bypassing the TOFU pinning every other identity update goes

@@ -61,22 +61,28 @@ function contactBookRecords() {
   });
 }
 
-function contactShareText(peer = {}) {
+/* Where a contact can be reached, as far as it may be passed on. Only a route
+   established out of band here too: forwarding a presence hint would launder
+   it into a card — the receiver files anything in a card as card-rank — which
+   is the one way the ladder could be climbed by accident. routableHomeRelay
+   routes on a presence-rank route as well (a discovered route is one), so the
+   rank is checked here. Shared by every way a contact is handed on. */
+function shareableHomeRelay(peer) {
+  const route = typeof routableHomeRelay === 'function' ? routableHomeRelay(peer) : null;
+  if (!route || (route.source !== 'card' && route.source !== 'session')) return null;
+  return { origin: route.origin || '', id: route.id || '', key: route.key || '' };
+}
+function contactShareText(peer = {}, { avatarData = '' } = {}) {
   return 'poorija-chat-v1:' + utf8_to_b64(JSON.stringify({
     type: 'poorija-chat-identity',
     name: peer.name || peer.username || '',
     peerId: peer.peerId || '',
     fingerprint: peer.fingerprint || '',
     publicKeyData: peer.publicKeyData || '',
-    /* Passed on only when it was established out of band here too. Forwarding
-       a presence hint would launder it into a card — the receiver files
-       anything in a card as card-rank — which is the one way the ladder could
-       be climbed by accident. routableHomeRelay routes on a presence-rank
-       route as well (a discovered route is one), so the rank is checked here. */
-    homeRelay: (() => {
-      const route = routableHomeRelay(peer);
-      return route && (route.source === 'card' || route.source === 'session') ? route : null;
-    })(),
+    homeRelay: shareableHomeRelay(peer),
+    /* A small, redrawn copy of their photograph, so the card looks like the
+       person it is for; the importer shows it until their own card arrives. */
+    ...(avatarData ? { avatarData } : {}),
   }));
 }
 
@@ -247,25 +253,34 @@ async function removeContactRecord(peerId) {
  * A card is what this app understands and imports in one paste; JSON is for a
  * script or another tool; plain text is for somebody who is going to read it
  * with their eyes. Sharing one shape and hoping was the old behaviour. */
-function contactShareShapes(peer) {
-  const card = contactShareText(peer);
+function contactShareShapes(peer, { avatarData = '' } = {}) {
+  const homeRelay = shareableHomeRelay(peer);
+  const card = contactShareText(peer, { avatarData });
   const json = JSON.stringify({
     name: peer.username || peer.name || '',
     peerId: peer.peerId || '',
     fingerprint: peer.fingerprint || '',
     publicKeyData: peer.publicKeyData || '',
+    homeRelay,
+    ...(avatarData ? { avatarData } : {}),
   }, null, 2);
   const plain = [
     `${t('نام', 'Name')}: ${peer.username || peer.name || '-'}`,
     `${t('شناسه', 'Peer id')}: ${peer.peerId || '-'}`,
     `${t('اثرانگشت', 'Fingerprint')}: ${peer.fingerprint || '-'}`,
+    `${t('رله', 'Relay')}: ${homeRelay?.origin || '-'}`,
   ].join('\n');
   return { card, json, plain };
 }
 async function shareContactRecord(peerId) {
   const peer = contactByPeerId(peerId);
   if (!peer) return;
-  const shapes = contactShareShapes(peer);
+  /* The text card and the JSON carry a small photograph; plain text has no
+     room for one. Redrawn, so nothing of the original file travels. */
+  const avatarData = typeof contactCardAvatar === 'function'
+    ? await contactCardAvatar(peer.avatarData, CONTACT_SHARE_TEXT_AVATAR_PX)
+    : '';
+  const shapes = contactShareShapes(peer, { avatarData });
   const choice = await PoorijaDialogs.choose(
     t('کارت مخاطب در چه قالبی فرستاده شود؟', 'In what form should this contact go?'),
     [
@@ -303,8 +318,10 @@ async function addContactFromPrompt() {
   if (!raw || !raw.trim()) return;
   const parsed = parseIdentityText(raw.trim());
   if (parsed?.peerId) {
-    addIdentityAsConversation(parsed, { startSession: false });
-    notify(t('مخاطب افزوده شد.', 'Contact added.'), 'success');
+    /* addIdentityAsConversation says why when it refuses a card. */
+    if (await addIdentityAsConversation(parsed, { startSession: false })) {
+      notify(t('مخاطب افزوده شد.', 'Contact added.'), 'success');
+    }
     renderPeers();
     return;
   }

@@ -131,7 +131,41 @@ function acceptMessageRequest(record) {
   if (typeof flushSeenReceipts === 'function') flushSeenReceipts();
 }
 
-/* The bar above the composer while a request is open. */
+/* The card in the middle of the conversation while a request is open.
+ *
+ * It used to sit in the composer's footer, which is sized for the input and
+ * clips what does not fit — on a phone and on a desktop alike the three
+ * buttons were cut through the middle, and Accept, Block and Delete could not
+ * be pressed. It is a decision, so it is placed where a decision is read: over
+ * the middle of the messages, centred on them, kept there as the panel
+ * changes size (the keyboard, a rotation, the rail being dragged). */
+function placeMessageRequestCard() {
+  const bar = document.getElementById('chatRequestBar');
+  const panel = document.getElementById('chatMessages');
+  if (!bar || !panel || bar.classList.contains('hidden')) return;
+  const host = bar.offsetParent || document.body;
+  const hostBox = host.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const width = Math.max(220, Math.min(480, box.width - 32));
+  bar.style.width = `${Math.round(width)}px`;
+  bar.style.left = `${Math.round(box.left - hostBox.left + (host.scrollLeft || 0) + box.width / 2)}px`;
+  bar.style.top = `${Math.round(box.top - hostBox.top + (host.scrollTop || 0) + box.height / 2)}px`;
+  bar.style.maxHeight = `${Math.round(Math.max(160, box.height - 24))}px`;
+}
+let messageRequestCardObserver = null;
+function keepMessageRequestCardPlaced() {
+  if (messageRequestCardObserver) return;
+  const panel = document.getElementById('chatMessages');
+  if (!panel) return;
+  if (typeof ResizeObserver === 'function') {
+    messageRequestCardObserver = new ResizeObserver(() => placeMessageRequestCard());
+    messageRequestCardObserver.observe(panel);
+  }
+  window.addEventListener('resize', placeMessageRequestCard, { passive: true });
+  window.visualViewport?.addEventListener('resize', placeMessageRequestCard, { passive: true });
+}
+
 function renderMessageRequestBar(peer) {
   const thread = document.querySelector('.chat-thread');
   let bar = document.getElementById('chatRequestBar');
@@ -145,9 +179,9 @@ function renderMessageRequestBar(peer) {
     bar.id = 'chatRequestBar';
     bar.className = 'chat-request-bar';
     bar.setAttribute('role', 'region');
-    const composer = document.querySelector('.chat-composer-bar');
-    if (composer?.parentNode) composer.parentNode.insertBefore(bar, composer);
-    else thread?.appendChild(bar);
+    bar.setAttribute('aria-label', t('درخواست پیام', 'Message request'));
+    (thread || document.body).appendChild(bar);
+    keepMessageRequestCardPlaced();
     bar.addEventListener('click', (event) => {
       const action = event.target.closest?.('[data-request-action]')?.dataset.requestAction;
       const current = activePeer();
@@ -178,6 +212,7 @@ function renderMessageRequestBar(peer) {
       `"${by}", who is not in your contacts, added you to this group. Until you accept, it makes no sound, its files are not shown and its calls do not ring.`,
     );
     bar.classList.remove('hidden');
+    placeMessageRequestCard();
     return;
   }
   const name = peer.username || peer.name || t('این شخص', 'This person');
@@ -193,6 +228,7 @@ function renderMessageRequestBar(peer) {
     `"${name}" is not in your contacts. Until you accept, they get no read receipts, their files are not shown and their calls do not ring. Replying accepts them.`,
   );
   bar.classList.remove('hidden');
+  placeMessageRequestCard();
 }
 
 /* What a file, voice note or sticker from a request looks like until it is

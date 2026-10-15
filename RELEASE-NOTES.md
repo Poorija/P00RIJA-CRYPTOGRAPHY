@@ -1,3 +1,47 @@
+# P00RIJA Cryptography 2.98.42
+
+Version 2.98.42 · build chat-v135
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## درخواست پیام و کارت مخاطب · Message requests and contact cards
+
+- **درخواست پیام**: پیامِ کسی که در مخاطبان شما نیست، قبلاً اعلانی بالای کادر پیام
+  داشت که دکمه‌هایش نصفه می‌ماند و نمی‌شد «پذیرفتن»، «مسدود کردن» یا «حذف» را زد.
+  حالا این اعلان کارتی وسط پیام‌هاست، روی گوشی و دسکتاپ، با همهٔ دکمه‌ها کامل و
+  در دسترس.
+- **کارت مخاطب کامل شد**: کارتی که در چت می‌فرستید حالا علاوه بر نام، شناسه،
+  اثرانگشت و کلید، آدرس رلهٔ آن شخص (آدرس، شناسه و کلید رله) را هم دارد. قبلاً
+  مخاطبی را که روی سرور دیگری بود از روی کارت اضافه می‌کردید، ولی پیام‌ها به او
+  نمی‌رسید. عکس پروفایل هم واضح‌تر شده و دوباره کشیده می‌شود، پس هیچ متادیتایی
+  همراهش نمی‌رود. کارتی که بیرون از برنامه به اشتراک می‌گذارید (کارت متنی، JSON و
+  متن ساده) هم حالا آدرس رله را دارد؛ کارت متنی و JSON عکس را هم دارند.
+- **امنیت**: کارتی که اثرانگشتش با کلیدش جور نباشد دیگر پذیرفته نمی‌شود، چه از چت
+  آمده باشد، چه چسبانده یا اسکن شده باشد. چنین کارتی می‌توانست مقایسهٔ شمارهٔ امنیتی
+  را رد کند، در حالی که پیام‌ها برای کلید شخص دیگری رمز می‌شدند. کلید مخاطبی که از
+  کارت اضافه می‌شود هم مثل بقیه ثبت و تثبیت می‌شود.
+
+- **Message requests**: a message from someone not in your contacts came with a
+  notice above the message box whose buttons were cut in half, so Accept, Block,
+  and Delete could not be pressed. The notice is now a card in the middle of the
+  messages, on phones and desktops, with every button whole and reachable.
+- **Complete contact cards**: a card sent in a chat now carries the person's relay
+  (address, id, and key) besides the name, id, fingerprint, and key. Before, a
+  contact on the other server could be added from a card but never reached. The
+  photograph is sharper and redrawn, so no metadata goes with it. A card shared
+  outside the app (text card, JSON, plain text) names the relay too, and the text
+  card and the JSON carry the photograph.
+- **Security**: a card whose fingerprint does not belong to its key is refused,
+  whether it came in a chat, was pasted, or was scanned. Such a card could pass a
+  safety-number comparison while messages were sealed to someone else's key. A
+  contact added from a card has their key pinned like any other.
+
+---
+
 # P00RIJA Cryptography 2.98.41
 
 Version 2.98.41 · build chat-v134

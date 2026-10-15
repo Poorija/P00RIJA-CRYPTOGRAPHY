@@ -877,11 +877,40 @@ console.error('Fatal showChatIdentityQr:', error);
 notify(t('خطا در نمایش QR: ', 'Error showing QR: ') + (error.message || 'Unknown'), 'error');
 }
 }
-function addIdentityAsConversation(identity, { startSession = true } = {}) {
+/* A card's fingerprint against its own key.
+ *
+ * The fingerprint is what the safety number is computed from; the key is what
+ * every message is sealed to. A card naming one person's fingerprint beside
+ * another key would pass a safety-number comparison with the real person while
+ * the other key's holder read everything — and cards were taken as they came,
+ * pasted, scanned or forwarded. The fingerprint is now worked out from the key:
+ * a card that names a different one is refused, one that names none gets the
+ * right one. A card with no key (an id typed by hand) has nothing to check. */
+async function checkedIdentity(identity) {
+  if (!identity) return { ok: false, identity: null };
+  const publicKeyData = String(identity.publicKeyData || '');
+  if (!publicKeyData) return { ok: true, identity };
+  let computed = '';
+  try {
+    computed = await sha256Hex(app().base64ToArrayBuffer(publicKeyData));
+  } catch (_error) {
+    return { ok: false, identity: null };
+  }
+  const claimed = String(identity.fingerprint || '').toLowerCase();
+  if (claimed && claimed !== computed) return { ok: false, identity: null };
+  return { ok: true, identity: { ...identity, fingerprint: computed } };
+}
+async function addIdentityAsConversation(identity, { startSession = true } = {}) {
 if (!identity?.peerId && !identity?.fingerprint) {
 notify(t('هویت چت معتبر نیست.', 'Invalid chat identity.'), 'warning');
 return null;
 }
+const checked = await checkedIdentity(identity);
+if (!checked.ok) {
+notify(t('اثرانگشت این کارت با کلیدش جور نیست؛ اضافه نشد.', "This card's fingerprint does not match its key, so it was not added."), 'error');
+return null;
+}
+identity = checked.identity;
 const record = mergePeerRecord({
 clientId: identity.peerId || identity.fingerprint,
 peerId: identity.peerId || identity.fingerprint,
@@ -1028,14 +1057,14 @@ if (cameras.length < 2) return;
 scanner.cameraIndex = (scanner.cameraIndex + 1) % cameras.length;
 await scanChatIdentityQr(cameras[scanner.cameraIndex].deviceId);
 });
-modal.querySelector('[data-chat-manual-submit]')?.addEventListener('click', () => {
+modal.querySelector('[data-chat-manual-submit]')?.addEventListener('click', async () => {
 const raw = modal.querySelector('[data-chat-manual-json]')?.value || '';
 const parsed = parseIdentityText(raw) || {
 peerId: modal.querySelector('[data-chat-manual-peer]')?.value.trim(),
 fingerprint: modal.querySelector('[data-chat-manual-key]')?.value.trim(),
 name: '',
 };
-if (addIdentityAsConversation(parsed)) closeStartChatModal();
+if (await addIdentityAsConversation(parsed)) closeStartChatModal();
 });
 modal.querySelector('[data-chat-qr-torch]')?.addEventListener('click', () => toggleQrTorch());
 modal.querySelector('[data-chat-qr-file-btn]')?.addEventListener('click', () => modal.querySelector('[data-chat-qr-file]')?.click());
@@ -1067,11 +1096,11 @@ if (!parsed) {
 notify(t('هویت معتبری در کلیپ‌بورد پیدا نشد.', 'No valid identity was found in clipboard.'), 'warning');
 return;
 }
-if (addIdentityAsConversation(parsed)) closeStartChatModal();
+if (await addIdentityAsConversation(parsed)) closeStartChatModal();
 } catch (error) {
 const fallback = await PoorijaDialogs.prompt(t('خواندن کلیپ‌بورد ناموفق بود. هویت کامل را دستی وارد کنید:', 'Clipboard access failed. Paste the full identity manually:')) || '';
 const parsed = parseIdentityText(fallback);
-if (parsed && addIdentityAsConversation(parsed)) closeStartChatModal();
+if (parsed && await addIdentityAsConversation(parsed)) closeStartChatModal();
 else notify(t('خواندن کلیپ‌بورد ناموفق بود.', 'Could not read clipboard.'), 'error');
 }
 }
@@ -1079,7 +1108,7 @@ async function handleScannedIdentity(rawValue) {
 const parsed = parseIdentityText(rawValue);
 if (!parsed) return false;
 stopQrScanner();
-if (addIdentityAsConversation(parsed)) closeStartChatModal();
+if (await addIdentityAsConversation(parsed)) closeStartChatModal();
 return true;
 }
 function stopQrScanner() {
