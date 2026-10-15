@@ -483,6 +483,9 @@ function shouldShowConversation(record) {
 if (!record) return false;
 if (record.system || record.type) return true;
 const key = getConversationKey(record);
+/* Deleted, with the contact kept: off the list until something new is said,
+   or until the person is opened again. */
+if (record.chatClearedAt && !conversationHistory(record).length && chatState.activeConversationId !== key) return false;
 /* Somebody known only from a group's member cards is a member of that group,
    not a conversation: a session key minted to write to them in the group
    does not make them one. They appear once there is something between them
@@ -521,10 +524,52 @@ if (!key) return false;
 const record = findPeerByAnyKey(key) || conversationRecordById(key);
 return isConversationBlocked(record);
 }
+/* Blocking is a decision about a person, kept apart from their contact record:
+   the record goes when the contact is deleted, and the decision must not go
+   with it — deleting a blocked person's conversation used to unblock them.
+   Their identifiers only, in the encrypted store. */
+const CHAT_BLOCKLIST_STORAGE_KEY = 'poorija_chat_blocklist';
+function blocklist() {
+if (!chatState.blocklist) {
+const stored = loadEncrypted(CHAT_BLOCKLIST_STORAGE_KEY, null);
+chatState.blocklist = stored && typeof stored === 'object' ? stored : {};
+/* Blocks made before the list existed live only on their records. */
+if (!stored) {
+const at = new Date().toISOString();
+(chatState.peers || []).filter((peer) => peer?.blocked && !peer.type).forEach((peer) => {
+blockNames(peer).forEach((name) => { chatState.blocklist[name] = at; });
+});
+if (Object.keys(chatState.blocklist).length) saveEncrypted(CHAT_BLOCKLIST_STORAGE_KEY, chatState.blocklist);
+}
+}
+return chatState.blocklist;
+}
+function blockNames(record) {
+return [record?.fingerprint, record?.trustedFingerprint, record?.peerId, record?.clientId].filter(Boolean).map(String);
+}
+function isBlocklisted(record) {
+const list = blocklist();
+return blockNames(record).some((name) => Boolean(list[name]));
+}
+function rememberBlocked(record) {
+const list = blocklist();
+const at = new Date().toISOString();
+blockNames(record).forEach((name) => { list[name] = at; });
+saveEncrypted(CHAT_BLOCKLIST_STORAGE_KEY, list);
+}
+function forgetBlocked(record) {
+const list = blocklist();
+blockNames(record).forEach((name) => { delete list[name]; });
+saveEncrypted(CHAT_BLOCKLIST_STORAGE_KEY, list);
+}
 function toggleConversationBlock(conversationId) {
 const record = conversationRecordById(conversationId);
 if (!record) return;
 record.blocked = !record.blocked;
+if (!record.type) {
+if (record.blocked) rememberBlocked(record);
+else forgetBlocked(record);
+}
 if (record.blocked) {
 /* A blocked chat should also stop making noise and stop taking up room. */
 record.muted = true;

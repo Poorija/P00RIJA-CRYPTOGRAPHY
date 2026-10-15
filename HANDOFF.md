@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.42**
+نسخهٔ این پکیج: **2.98.43**
 
 </div>
 
@@ -533,7 +533,7 @@ privileged `nsenter` container, the same root the docker socket already is.
 `--status`, `--once` and `--renew-now` run through `docker exec`.
 `tests/e2e/certkeeper.mjs` runs it in the real image.
 
-**Avatars travel on the signed profile card only** (2.98.42). There are four
+**Avatars travel on the signed profile card only** (2.98.43). There are four
 rules:
 - `cleanAvatarImage` (34-sheets-profile-clocks.js) redraws every chosen picture
   to a JPEG of at most 640 px. A canvas export carries no EXIF, which makes it the
@@ -547,6 +547,22 @@ rules:
   versions (`profileVersion`). An empty photo or status on a believed card means
   "removed". A reply to `pleaseReply` never goes by transit to this device's own
   relay. `tests/e2e/profilesync.mjs` covers all of it on two real relays.
+
+**Deleting a conversation** (2.98.43) goes through
+`purgeConversationEverywhere(id, { contact, group, fromSibling, before })` in
+29-file-transfer.js. It is local and tells the other person nothing.
+- `contact: 'keep'` is the default from the dialog: the record stays, with
+  `chatClearedAt` hiding the empty conversation in `shouldShowConversation`.
+- `contact: 'remove'` (the default for the lockout) moves a block onto the
+  encrypted block list (`rememberBlocked`, 23-export-import.js). `mergePeerRecord`
+  applies that list when the relay lists the person again.
+- Deletions reach the account's other devices as a `deletions` device-sync bundle,
+  live and first in every delta (44-device-beacon.js). `applySiblingDeletion`
+  only removes what is older than `deletedAt`, and only once.
+- Hashed graves (`poorija_chat_deleted`) stop a sibling's stale history, calls, or
+  contacts from being merged back.
+- `tests/e2e/deleteconversation.mjs` covers it. Phase two (a key per
+  conversation) is planned in `docs/plans/2026-10-15-conversation-keys.md`.
 
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted

@@ -245,7 +245,17 @@ async function sendLiveUpdate(share, fields, { final = false } = {}) {
 
 /* ---- stopping ---------------------------------------------------------------- */
 
-function stopLiveLocation(shareId, reason = 'stopped') {
+/* Every share going to a conversation that is being deleted, ended without
+   the closing update: the deletion is this device's business, and the other
+   side hears nothing about it. Their card ends on its own when its time runs
+   out. */
+function stopLiveSharesFor(names) {
+  for (const share of Array.from(liveShares.values())) {
+    if (share?.key && names.has(share.key)) stopLiveLocation(share.id, 'deleted', { silent: true });
+  }
+}
+
+function stopLiveLocation(shareId, reason = 'stopped', { silent = false } = {}) {
   const share = liveShares.get(shareId);
   if (share) {
     if (share.watchId !== null) { try { navigator.geolocation.clearWatch(share.watchId); } catch (_error) { /* gone */ } }
@@ -254,6 +264,7 @@ function stopLiveLocation(shareId, reason = 'stopped') {
     if (share.heartbeatTimer) window.clearInterval(share.heartbeatTimer);
     liveShares.delete(shareId);
   }
+  if (silent) return Boolean(share);
   const key = share?.key || Object.keys(chatState.history || {}).find((k) => findLiveEntry(k, shareId));
   const entry = key ? findLiveEntry(key, shareId) : null;
   const rich = entry ? richPayloadOf(entry) : null;

@@ -545,16 +545,45 @@ createdAt: new Date().toISOString(),
 }
 /* Everything one conversation or one group leaves behind.
  *
- * deleteActiveConversation() did this for whatever was on screen, behind a
- * confirm. The lockout needs the same destruction with no question asked and
- * for a conversation that is not the open one, so the work lives here and both
- * call it. Nothing is duplicated, which matters: a second copy of a deletion
- * routine is how a wipe ends up leaving the session keys behind.
+ * deleteActiveConversation() does this for whatever is on screen, behind a
+ * question; the lockout does it with no question for a conversation that is
+ * not the open one; a sibling device does it when this account deleted the
+ * conversation on another machine. The work lives here once, because a second
+ * copy of a deletion routine is how a wipe ends up leaving the session keys
+ * behind.
+ *
+ * Local, always: nothing here is sent to the other person and nothing of theirs
+ * changes. What goes is everything this device holds about the conversation —
+ * the messages, the files, the drafts, the session keys on disk and the live
+ * session in memory with its open channel, the call log with them, the
+ * conversation's lock, its unread mark, a live location still being shared.
+ *
+ *   contact: 'keep'   the default for "delete conversation": the person stays a
+ *                     contact — accepted, blocked or muted as before, verified
+ *                     as before — and the empty conversation leaves the list
+ *                     until something new arrives. Deleting a conversation used
+ *                     to delete the contact too, which quietly turned them into
+ *                     a stranger: their calls stopped ringing, their receipts
+ *                     stopped, and a blocked person was unblocked.
+ *   contact: 'remove' the person goes as well, with what belongs to them alone
+ *                     (the verified mark, the TURN and path memory). A block
+ *                     outlives them on the block list.
+ *   group:   'keep'   the history goes and the membership stays;
+ *   group:   'leave'  the history goes and this account leaves the group;
+ *   group:   'remove' the group goes from this device without a word (the
+ *                     lockout: there is nobody to ask).
+ *
+ * The default is the lockout's, the most thorough.
  */
-function purgeConversationEverywhere(conversationId) {
+function purgeConversationEverywhere(conversationId, { contact = 'remove', group = 'remove', fromSibling = false, before = '' } = {}) {
+  /* A deletion made on another device of this account reaches this one later,
+     and what arrived here after that moment was not part of what was deleted. */
+  const beforeMs = before ? (Date.parse(before) || 0) : 0;
+  const entryTime = (entry) => Date.parse(entry?.createdAt || entry?.timestamp || 0) || 0;
   const groups = chatState.spaces?.groups || [];
   const groupIndex = groups.findIndex((space) => space.conversationId === conversationId);
   const isGroup = groupIndex >= 0;
+  const space = isGroup ? groups[groupIndex] : null;
 
   /* Every name this conversation answers to.
    *
@@ -566,7 +595,7 @@ function purgeConversationEverywhere(conversationId) {
    * with it. So every identifier is collected first and everything holding any
    * of them goes. */
   const names = new Set([conversationId]);
-  const records = chatState.peers.filter((p) => {
+  const records = isGroup ? [] : chatState.peers.filter((p) => {
     const key = (() => { try { return getConversationKey(p); } catch (error) { return ''; } })();
     return key === conversationId
       || p.conversationId === conversationId
@@ -575,35 +604,122 @@ function purgeConversationEverywhere(conversationId) {
       || p.fingerprint === conversationId;
   });
   records.forEach((p) => {
-    [p.peerId, p.clientId, p.fingerprint, p.conversationId].forEach((n) => { if (n) names.add(n); });
+    [p.peerId, p.clientId, p.fingerprint, p.conversationId, p.trustedFingerprint].forEach((n) => { if (n) names.add(n); });
     try { const key = getConversationKey(p); if (key) names.add(key); } catch (error) { /* unkeyed */ }
   });
 
+  /* The live session first: its key is in memory and its channel is open, and
+     a deleted conversation must not go on being readable — or writable — over
+     either until the app happens to be restarted. */
+  for (const [sessionKey, session] of Array.from(chatState.sessions || [])) {
+    const owned = [sessionKey, session?.peerId, session?.remoteFingerprint, session?.conversationId].some((n) => n && names.has(n));
+    if (!owned) continue;
+    try { session.connection?.close?.(); } catch (error) { /* already gone */ }
+    if (session) { session.cryptoKey = null; session.connection = null; }
+    chatState.sessions.delete(sessionKey);
+  }
+  /* A live location still going to them stops here, without a last word:
+     nothing about this deletion is announced to the other side. */
+  if (typeof stopLiveSharesFor === 'function') stopLiveSharesFor(names);
+
   names.forEach((name) => {
-    delete chatState.history[name];
-    try { dropConversationMedia(name); } catch (error) { /* nothing stored */ }
+    if (beforeMs && Array.isArray(chatState.history[name])) {
+      const kept = [];
+      for (const entry of chatState.history[name]) {
+        if (entryTime(entry) > beforeMs) kept.push(entry);
+        else if (entry?.id) { try { dropMessageMedia(entry.id); } catch (error) { /* nothing stored */ } }
+      }
+      if (kept.length) chatState.history[name] = kept;
+      else delete chatState.history[name];
+    } else {
+      delete chatState.history[name];
+      try { dropConversationMedia(name); } catch (error) { /* nothing stored */ }
+    }
     try { if (chatState.drafts) delete chatState.drafts[name]; } catch (error) { /* no drafts */ }
+    try { if (chatState.manualUnread) delete chatState.manualUnread[name]; } catch (error) { /* no flags */ }
     /* The session key under every name it might be filed under. */
     if (chatState.sessionKeys && chatState.sessionKeys[name] !== undefined) {
       delete chatState.sessionKeys[name];
     }
+    try { if (typeof dropConversationLockRecord === 'function') dropConversationLockRecord(name); } catch (error) { /* no lock */ }
   });
+  try { saveChatDrafts(); } catch (error) { /* nothing to persist to */ }
+  /* The call log with them is part of what was said. */
+  const callsBefore = (chatState.calls || []).length;
+  chatState.calls = (chatState.calls || []).filter((call) => ![call?.peerId, call?.fingerprint, call?.conversationId, call?.spaceId]
+    .some((n) => n && names.has(n)) || (beforeMs && entryTime(call) > beforeMs));
+  if (chatState.calls.length !== callsBefore) {
+    try { saveCalls(); } catch (error) { /* nothing to persist to */ }
+  }
+  /* Frames still waiting for an answer about this conversation. */
+  for (const [tag, pending] of Array.from(chatState.pendingRelayTags || [])) {
+    if (pending && names.has(pending.conversationKey)) chatState.pendingRelayTags.delete(tag);
+  }
+  for (const [tag, pending] of Array.from(chatState.pendingTransit || [])) {
+    if (pending && names.has(pending.peerId)) chatState.pendingTransit.delete(tag);
+  }
 
   if (isGroup) {
-    groups.splice(groupIndex, 1);
-    saveSpaces();
+    if (group === 'leave' && typeof leaveSpace === 'function') {
+      leaveSpace(space);
+    } else if (group === 'remove') {
+      groups.splice(groupIndex, 1);
+      saveSpaces();
+    }
   }
   if (records.length) {
-    records.forEach((p) => {
-      const index = chatState.peers.indexOf(p);
-      if (index >= 0) chatState.peers.splice(index, 1);
-    });
+    if (contact === 'keep') {
+      /* Still a contact, no longer a conversation: off the list until there is
+         something in it again, and not pinned or archived in the meantime. */
+      const clearedAt = new Date().toISOString();
+      records.forEach((p) => {
+        p.chatClearedAt = clearedAt;
+        p.pinned = false;
+        p.pinOrder = 0;
+        p.archived = false;
+      });
+    } else {
+      records.forEach((p) => {
+        /* A block is this account's decision about a person, not part of the
+           conversation, so it outlives the contact. */
+        if (p.blocked && typeof rememberBlocked === 'function') rememberBlocked(p);
+        [p.fingerprint, p.trustedFingerprint].forEach((fp) => {
+          if (fp && typeof isPeerVerified === 'function' && isPeerVerified(fp)) setPeerVerified(fp, false);
+        });
+        const index = chatState.peers.indexOf(p);
+        if (index >= 0) chatState.peers.splice(index, 1);
+      });
+      /* What this device learnt about reaching them. */
+      let prefsChanged = false;
+      ['turnChoices', 'pathChoices'].forEach((field) => {
+        const memory = chatState.prefs?.[field];
+        if (!memory || typeof memory !== 'object') return;
+        names.forEach((name) => {
+          if (memory[name] !== undefined) { delete memory[name]; prefsChanged = true; }
+        });
+      });
+      if (prefsChanged) {
+        try { saveChatPrefs(); } catch (error) { /* nothing to persist to */ }
+      }
+    }
     saveContacts();
   }
   try { saveEncrypted(CHAT_SESSION_KEYS_STORAGE_KEY, chatState.sessionKeys); }
   catch (error) { /* nothing to persist to */ }
 
-  storeHistory();
+  storeHistory({ immediate: true });
+  /* Remembered as gone, so a sibling's next sync does not bring the old
+     messages back — and told to those siblings, unless that is where the
+     deletion came from. */
+  const deletion = {
+    names: Array.from(names),
+    contact: isGroup ? 'keep' : contact,
+    group: isGroup ? group : '',
+    deletedAt: before || new Date().toISOString(),
+  };
+  if (typeof noteConversationDeleted === 'function') {
+    noteConversationDeleted(deletion, { announce: !fromSibling }).catch((error) => console.warn('[Chat] noting a deletion failed:', error));
+  }
   if (names.has(chatState.activeConversationId) || names.has(chatState.activePeerClientId)) {
     chatState.activePeerClientId = '';
     chatState.activeConversationId = '';
@@ -622,20 +738,31 @@ const key = getConversationKey(conversation);
 const isGroup = conversation.type === 'group';
 const label = conversation.username || conversation.name || conversation.peerId || key;
 /* PoorijaDialogs, not window.confirm: the native desktop shell has no window
-   dialogs, so confirm() there returns false without showing anything and the
-   button did nothing at all. A group speaks with the group's words: the
-   action clears the group's history on this device, and the question says
-   exactly that rather than borrowing the one-to-one phrasing. */
-const ok = await PoorijaDialogs.confirm(
-isGroup
-? t(`تاریخچه گروه «${label}» حذف شود؟`, `Delete the history of the group "${label}"?`)
-: t(`گفتگوی «${label}» کامل حذف شود؟`, `Delete the whole "${label}" conversation?`),
-{ danger: true });
-if (!ok) return;
-purgeConversationEverywhere(conversation.conversationId || key);
+   dialogs, so confirm() there returns false without showing anything. The
+   question says what goes and what does not: the conversation, on every
+   device of this account; nothing on the other person's side. */
+const choice = isGroup
+? await PoorijaDialogs.choose(
+t(`تاریخچهٔ گروه «${label}» از همهٔ دستگاه‌های شما پاک شود؟ برای بقیهٔ اعضا چیزی پاک نمی‌شود.`,
+  `Delete the history of "${label}" from all your devices? Nothing is deleted for the other members.`),
+[
+{ value: 'keep', label: t('پاک کردن تاریخچه — در گروه می‌مانید', 'Delete the history - stay in the group') },
+{ value: 'leave', label: t('پاک کردن تاریخچه و خروج از گروه', 'Delete the history and leave the group') },
+],
+{ cancelLabel: t('انصراف', 'Cancel') })
+: await PoorijaDialogs.choose(
+t(`گفتگوی «${label}» از همهٔ دستگاه‌های شما پاک شود؟ پیام‌ها، فایل‌ها، تماس‌ها و کلیدهای این گفتگو حذف می‌شوند؛ برای «${label}» چیزی پاک نمی‌شود و خبری هم به او نمی‌رسد.`,
+  `Delete the conversation with "${label}" from all your devices? Its messages, files, calls and keys go; nothing is deleted for "${label}", and they are not told.`),
+[
+{ value: 'keep', label: t('حذف گفتگو — مخاطب می‌ماند', 'Delete the conversation - keep the contact') },
+{ value: 'remove', label: t('حذف گفتگو و مخاطب', 'Delete the conversation and the contact') },
+],
+{ cancelLabel: t('انصراف', 'Cancel') });
+if (!choice) return;
+purgeConversationEverywhere(conversation.conversationId || key, isGroup ? { group: choice } : { contact: choice });
 notify(isGroup
-? t('تاریخچه گروه حذف شد.', 'Group history deleted.')
-: t('گفتگو حذف شد.', 'Conversation deleted.'), 'success');
+? (choice === 'leave' ? t('تاریخچه پاک شد و از گروه خارج شدید.', 'History deleted, and you left the group.') : t('تاریخچه گروه حذف شد.', 'Group history deleted.'))
+: (choice === 'remove' ? t('گفتگو و مخاطب حذف شدند.', 'Conversation and contact deleted.') : t('گفتگو حذف شد.', 'Conversation deleted.')), 'success');
 }
 // Arrival now acks 'delivered' and nothing more. Read is a separate question:
 // the old test was `activeTab === 'chat' && !document.hidden`, which claimed a

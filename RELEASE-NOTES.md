@@ -1,3 +1,57 @@
+# P00RIJA Cryptography 2.98.43
+
+Version 2.98.43 · build chat-v136
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## حذف گفتگو · Deleting a conversation
+
+- **پاک‌سازی کامل روی دستگاه شما**: پیام‌ها، فایل‌ها، پیش‌نویس، کلیدهای جلسه روی
+  دیسک، جلسهٔ زندهٔ در حافظه و کانال مستقیمش، تاریخچهٔ تماس با آن شخص، قفل آن گفتگو
+  و علامت «خوانده‌نشده» همه پاک می‌شوند. اگر هنگام حذف موقعیت زنده می‌فرستادید،
+  همان لحظه بی‌صدا متوقف می‌شود.
+- **برای طرف مقابل هیچ اتفاقی نمی‌افتد**: چیزی از او پاک نمی‌شود و هیچ پیامی هم
+  به او نمی‌رسد.
+- **مخاطب می‌ماند**: حذف گفتگو دیگر مخاطب را حذف نمی‌کند. او همچنان مخاطب شماست
+  و تأییدشده، مسدودشده یا بی‌صدا هم می‌ماند؛ تماس‌هایش زنگ می‌زند و فقط گفتگوی
+  خالی از فهرست کنار می‌رود. قبلاً حذف گفتگو او را غریبه می‌کرد: تماسش زنگ نمی‌زد
+  و اگر مسدود بود، از مسدودی درمی‌آمد. اگر بخواهید، می‌توانید «حذف گفتگو و مخاطب»
+  را انتخاب کنید؛ در این حالت هم کسی که مسدود کرده‌اید مسدود می‌ماند.
+- **همهٔ دستگاه‌های شما**: حذف به دستگاه‌های دیگر خودتان هم می‌رسد، و همگام‌سازی
+  بعدی دیگر پیام‌های حذف‌شده را برنمی‌گرداند. پیام‌هایی که بعد از لحظهٔ حذف رسیده‌اند
+  می‌مانند.
+- **گروه**: می‌توانید فقط تاریخچه را پاک کنید و در گروه بمانید، یا تاریخچه را پاک
+  کنید و از گروه خارج شوید.
+- **مرحلهٔ بعد**: کلید جداگانه برای هر گفتگو، تا حذف از نظر رمزنگاری هم کامل باشد.
+  نقشهٔ آن در `docs/plans/2026-10-15-conversation-keys.md` است.
+
+- **A complete wipe on your device**: the messages, files, draft, session keys on
+  disk, the live session in memory with its direct channel, the call log with that
+  person, the conversation's lock, and its unread mark all go. A live location
+  being shared stops at once, silently.
+- **Nothing happens to the other person**: nothing of theirs is deleted, and
+  nothing is sent to them.
+- **The contact stays**: deleting a conversation no longer deletes the contact.
+  They stay a contact, and stay verified, blocked, or muted as before; their
+  calls ring, and only the empty conversation leaves the list. Before, deleting
+  the conversation made them a stranger: their calls stopped ringing, and a
+  blocked person was unblocked. You can choose "Delete the conversation and the
+  contact" instead, and someone you blocked stays blocked.
+- **All your devices**: the deletion reaches your other devices, and the next
+  sync no longer brings deleted messages back. Messages that arrived after the
+  moment of deletion stay.
+- **Groups**: delete only the history and stay in the group, or delete it and
+  leave.
+- **Next**: a separate key for every conversation, so that deletion is complete
+  cryptographically too. The plan is in
+  `docs/plans/2026-10-15-conversation-keys.md`.
+
+---
+
 # P00RIJA Cryptography 2.98.42
 
 Version 2.98.42 · build chat-v135

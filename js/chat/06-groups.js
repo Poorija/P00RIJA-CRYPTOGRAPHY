@@ -385,6 +385,21 @@ async function leaveActiveSpace() {
         'You created this group. Leaving removes it from this device. Continue?')
     : t('از این گروه خارج می‌شوید؟', 'Leave this group?');
   if (!await PoorijaDialogs.confirm(question)) return;
+  leaveSpace(space);
+  chatState.activeConversationId = '';
+  chatState.activePeerClientId = '';
+  closeSpaceInfoPanel();
+  renderPeers();
+  renderActivePeer();
+  renderMessages();
+  notify(t('از گروه خارج شدید.', 'You left the group.'), 'success');
+}
+
+/* Leaving, without the question: the members are told, and this device's copy
+   goes. Also how "delete the history and leave" leaves
+   (purgeConversationEverywhere), which has asked already. */
+function leaveSpace(space) {
+  if (!space) return;
   const myKeys = [...localMembershipKeys()];
   const members = (space.members || []).filter((key) => !myKeys.includes(key));
   const admins = (space.admins || []).filter((key) => !myKeys.includes(key));
@@ -414,13 +429,6 @@ async function leaveActiveSpace() {
   dropConversationMedia(space.conversationId);
   saveSpaces();
   storeHistory({ immediate: true });
-  chatState.activeConversationId = '';
-  chatState.activePeerClientId = '';
-  closeSpaceInfoPanel();
-  renderPeers();
-  renderActivePeer();
-  renderMessages();
-  notify(t('از گروه خارج شدید.', 'You left the group.'), 'success');
 }
 
 /* ---------------- the info panel ----------------------------------- */

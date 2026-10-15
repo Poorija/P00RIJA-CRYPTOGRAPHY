@@ -2499,6 +2499,116 @@ return false;
 }
 }
 
+/* ------------------------------------------------------------------
+ * Deleted conversations, across this account's own devices.
+ *
+ * A conversation deleted on one device used to stay on the others, and the
+ * next sync between them brought it straight back to the one it was deleted
+ * on. Now a deletion travels to the siblings — at once to the ones that are
+ * here, and with every delta to the ones that come back later — and each
+ * device remembers what it deleted, so nothing older than the deletion is
+ * merged back in.
+ *
+ * What is remembered is as little as will do. The graves are hashes of the
+ * names a conversation answered to, with the moment it was deleted, kept for
+ * half a year. The log a sibling is told from holds the names themselves (a
+ * sibling has to find the conversation), for thirty days. Both are in the
+ * encrypted store. Nothing of this goes to the other person.
+ * ------------------------------------------------------------------ */
+const CHAT_DELETED_STORAGE_KEY = 'poorija_chat_deleted';
+const DELETION_GRAVE_KEEP_MS = 180 * 24 * 60 * 60 * 1000;
+const DELETION_LOG_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+function deletionStore() {
+  if (!chatState.deletions) {
+    const stored = loadEncrypted(CHAT_DELETED_STORAGE_KEY, null) || {};
+    const now = Date.now();
+    const keep = (at, ms) => now - (Date.parse(at || 0) || 0) < ms;
+    const prune = (map) => Object.fromEntries(Object.entries(map && typeof map === 'object' ? map : {})
+      .filter(([, at]) => keep(at, DELETION_GRAVE_KEEP_MS)));
+    chatState.deletions = {
+      graves: prune(stored.graves),
+      contactGraves: prune(stored.contactGraves),
+      log: (Array.isArray(stored.log) ? stored.log : []).filter((entry) => keep(entry?.deletedAt, DELETION_LOG_KEEP_MS)),
+    };
+  }
+  return chatState.deletions;
+}
+function saveDeletionStore() {
+  saveEncrypted(CHAT_DELETED_STORAGE_KEY, deletionStore());
+}
+function graveHash(name) {
+  return sha256Hex(new TextEncoder().encode(`poorija-deleted:${String(name || '')}`));
+}
+/* The moment the conversation answering to any of these names was last
+   deleted on this device, or 0. */
+async function graveTime(names, { contact = false } = {}) {
+  const store = deletionStore();
+  const map = contact ? store.contactGraves : store.graves;
+  let latest = 0;
+  for (const name of names) {
+    if (!name) continue;
+    const at = Date.parse(map[await graveHash(name)] || 0) || 0;
+    if (at > latest) latest = at;
+  }
+  return latest;
+}
+async function noteConversationDeleted(deletion, { announce = true } = {}) {
+  if (!deletion?.names?.length) return;
+  const store = deletionStore();
+  for (const name of deletion.names) {
+    const hash = await graveHash(name);
+    if (!store.graves[hash] || store.graves[hash] < deletion.deletedAt) store.graves[hash] = deletion.deletedAt;
+    if (deletion.contact === 'remove') store.contactGraves[hash] = deletion.deletedAt;
+  }
+  /* Every device keeps the log, not only the one it happened on: whichever
+     sibling is here when a third comes back is the one that tells it. */
+  if (!store.log.some((entry) => entry.deletedAt === deletion.deletedAt && entry.names?.[0] === deletion.names[0])) {
+    store.log.push({ names: deletion.names, contact: deletion.contact, group: deletion.group, deletedAt: deletion.deletedAt });
+    store.log = store.log.slice(-200);
+  }
+  saveDeletionStore();
+  if (!announce || !chatState.identity?.fingerprint) return;
+  /* The siblings that are here hear it now; the rest hear it with their next
+     delta (serveDeltaRequest), from the log above. */
+  try {
+    const envelope = await sealDeviceSyncBundle({ deletions: [deletion] });
+    sendRelayEnvelope({ fingerprint: chatState.identity.fingerprint }, envelope);
+  } catch (error) {
+    console.warn('[Chat] telling the other devices about a deletion failed:', error?.message || error);
+  }
+}
+function recentDeletions() {
+  return deletionStore().log.map((entry) => ({ ...entry }));
+}
+/* One deletion made on a sibling, done here — once, and only to what this
+   device held before that moment. */
+async function applySiblingDeletion(deletion) {
+  const names = Array.isArray(deletion?.names) ? deletion.names.map(String).filter(Boolean).slice(0, 16) : [];
+  const deletedAt = String(deletion?.deletedAt || '');
+  if (!names.length || !Date.parse(deletedAt)) return false;
+  if (await graveTime(names) >= Date.parse(deletedAt)) return false;
+  const contact = deletion.contact === 'remove' ? 'remove' : 'keep';
+  /* "Leave" was announced to the group by the device that left; here the
+     group only has to go. */
+  const group = deletion.group === 'keep' ? 'keep' : 'remove';
+  const done = new Set();
+  let applied = false;
+  for (const name of names) {
+    if (done.has(name)) continue;
+    const present = chatState.history[name]
+      || (chatState.spaces?.groups || []).some((space) => space.conversationId === name)
+      || (chatState.peers || []).some((peer) => [peer.peerId, peer.clientId, peer.fingerprint, peer.conversationId].includes(name));
+    if (!present) continue;
+    purgeConversationEverywhere(name, { contact, group, fromSibling: true, before: deletedAt });
+    names.forEach((n) => done.add(n));
+    applied = true;
+  }
+  /* Remembered even when there was nothing here, so a third device's copy
+     cannot bring it back either. */
+  if (!applied) await noteConversationDeleted({ names, contact, group: deletion.group || '', deletedAt }, { announce: false });
+  return applied;
+}
+
 async function sealDeviceSyncBundle(bundle) {
 const rawKey = app().generateSecureRandomBytes(32);
 const key = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, true, ['encrypt']);
@@ -2594,8 +2704,20 @@ list.splice(0, Math.max(0, list.length - 2000));
 
 async function mergeDeviceSyncBundle(bundle) {
 let changed = false;
+/* Deletions first, so whatever else this bundle carries is weighed against
+   them. */
+if (Array.isArray(bundle?.deletions)) {
+for (const deletion of bundle.deletions.slice(0, 200)) {
+if (await applySiblingDeletion(deletion)) changed = true;
+}
+}
 if (bundle?.conversation && Array.isArray(bundle.entries)) {
-for (const entry of bundle.entries) {
+/* Nothing older than this device's deletion of the conversation comes back. */
+const deletedAt = await graveTime([bundle.conversation]);
+const entries = deletedAt
+? bundle.entries.filter((entry) => (Date.parse(entry?.createdAt || entry?.timestamp || 0) || 0) > deletedAt)
+: bundle.entries;
+for (const entry of entries) {
 /* Inline media arrives as bytes; land it in this device's vault the
    way received media lands, so it survives a reload like any other
    attachment. */
@@ -2622,6 +2744,8 @@ renderMessages();
 	let callsChanged = false;
 	for (const call of bundle.calls) {
 	if (!call?.id || known.has(call.id)) continue;
+	const deletedAt = await graveTime([call.peerId, call.fingerprint, call.conversationId, call.spaceId]);
+	if (deletedAt && (Date.parse(call.createdAt || 0) || 0) <= deletedAt) continue;
 	chatState.calls.push(call);
 	callsChanged = true;
 	}
@@ -2642,6 +2766,9 @@ renderMessages();
 	for (const contact of bundle.contacts) {
 	const record = normalizePeerRecord(contact);
 	if (!record.peerId || byPeerId.has(record.peerId)) continue;
+	/* A contact this account deleted is not added back by a sibling that has
+	   not heard yet. */
+	if (await graveTime([record.peerId, record.fingerprint], { contact: true })) continue;
 	if (record.fingerprint && byFingerprint.has(record.fingerprint)) continue;
 	/* Marked so isStoredContact keeps it: nothing here has spoken to them
 	   yet, but this account has, on another machine. */

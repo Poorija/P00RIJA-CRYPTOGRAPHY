@@ -337,6 +337,10 @@ for (const [address, entry] of encryptedStoreCache) {
   if (!entry.dirty) encryptedStoreCache.delete(address);
 }
 unreadableChatStores.clear();
+/* Loaded on first use from the profile now open; a duress profile must not
+   inherit the real one's. */
+chatState.blocklist = null;
+chatState.deletions = null;
 const savedProfile = loadEncrypted(CHAT_PROFILE_STORAGE_KEY, null);
 if (savedProfile) {
 chatState.profile = { ...chatState.profile, ...savedProfile };

@@ -277,6 +277,10 @@ async function serveDeltaRequest(request) {
   const cursors = request.cursors && typeof request.cursors === 'object' ? request.cursors : {};
   const includeFiles = typeof deviceSyncFilesEnabled === 'function' && deviceSyncFilesEnabled();
   const bundles = [];
+  /* What this account deleted lately goes first: a sibling that was away
+     deletes it too before it hears anything else. */
+  const deletions = typeof recentDeletions === 'function' ? recentDeletions() : [];
+  if (deletions.length) bundles.push({ deletions, toDeviceId: requester });
   for (const [key, entries] of Object.entries(chatState.history || {})) {
     if (!key || key === 'system' || !Array.isArray(entries) || !entries.length) continue;
     const cursor = Number(cursors[key] || 0);

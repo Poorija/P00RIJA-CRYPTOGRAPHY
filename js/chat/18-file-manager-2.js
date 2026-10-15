@@ -137,6 +137,10 @@ mood: String(peer.mood || '').slice(0, 40),
    (their card's version). Kept so an older card arriving late, even after a
    reload, cannot put back what they replaced. */
 profileVersion: String(peer.profileVersion || '').slice(0, 40),
+/* When this account deleted the conversation and kept the contact: the
+   conversation stays off the list until there is something in it again
+   (shouldShowConversation). */
+chatClearedAt: String(peer.chatClearedAt || ''),
 conversationId: isReservedConversationKey(peer.conversationId) ? '' : (peer.conversationId || ''),
 /* Kept with its provenance rather than flattened to an address: the merge
    below has to know which channel it came on to decide whether it may
@@ -434,6 +438,7 @@ avatarData: options.profile
 ? (String(options.profile.avatarData || '') === '' ? '' : (normalized.avatarData || existing.avatarData))
 : (normalized.avatarData || existing.avatarData),
 profileVersion: existing.profileVersion || normalized.profileVersion || '',
+chatClearedAt: peer.chatClearedAt !== undefined ? String(peer.chatClearedAt || '') : (existing.chatClearedAt || ''),
 /* Ranked, not overwritten. A record arriving without one -- an identity card
    pasted by hand, a hello from an older build -- must not blank what a card
    established, which is the same mistake the prekey fields above had. */
@@ -528,6 +533,9 @@ trustedAt: normalized.trustedAt || (normalized.publicKeyData ? new Date().toISOS
 keyChangeWasVerified: false,
 /* Nor does it arrive already accepted: that is this person's answer to give. */
 accepted: false,
+/* Somebody this account blocked and then deleted is still blocked when the
+   relay lists them again (rememberBlocked). */
+blocked: Boolean(normalized.blocked) || (typeof isBlocklisted === 'function' && isBlocklisted(normalized)),
 };
 chatState.peers.push(record);
 /* The same key meeting us again after its contact was deleted is the real

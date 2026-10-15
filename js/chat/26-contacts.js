@@ -242,6 +242,8 @@ async function removeContactRecord(peerId) {
     `Remove "${name}" from the address book? The conversation history is left alone.`));
   if (!ok) return;
   revokeTrustedKey(peer);
+  /* Removing somebody is not unblocking them. */
+  if (peer.blocked && typeof rememberBlocked === 'function') rememberBlocked(peer);
   chatState.peers = (chatState.peers || []).filter((record) => record.peerId !== peerId);
   saveContacts();
   renderPeers();
