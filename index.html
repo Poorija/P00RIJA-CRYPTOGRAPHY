@@ -153,8 +153,8 @@ font-display: swap;
 <script defer src="vendor/otpauth/otpauth.umd.min.js"></script>
 <script defer src="vendor/hash-wasm/argon2.umd.min.js"></script>
 <script defer src="vendor/jszip/jszip.min.js"></script>
-<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.98.46-chat-v139">
-<link rel="stylesheet" href="css/styles.css?v=2.98.46-chat-v139">
+<link rel="stylesheet" href="vendor/tailwind/tailwind.generated.css?v=2.98.47-chat-v140">
+<link rel="stylesheet" href="css/styles.css?v=2.98.47-chat-v140">
 <script>
     (function() {
         window.loadDeferredFonts = function() {
@@ -2719,6 +2719,7 @@ FA / EN
 <input id="chatFileInput" type="file" multiple class="hidden">
 <input id="chatGalleryInput" type="file" accept="image/*,video/*" multiple class="hidden">
 <input id="chatGroupAvatarInput" type="file" accept="image/*,.heic,.heif,.dng" class="hidden">
+<input id="chatGifInput" type="file" multiple class="hidden" accept="image/gif,.gif">
 <input id="chatStickerInput" type="file" multiple class="hidden" accept="image/*,video/*,application/zip,application/x-zip-compressed,application/gzip,application/octet-stream,.webp,.png,.gif,.jpg,.jpeg,.avif,.svg,.webm,.tgs,.zip,.wastickers">
 <div id="chatRecordingOverlay" class="hidden chat-recording-overlay">
 <div id="chatRecordingLive" class="chat-recording-live">
@@ -2787,12 +2788,30 @@ FA / EN
 
 <div id="chatStickerPanel" class="chat-sticker-panel hidden">
 <div class="chat-sticker-panel-head">
-<span class="chat-sticker-panel-title" data-i18n="stickers">استیکرها</span>
+<!-- Two shelves in one panel: the sticker packs, and the saved GIFs
+     (js/chat/55-gifs-and-keyboard-stickers.js). -->
+<div class="chat-sticker-shelves" role="tablist">
+<button type="button" class="chat-sticker-shelf is-active" data-chat-panel-shelf="stickers" role="tab" aria-selected="true"><i class="fas fa-face-smile"></i><span data-i18n="stickers">استیکرها</span></button>
+<button type="button" class="chat-sticker-shelf" data-chat-panel-shelf="gifs" role="tab" aria-selected="false"><i class="fas fa-photo-film"></i><span data-i18n="gifs">گیف</span></button>
+</div>
 <div class="chat-sticker-panel-actions">
+<button id="chatGifImportBtn" type="button" class="chat-sticker-head-btn hidden" data-i18n-title="importGifs" title="وارد کردن گیف"><i class="fas fa-file-import"></i></button>
 <button id="chatStickerImportBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="importStickers" title="وارد کردن استیکر"><i class="fas fa-file-import"></i></button>
 <button id="chatStickerManageBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="manageStickers" title="مدیریت پک‌ها"><i class="fas fa-sliders"></i></button>
 <button id="chatStickerPacksBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="managePacks" title="مدیریت پک‌ها" onclick="openPackManager()"><i class="fas fa-layer-group"></i></button>
 <button id="chatStickerCloseBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="close" title="بستن"><i class="fas fa-xmark"></i></button>
+</div>
+</div>
+<!-- The keyboard box. The message box is a <textarea>, and a phone keyboard
+     will not put a sticker, a Memoji, a Genmoji or a GIF into a box that
+     only holds text. This one is rich, so the keyboard offers them; whatever
+     lands in it is sent and the box empties again. Shown on touch screens,
+     where those keyboards are. -->
+<div class="chat-keyboard-catcher-row">
+<i class="fas fa-keyboard" aria-hidden="true"></i>
+<div class="chat-keyboard-catcher-field">
+<div id="chatKeyboardCatcher" class="chat-keyboard-catcher" contenteditable="true" role="textbox" aria-multiline="false" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" data-i18n-aria-label="keyboardCatcherLabel" aria-label="استیکر یا گیف از کیبورد"></div>
+<span class="chat-keyboard-catcher-hint" aria-hidden="true" data-i18n="keyboardCatcherHint">این‌جا بزنید، بعد استیکر یا گیف را از کیبورد انتخاب یا پیست کنید</span>
 </div>
 </div>
 <!-- Outside the grid on purpose: the grid is a CSS grid of sticker cells,
@@ -2807,6 +2826,7 @@ FA / EN
 <button id="chatComposerPlusBtn" type="button" class="chat-plus-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title="composerActions" title="گزینه‌های پیام"><i class="fas fa-plus"></i></button>
 <div id="chatComposerActions" class="chat-actions-sheet hidden" role="menu" aria-labelledby="chatComposerPlusBtn">
 <button id="chatStickerBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" aria-expanded="false" data-i18n-title="stickers" title="استیکرها"><i class="fas fa-face-smile"></i><span data-i18n="stickers">استیکرها</span></button>
+<button id="chatGifBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="gifs" title="گیف"><i class="fas fa-photo-film"></i><span data-i18n="gifs">گیف</span></button>
 <button id="chatPollBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="createPoll" title="نظرسنجی"><i class="fas fa-square-poll-vertical"></i><span data-i18n="createPoll">نظرسنجی</span></button>
 <button id="chatLocationBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="shareLocation" title="ارسال موقعیت"><i class="fas fa-location-dot"></i><span data-i18n="shareLocation">ارسال موقعیت</span></button>
 <button id="chatLiveLocationBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="shareLiveLocation" title="موقعیت زنده"><i class="fas fa-location-crosshairs"></i><span data-i18n="shareLiveLocation">موقعیت زنده</span></button>
@@ -5224,65 +5244,65 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 </div>
 </div>
 </div>
-<script defer src="vendor/peerjs/peerjs.min.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/crypto-core.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/vault-profiles.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/screen-guard.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/stego.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/qr-kit.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/tools-extra.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/local-link.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/local-mesh.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/local-room.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/crypto-config.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/dialogs.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/desktop-bridge.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/metadata.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/voice-changer.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/help-content.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/games.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/relay-hints.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/image-formats.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/update-check.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/app.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/ssh-keys.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/advanced-crypto.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/backup.js?v=2.98.46-chat-v139"></script>
+<script defer src="vendor/peerjs/peerjs.min.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/crypto-core.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/vault-profiles.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/screen-guard.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/stego.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/qr-kit.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/tools-extra.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/local-link.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/local-mesh.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/local-room.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/crypto-config.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/dialogs.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/desktop-bridge.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/metadata.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/voice-changer.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/help-content.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/games.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/relay-hints.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/image-formats.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/update-check.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/app.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/ssh-keys.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/advanced-crypto.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/backup.js?v=2.98.47-chat-v140"></script>
 <!-- Secure Chat: one file split into ordered parts. `defer` keeps them in
      document order, which is the order they depend on. See js/chat/README.md. -->
-<script defer src="js/chat/01-constants.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/02-media-vault.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/03-call-screen.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/04-call-layout.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/05-structured-messages.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/06-groups.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/07-conversation-lock.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/08-global-search.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/09-the-emoji-key.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/10-selection.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/11-group-permissions.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/12-group-call-mesh.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/13-group-call-stage.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/14-group-call-roster.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/15-group-call-render.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/16-group-call-signalling.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/17-file-manager.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/18-file-manager-2.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/19-forward-secrecy.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/20-call-rows.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/21-chat-list-filters.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/22-drafts.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/23-export-import.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/24-settings-panels.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/25-call-log.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/26-contacts.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/27-message-render.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/28-offline-envelopes.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/29-file-transfer.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/30-file-transfer-2.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/31-file-transfer-3.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/32-file-transfer-4.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/33-rail-header.js?v=2.98.46-chat-v139"></script>
+<script defer src="js/chat/01-constants.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/02-media-vault.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/03-call-screen.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/04-call-layout.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/05-structured-messages.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/06-groups.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/07-conversation-lock.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/08-global-search.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/09-the-emoji-key.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/10-selection.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/11-group-permissions.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/12-group-call-mesh.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/13-group-call-stage.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/14-group-call-roster.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/15-group-call-render.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/16-group-call-signalling.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/17-file-manager.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/18-file-manager-2.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/19-forward-secrecy.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/20-call-rows.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/21-chat-list-filters.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/22-drafts.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/23-export-import.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/24-settings-panels.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/25-call-log.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/26-contacts.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/27-message-render.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/28-offline-envelopes.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/29-file-transfer.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/30-file-transfer-2.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/31-file-transfer-3.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/32-file-transfer-4.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/33-rail-header.js?v=2.98.47-chat-v140"></script>
 <!-- Carrying a message through a messenger that works but is watched. The
      pieces were always here; what was missing was a way to use them without
      knowing they were here. See js/chat/38-carrier.js. -->
@@ -5327,26 +5347,27 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 </section>
 </div>
 </div>
-<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/37-chat-tools.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/38-carrier.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/39-relay-call.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/40-route-finder.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/41-member-cards.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/42-path-manager.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/43-relay-link.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/44-device-beacon.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/45-text-format.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/46-saved-messages.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/47-scheduled-send.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/48-key-verify.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/49-message-requests.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/50-live-location.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/51-envelope-privacy.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/52-relay-mirrors.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/53-native-proxy.js?v=2.98.46-chat-v139"></script>
-<script defer src="js/chat/54-link-preview.js?v=2.98.46-chat-v139"></script>
+<script defer src="js/chat/34-sheets-profile-clocks.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/35-sheets-profile-clocks-2.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/36-sheets-profile-clocks-3.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/37-chat-tools.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/38-carrier.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/39-relay-call.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/40-route-finder.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/41-member-cards.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/42-path-manager.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/43-relay-link.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/44-device-beacon.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/45-text-format.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/46-saved-messages.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/47-scheduled-send.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/48-key-verify.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/49-message-requests.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/50-live-location.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/51-envelope-privacy.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/52-relay-mirrors.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/53-native-proxy.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/54-link-preview.js?v=2.98.47-chat-v140"></script>
+<script defer src="js/chat/55-gifs-and-keyboard-stickers.js?v=2.98.47-chat-v140"></script>
 </body>
 </html>

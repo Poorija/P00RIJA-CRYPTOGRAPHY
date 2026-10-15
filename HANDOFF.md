@@ -9,7 +9,7 @@
 و کدام تله‌ها قبلاً وقت گرفته‌اند. `README.md` نصب و بیلد نیتیو را پوشش می‌دهد؛
 اینجا تکرارش نمی‌کنم.
 
-نسخهٔ این پکیج: **2.98.46**
+نسخهٔ این پکیج: **2.98.47**
 
 </div>
 
@@ -563,6 +563,25 @@ rules:
   contacts from being merged back.
 - `tests/e2e/deleteconversation.mjs` covers it. Phase two (a key per
   conversation) is planned in `docs/plans/2026-10-15-conversation-keys.md`.
+
+**A phone keyboard will not put a picture into a `<textarea>`** (2.98.47,
+`js/chat/55-gifs-and-keyboard-stickers.js`). The message box is a textarea,
+and both engines decide from the focused field whether a keyboard sticker,
+Memoji, Genmoji or GIF may go in. Chrome on Android asks whether the field is
+rich: `-webkit-user-modify: read-write` on the textarea is enough (the inner
+editor stays plain text — typing, Enter, `insertText` and undo are unchanged,
+measured), and the picture then arrives as a paste with the file in it. Chrome
+still keeps this behind `chrome://flags/#enable-android-media-insertion` on
+phones. WebKit reads the inner editor, which is plain text whatever the page
+sets, so on an iPhone the sticker panel carries a small contenteditable — the
+keyboard box — and whatever the keyboard writes there (a paste, or an `<img>`
+put straight into the box) is read back and sent. Do not turn the composer
+itself into a contenteditable to fix this: forty call sites read `.value` and
+`selectionStart`. A GIF is a sticker with `stickerKind: 'gif'` so an older
+client still draws it moving; the saved GIFs are one record (`GIF_LIBRARY_ID`)
+in the sticker store's `packs`, lifted out by `loadStickerPacks()`, because a
+new object store would bump the database version and `js/backup.js` restores
+into version 1.
 
 **Global localStorage keys.** A key read on the lock screen must be in
 `GLOBAL_KEYS` in `js/vault-profiles.js`, or it is namespaced into an encrypted

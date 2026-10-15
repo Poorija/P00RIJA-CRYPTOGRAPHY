@@ -505,6 +505,10 @@ peers: [],
    payload by the relay handler, never persisted. Family, not contacts. */
 linkedDevices: [],
 stickerPacks: [],
+/* The saved GIFs: one record in the sticker store, lifted out of the pack
+   list by loadStickerPacks() (55-gifs-and-keyboard-stickers.js). */
+gifLibrary: null,
+stickerPanelMode: 'stickers',
 stickerActivePackId: '',
 stickerManageMode: false,
 stickerUrls: new Map(),

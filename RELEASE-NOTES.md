@@ -1,10 +1,66 @@
-# P00RIJA Cryptography 2.98.46
+# P00RIJA Cryptography 2.98.47
 
-Version 2.98.46 · build chat-v139
+Version 2.98.47 · build chat-v140
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## گیف و استیکرهای کیبورد · GIFs and keyboard stickers
+
+- **پیست کنید، فرستاده می‌شود**: گیف یا استیکری که از هر جایی کپی شده باشد — با
+  «کپی تصویر» مرورگر، یا استیکری که در پیام‌رسان دیگری کپی شده — با پیست در کادر
+  پیام همان لحظه فرستاده می‌شود. کشیدن و رها کردن فایل روی کادر پیام هم همین کار
+  را می‌کند. برای عکس بزرگ اول می‌پرسد که به‌صورت عکس برود یا استیکر؛ متن، و کپی
+  از سند و جدول، مثل قبل به‌صورت متن پیست می‌شوند.
+- **از کیبورد گوشی**: روی اندروید، کیبوردهایی مثل Gboard حالا می‌توانند گیف و
+  استیکر را مستقیم در کادر پیام بگذارند (Chrome اندروید هنوز این قابلیت را پشت
+  پرچم `chrome://flags/#enable-android-media-insertion` نگه داشته است). روی آیفون
+  و آیپد کیبورد استیکر را در کادر پیام نمی‌گذارد؛ برای همین پنل استیکر یک «کادر
+  کیبورد» دارد: رویش بزنید، از بخش استیکرهای کیبورد ایموجی یک استیکر، Memoji یا
+  Genmoji انتخاب کنید، یا گیفی را پیست کنید، و فرستاده می‌شود.
+- **گیف به شکل خودش**: گیف در گفتگو با نسبت ابعاد خودش، گوشه‌های گرد و برچسب کوچک
+  GIF نشان داده می‌شود، نه به شکل مربع استیکر. نسخه‌های قدیمی‌تر برنامه هم آن را
+  متحرک می‌بینند.
+- **قفسهٔ گیف**: پنل استیکر حالا دو قفسه دارد: «استیکرها» و «گیف». گیفی را که در
+  گفتگو آمده با نشانک رویش نگه دارید یا فایل .gif وارد کنید، و بعد با یک ضربه
+  دوباره بفرستید. ردیف «گیف» در منوی + مستقیم همین قفسه را باز می‌کند. نشانک روی
+  استیکرِ دریافتی هم آن را به «استیکرهای من» اضافه می‌کند. گیف‌های ذخیره‌شده در
+  پشتیبان کامل خزانه هم هستند.
+- **چیزی از اینترنت گرفته نمی‌شود**: همه‌چیز مثل استیکرها رمزنگاری سرتاسری می‌شود
+  و از همان مسیر می‌رود؛ اگر چیزی که پیست شده فقط آدرس تصویری در اینترنت باشد،
+  برنامه آن را باز نمی‌کند.
+- **Paste it and it is sent**: a GIF or a sticker copied from anywhere — a
+  browser's "Copy image", or a sticker copied in another messenger — is sent
+  the moment it is pasted into the message box. Dropping the file on the
+  message box does the same. A large photo asks first whether it should go as
+  a photo or a sticker; text, and copies from documents and spreadsheets,
+  still paste as text.
+- **From the phone's keyboard**: on Android, keyboards such as Gboard can now
+  put GIFs and stickers straight into the message box (Chrome on Android still
+  keeps this behind `chrome://flags/#enable-android-media-insertion`). On
+  iPhone and iPad the keyboard will not put a sticker into the message box, so
+  the sticker panel has a keyboard box: tap it, pick a sticker, Memoji or
+  Genmoji from the emoji keyboard's stickers, or paste a GIF, and it is sent.
+- **GIFs in their own shape**: a GIF shows at its own aspect ratio, with
+  rounded corners and a small GIF mark, rather than as a square sticker. Older
+  versions of the app still see it move.
+- **A GIF shelf**: the sticker panel now has two shelves, Stickers and GIF.
+  Keep a GIF somebody sent with the bookmark on it, or import .gif files, then
+  send it again with one tap. The GIF row in the + menu opens this shelf
+  directly. The bookmark on a received sticker adds it to "My stickers". Saved
+  GIFs are part of the full vault backup.
+- **Nothing is fetched from the internet**: everything is end-to-end encrypted
+  and travels the way stickers do; a paste that only names a picture by its
+  web address is not followed.
+
+---
+
+# P00RIJA Cryptography 2.98.46
+
+Version 2.98.46 · build chat-v139
 
 ---
 

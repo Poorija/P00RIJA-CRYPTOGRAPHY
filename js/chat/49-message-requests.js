@@ -236,6 +236,7 @@ function renderMessageRequestBar(peer) {
 function requestMaskedBubble(entry, bubbleClassName) {
   const label = entry.type === 'voice'
     ? t('پیام صوتی', 'Voice message')
+    : isGifEntry(entry) ? t('گیف', 'GIF')
     : entry.type === 'sticker' ? t('استیکر', 'Sticker') : t('فایل', 'File');
   return `
 <div class="${bubbleClassName}" data-id="${app().escapeHTML(String(entry.id || ''))}">

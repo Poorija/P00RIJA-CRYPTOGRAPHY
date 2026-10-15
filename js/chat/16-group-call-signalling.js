@@ -211,6 +211,21 @@ const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
 const STICKER_ARCHIVE_EXT = /\.(zip|wastickers)$/i;
 const LOTTIE_SCRIPT_URL = 'vendor/lottie/lottie_light.min.js';
+/* The saved-GIF library (55-gifs-and-keyboard-stickers.js) is one record in
+   the packs store under this id, so a vault backup carries it with the packs
+   and the database keeps its version: js/backup.js restores into version 1,
+   and a new object store would have made every restore fail with a version
+   error. loadStickerPacks() lifts it out before anything counts packs. */
+const GIF_LIBRARY_ID = '__gif_library__';
+
+/* A GIF travels as a sticker whose kind is 'gif'. A client that predates GIFs
+   draws a sticker's picture with an <img>, which animates a GIF by itself, so
+   it still sees the GIF move rather than a file card with a download button.
+   It also puts GIFs under the group's "stickers" permission, the same pairing
+   other messengers use ("stickers and GIFs"). */
+function isGifEntry(entry) {
+  return Boolean(entry) && entry.type === 'sticker' && entry.stickerKind === 'gif';
+}
 
 let stickerDbPromise = null;
 
@@ -281,6 +296,7 @@ function richEntryLabel(entry = {}) {
 function mediaEntryLabel(entry = {}) {
   if (entry.type === 'rich') return richEntryLabel(entry);
   if (entry.type === 'stickerpack') return `🗂 ${t('پک استیکر', 'Sticker pack')}${entry.packTitle ? `: ${entry.packTitle}` : ''}`;
+  if (isGifEntry(entry)) return `🎞 ${t('گیف', 'GIF')}`;
   if (entry.type === 'sticker') return `${entry.stickerEmoji || '🩹'} ${t('استیکر', 'Sticker')}`.trim();
   if (entry.type === 'voice') return t('پیام صوتی', 'Voice message');
   if (entry.type === 'file') return entry.name || t('فایل', 'File');
@@ -289,6 +305,7 @@ function mediaEntryLabel(entry = {}) {
 }
 function transferBannerLabel(kind, fileName) {
   if (kind === 'voice') return t('در حال ارسال پیام صوتی…', 'Sending voice message…');
+  if (kind === 'sticker' && /\.gif$/i.test(fileName || '')) return t('در حال ارسال گیف…', 'Sending GIF…');
   if (kind === 'sticker') return t('در حال ارسال استیکر…', 'Sending sticker…');
   if (kind === 'stickerpack') return t('در حال ارسال پک استیکر…', 'Sending sticker pack…');
   return t(`در حال ارسال ${fileName}…`, `Sending ${fileName}…`);
@@ -350,13 +367,18 @@ function rememberActiveStickerPack(packId) {
 async function loadStickerPacks() {
   try {
     const packs = await stickerDbGetAllPacks();
+    /* The GIF library shares the store but is not a pack: it never shows as
+       a tab, never counts toward the pack limit, and the manager never lists
+       it. Lifted out here, before anything else sees the list. */
+    chatState.gifLibrary = (packs || []).find((pack) => pack.id === GIF_LIBRARY_ID) || null;
     /* An explicit order when one has been set, and arrival order for packs
        imported before there was such a thing -- so an install that predates
        the manager opens looking exactly as it did. */
-    chatState.stickerPacks = (packs || []).sort(stickerPackOrder);
+    chatState.stickerPacks = (packs || []).filter((pack) => pack.id !== GIF_LIBRARY_ID).sort(stickerPackOrder);
   } catch (error) {
     console.warn('[Stickers] load failed', error);
     chatState.stickerPacks = [];
+    chatState.gifLibrary = null;
   }
   let remembered = '';
   try { remembered = localStorage.getItem(STICKER_ACTIVE_PACK_KEY) || ''; } catch (_error) { remembered = ''; }
@@ -1176,6 +1198,14 @@ function renderStickerPanel() {
   const grid = document.getElementById('chatStickerGrid');
   const tabs = document.getElementById('chatStickerTabs');
   if (!grid || !tabs) return;
+  /* One panel, two shelves: the GIF shelf draws itself (55-gifs-and-keyboard-
+     stickers.js). Everything that redraws the sticker shelf calls this, so
+     the switch lives here rather than at every caller. */
+  if (typeof syncStickerPanelShelf === 'function') syncStickerPanelShelf();
+  if (chatState.stickerPanelMode === 'gifs' && typeof renderGifShelf === 'function') {
+    renderGifShelf();
+    return;
+  }
   const packs = orderedStickerPacks();
   /* Leaving the manage view ends the pick: a tick that survives into the
      sticker grid and reappears weeks later is a question with no answer. */
@@ -1327,7 +1357,7 @@ window.__stickerProbe = {
   },
 };
 
-function setStickerPanelVisible(visible) {
+function setStickerPanelVisible(visible, { shelf = 'stickers' } = {}) {
   const panel = document.getElementById('chatStickerPanel');
   if (!panel) return;
   const button = document.getElementById('chatStickerBtn');
@@ -1337,6 +1367,9 @@ function setStickerPanelVisible(visible) {
   document.getElementById('chatStickerManageBtn')?.classList.remove('is-active');
   if (visible) {
     chatState.stickerManageMode = false;
+    /* Opened from the Stickers row it opens on stickers, from the GIF row on
+       GIFs: the row somebody tapped is the shelf they meant. */
+    chatState.stickerPanelMode = shelf === 'gifs' ? 'gifs' : 'stickers';
     renderStickerPanel();
   }
   /* Opening the panel shortens the thread pane, which leaves the scroll offset
@@ -1522,9 +1555,12 @@ async function renderStorageCard() {
   );
   const packCount = chatState.stickerPacks.reduce((sum, pack) => sum + pack.stickers.length, 0);
   const soundBytes = chatState.customSounds.reduce((sum, sound) => sum + (sound.blob?.size || 0), 0);
+  const savedGifs = chatState.gifLibrary?.stickers || [];
+  const gifBytes = savedGifs.reduce((sum, record) => sum + (record.blob?.size || 0), 0);
   const rows = [
     [t('پیوست پیام‌ها', 'Message attachments'), `${media.count} ${t('مورد', 'items')} · ${formatVaultBytes(media.bytes)}`],
     [t('استیکرها', 'Stickers'), `${chatState.stickerPacks.length} ${t('پک', 'packs')} / ${packCount} ${t('استیکر', 'stickers')} · ${formatVaultBytes(packBytes)}`],
+    [t('گیف‌های ذخیره‌شده', 'Saved GIFs'), `${savedGifs.length} ${t('مورد', 'items')} · ${formatVaultBytes(gifBytes)}`],
     [t('صداهای دلخواه', 'Custom sounds'), `${chatState.customSounds.length} ${t('مورد', 'items')} · ${formatVaultBytes(soundBytes)}`],
   ];
   if (media.oldest) {

@@ -643,7 +643,7 @@ entry.name,
 entry.type === 'call-log' ? callHistoryText(entry) : '',
 entry.type === 'voice' ? t('پیام صوتی', 'Voice message') : '',
 entry.type === 'file' ? t('فایل', 'File') : '',
-entry.type === 'sticker' ? t('استیکر', 'Sticker') : '',
+entry.type === 'sticker' ? (isGifEntry(entry) ? t('گیف GIF', 'GIF') : t('استیکر', 'Sticker')) : '',
 entry.type === 'rich' ? richEntryLabel(entry) : '',
 ].filter(Boolean).join(' ');
 }
