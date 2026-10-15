@@ -242,6 +242,13 @@ const editButton = (entry.direction === 'out' && entry.type === 'text') ? `
 <button type="button" data-chat-edit-message="${eid(entry.id)}" class="chat-message-icon-btn" title="${app().escapeHTML(t('ویرایش', 'Edit'))}">
 <i class="fas fa-pen"></i>
 </button>` : '';
+/* Keeping a sticker or a GIF somebody sent, to send it on later: a GIF goes
+   to the saved GIFs, a sticker to "My stickers" (55-gifs-and-keyboard-
+   stickers.js). Only while the picture is on this device to keep. */
+const keepButton = (entry.type === 'sticker' && entry.downloadUrl) ? `
+<button type="button" data-chat-keep-sticker="${eid(entry.id)}" class="chat-message-icon-btn" title="${app().escapeHTML(isGifEntry(entry) ? t('ذخیره در گیف‌ها', 'Save to GIFs') : t('افزودن به استیکرهای من', 'Add to my stickers'))}">
+<i class="fas fa-bookmark"></i>
+</button>` : '';
 const senderLabel = messageSenderLabel(entry, peer);
 const senderHtml = senderLabel
 ? `<div class="chat-message-sender">${messageSenderAvatar(entry, peer)}<span>${app().escapeHTML(senderLabel)}</span></div>`
@@ -268,6 +275,7 @@ ${canReactToEntry ? `<button type="button" data-chat-toggle-reaction="${eid(entr
 <i class="fas fa-reply"></i>
 </button>
 ${editButton}
+${keepButton}
 <button type="button" data-chat-copy-message="${eid(entry.id)}" class="chat-message-icon-btn" title="${app().escapeHTML(t('کپی', 'Copy'))}">
 <i class="far fa-copy"></i>
 </button>
@@ -468,13 +476,19 @@ if (entry.type === 'sticker') {
    name, no download button — just the artwork on a transparent bubble, the
    way every other messenger draws it. */
 const stickerKind = entry.stickerKind || stickerKindForName(entry.name || '', entry.mime || '');
+/* A GIF is drawn as a sticker that keeps its own shape: the picture at its
+   real aspect ratio with rounded corners and a small "GIF" mark, rather than
+   a square stamp. */
+const gif = isGifEntry(entry);
 return `
-<div class="${bubbleClass(entry)} chat-sticker-bubble" data-id="${eid(entry.id)}">
+<div class="${bubbleClass(entry)} chat-sticker-bubble${gif ? ' is-gif' : ''}" data-id="${eid(entry.id)}">
 ${senderHtml}
 ${replyPreview}
 <div class="chat-sticker-body">${entry.downloadUrl
-? stickerMediaHtml(safeMediaUrl(entry.downloadUrl) || 'about:blank', stickerKind, 'chat-sticker-media')
-: missingMediaHtml(t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'))}</div>
+? stickerMediaHtml(safeMediaUrl(entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media')
+: missingMediaHtml(gif
+? t('این گیف روی این دستگاه ذخیره نشده است.', 'This GIF is not stored on this device.')
+: t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'))}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
 ${reactionToolbar}
 ${meta}
 </div>
@@ -1018,6 +1032,15 @@ event.stopPropagation();
 const entry = (chatState.history[conversationKey] || []).find((item) => item.id === button.dataset.chatAdoptPack);
 button.disabled = true;
 await adoptSharedStickerPack(entry);
+};
+});
+panel.querySelectorAll('[data-chat-keep-sticker]').forEach((button) => {
+button.onclick = async (event) => {
+event.stopPropagation();
+const entry = (chatState.history[conversationKey] || []).find((item) => item.id === button.dataset.chatKeepSticker);
+if (!entry || typeof keepStickerFromMessage !== 'function') return;
+button.disabled = true;
+try { await keepStickerFromMessage(entry); } finally { button.disabled = false; }
 };
 });
 panel.querySelectorAll('[data-chat-delete-message]').forEach((button) => {

@@ -109,7 +109,7 @@ return FSEARCH_MEDIA_TYPES.has(String(entry?.type || ''));
 function fsearchEntryLabel(entry) {
 if (entry?.type === 'voice') return t('پیام صوتی', 'Voice message');
 if (entry?.type === 'file') return entry.name || t('فایل', 'File');
-if (entry?.type === 'sticker') return t('استیکر', 'Sticker');
+if (entry?.type === 'sticker') return isGifEntry(entry) ? t('گیف', 'GIF') : t('استیکر', 'Sticker');
 if (entry?.type === 'rich') return richEntryLabel(entry);
 if (entry?.type === 'call-log') return callHistoryText(entry);
 return entry?.text || '';
