@@ -27637,3 +27637,226 @@ html body .poorija-dialog-cancel.is-primary:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* ============================================================================
+   GIFs, and stickers from the phone's keyboard
+   ----------------------------------------------------------------------------
+   The sticker panel became two shelves (stickers, GIFs) with a switch in its
+   head, and gained a small rich text box — the only kind of box a phone
+   keyboard will drop a sticker, a Genmoji or a GIF into. GIF messages keep
+   their own shape instead of the square sticker stamp. Behaviour lives in
+   js/chat/55-gifs-and-keyboard-stickers.js.
+
+   The head buttons and the pack tabs are drawn by rules with two ids in them,
+   which outrank the plain .hidden utility — so hiding them per shelf has to
+   be said here, at the same weight.
+   ========================================================================== */
+html body #mainApp #content-chat .chat-sticker-head-btn.hidden,
+html body #mainApp #content-chat .chat-sticker-tabs.hidden {
+  display: none !important;
+}
+
+/* ---- the two shelves ---------------------------------------------------- */
+html body #mainApp #content-chat .chat-sticker-shelves {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem;
+  border-radius: 0.7rem;
+  background: rgba(148, 163, 184, 0.12);
+  min-width: 0;
+}
+html body #mainApp #content-chat .chat-sticker-shelf {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 1.75rem;
+  padding: 0 0.65rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--app-muted, #94a3b8);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html body #mainApp #content-chat .chat-sticker-shelf:hover { color: var(--app-text, #e2e8f0); }
+html body #mainApp #content-chat .chat-sticker-shelf.is-active {
+  background: color-mix(in srgb, var(--app-accent, #38bdf8) 22%, transparent);
+  color: var(--app-accent, #38bdf8);
+}
+
+/* ---- the keyboard box --------------------------------------------------- */
+html body #mainApp #content-chat .chat-keyboard-catcher-row {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem 0;
+  color: var(--app-muted, #94a3b8);
+}
+/* Touch screens are where the keyboards with stickers and GIFs are. The row
+   is also shown when a sticker tapped into the message box was lost and the
+   person is sent here (is-wanted). */
+html.touch-device body #mainApp #content-chat .chat-keyboard-catcher-row,
+html body #mainApp #content-chat .chat-keyboard-catcher-row.is-wanted {
+  display: flex;
+}
+html body #mainApp #content-chat .chat-keyboard-catcher-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+html body #mainApp #content-chat .chat-keyboard-catcher {
+  display: block;
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 2.4rem !important;
+  min-height: 0 !important;
+  max-height: 2.4rem !important;
+  padding: 0.55rem 0.75rem;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--app-accent, #38bdf8) 45%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--app-accent, #38bdf8) 6%, transparent);
+  color: var(--app-text, #e2e8f0);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  outline: none;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+html body #mainApp #content-chat .chat-keyboard-catcher:focus {
+  border-style: solid;
+  border-color: var(--app-accent, #38bdf8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #38bdf8) 22%, transparent);
+}
+/* Whatever a keyboard writes in is read back and removed within a frame;
+   until then it must not stretch the box. */
+html body #mainApp #content-chat .chat-keyboard-catcher img {
+  height: 1.3rem;
+  width: auto;
+  vertical-align: middle;
+}
+html body #mainApp #content-chat .chat-keyboard-catcher-hint {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: 0.8rem;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  font-size: 0.74rem;
+  line-height: 1.25;
+  color: var(--app-muted, #94a3b8);
+  pointer-events: none;
+}
+html body #mainApp #content-chat .chat-keyboard-catcher:not(:empty) + .chat-keyboard-catcher-hint {
+  display: none;
+}
+
+/* ---- the GIF shelf ------------------------------------------------------ */
+html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  grid-auto-rows: auto;
+}
+html body #mainApp #content-chat .chat-gif-cell {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.7rem;
+  background: rgba(148, 163, 184, 0.12);
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.15s ease;
+}
+html body #mainApp #content-chat .chat-gif-cell:active { transform: scale(0.96); }
+html body #mainApp #content-chat .chat-gif-cell.is-sending { opacity: 0.45; pointer-events: none; }
+html body #mainApp #content-chat .chat-gif-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+html body #mainApp #content-chat .chat-gif-remove {
+  position: absolute;
+  top: 0.25rem;
+  inset-inline-end: 0.25rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.6);
+  color: #f8fafc;
+  font-size: 0.7rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+html body #mainApp #content-chat .chat-gif-cell:hover .chat-gif-remove,
+html body #mainApp #content-chat .chat-gif-remove:focus-visible { opacity: 1; }
+/* No hover on a phone: the cross is always there, just quieter. */
+@media (hover: none) {
+  html body #mainApp #content-chat .chat-gif-remove { opacity: 0.85; }
+}
+
+/* ---- a GIF in the conversation ------------------------------------------
+   The sticker body is a fixed square; a GIF keeps its own aspect ratio, so
+   the square, its width clamp and its aspect are all restated. */
+html body #mainApp #content-chat .chat-message-bubble.chat-sticker-bubble.is-gif {
+  max-width: min(72%, 17rem) !important;
+}
+html body #mainApp #content-chat .chat-sticker-bubble.is-gif .chat-sticker-body {
+  position: relative;
+  width: min(16rem, 62vw) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+}
+html body #mainApp #content-chat .chat-sticker-bubble.is-gif .chat-gif-media {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 20rem !important;
+  object-fit: cover;
+  border-radius: 0.9rem;
+  background: rgba(148, 163, 184, 0.12);
+}
+html body #mainApp #content-chat .chat-gif-badge {
+  position: absolute;
+  top: 0.4rem;
+  inset-inline-start: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  background: rgba(2, 6, 23, 0.55);
+  color: #f8fafc;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+/* ---- dropping a file on the message box --------------------------------- */
+html body #mainApp #content-chat .chat-composer-surface.is-dropping {
+  outline: 2px dashed var(--app-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+/* ---- Chrome on Android: let the keyboard offer pictures -----------------
+   Chrome offers keyboard images only to a field it treats as rich. This makes
+   the textarea count as one; what is typed stays plain text, because the
+   textarea's own inner editor keeps its plain-text-only rule. */
+html.keyboard-pictures body #mainApp #content-chat #chatComposer {
+  -webkit-user-modify: read-write;
+}

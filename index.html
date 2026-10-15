@@ -2719,6 +2719,7 @@ FA / EN
 <input id="chatFileInput" type="file" multiple class="hidden">
 <input id="chatGalleryInput" type="file" accept="image/*,video/*" multiple class="hidden">
 <input id="chatGroupAvatarInput" type="file" accept="image/*,.heic,.heif,.dng" class="hidden">
+<input id="chatGifInput" type="file" multiple class="hidden" accept="image/gif,.gif">
 <input id="chatStickerInput" type="file" multiple class="hidden" accept="image/*,video/*,application/zip,application/x-zip-compressed,application/gzip,application/octet-stream,.webp,.png,.gif,.jpg,.jpeg,.avif,.svg,.webm,.tgs,.zip,.wastickers">
 <div id="chatRecordingOverlay" class="hidden chat-recording-overlay">
 <div id="chatRecordingLive" class="chat-recording-live">
@@ -2787,12 +2788,30 @@ FA / EN
 
 <div id="chatStickerPanel" class="chat-sticker-panel hidden">
 <div class="chat-sticker-panel-head">
-<span class="chat-sticker-panel-title" data-i18n="stickers">استیکرها</span>
+<!-- Two shelves in one panel: the sticker packs, and the saved GIFs
+     (js/chat/55-gifs-and-keyboard-stickers.js). -->
+<div class="chat-sticker-shelves" role="tablist">
+<button type="button" class="chat-sticker-shelf is-active" data-chat-panel-shelf="stickers" role="tab" aria-selected="true"><i class="fas fa-face-smile"></i><span data-i18n="stickers">استیکرها</span></button>
+<button type="button" class="chat-sticker-shelf" data-chat-panel-shelf="gifs" role="tab" aria-selected="false"><i class="fas fa-photo-film"></i><span data-i18n="gifs">گیف</span></button>
+</div>
 <div class="chat-sticker-panel-actions">
+<button id="chatGifImportBtn" type="button" class="chat-sticker-head-btn hidden" data-i18n-title="importGifs" title="وارد کردن گیف"><i class="fas fa-file-import"></i></button>
 <button id="chatStickerImportBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="importStickers" title="وارد کردن استیکر"><i class="fas fa-file-import"></i></button>
 <button id="chatStickerManageBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="manageStickers" title="مدیریت پک‌ها"><i class="fas fa-sliders"></i></button>
 <button id="chatStickerPacksBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="managePacks" title="مدیریت پک‌ها" onclick="openPackManager()"><i class="fas fa-layer-group"></i></button>
 <button id="chatStickerCloseBtn" type="button" class="chat-sticker-head-btn" data-i18n-title="close" title="بستن"><i class="fas fa-xmark"></i></button>
+</div>
+</div>
+<!-- The keyboard box. The message box is a <textarea>, and a phone keyboard
+     will not put a sticker, a Memoji, a Genmoji or a GIF into a box that
+     only holds text. This one is rich, so the keyboard offers them; whatever
+     lands in it is sent and the box empties again. Shown on touch screens,
+     where those keyboards are. -->
+<div class="chat-keyboard-catcher-row">
+<i class="fas fa-keyboard" aria-hidden="true"></i>
+<div class="chat-keyboard-catcher-field">
+<div id="chatKeyboardCatcher" class="chat-keyboard-catcher" contenteditable="true" role="textbox" aria-multiline="false" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" data-i18n-aria-label="keyboardCatcherLabel" aria-label="استیکر یا گیف از کیبورد"></div>
+<span class="chat-keyboard-catcher-hint" aria-hidden="true" data-i18n="keyboardCatcherHint">این‌جا بزنید، بعد استیکر یا گیف را از کیبورد انتخاب یا پیست کنید</span>
 </div>
 </div>
 <!-- Outside the grid on purpose: the grid is a CSS grid of sticker cells,
@@ -2807,6 +2826,7 @@ FA / EN
 <button id="chatComposerPlusBtn" type="button" class="chat-plus-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title="composerActions" title="گزینه‌های پیام"><i class="fas fa-plus"></i></button>
 <div id="chatComposerActions" class="chat-actions-sheet hidden" role="menu" aria-labelledby="chatComposerPlusBtn">
 <button id="chatStickerBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" aria-expanded="false" data-i18n-title="stickers" title="استیکرها"><i class="fas fa-face-smile"></i><span data-i18n="stickers">استیکرها</span></button>
+<button id="chatGifBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="gifs" title="گیف"><i class="fas fa-photo-film"></i><span data-i18n="gifs">گیف</span></button>
 <button id="chatPollBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="createPoll" title="نظرسنجی"><i class="fas fa-square-poll-vertical"></i><span data-i18n="createPoll">نظرسنجی</span></button>
 <button id="chatLocationBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="shareLocation" title="ارسال موقعیت"><i class="fas fa-location-dot"></i><span data-i18n="shareLocation">ارسال موقعیت</span></button>
 <button id="chatLiveLocationBtn" type="button" class="chat-icon-btn chat-action-row" role="menuitem" data-i18n-title="shareLiveLocation" title="موقعیت زنده"><i class="fas fa-location-crosshairs"></i><span data-i18n="shareLiveLocation">موقعیت زنده</span></button>
@@ -5348,5 +5368,6 @@ class="input-with-leading-icon w-full px-4 py-2 rounded-lg bg-slate-700 border b
 <script defer src="js/chat/52-relay-mirrors.js?v=2.98.46-chat-v139"></script>
 <script defer src="js/chat/53-native-proxy.js?v=2.98.46-chat-v139"></script>
 <script defer src="js/chat/54-link-preview.js?v=2.98.46-chat-v139"></script>
+<script defer src="js/chat/55-gifs-and-keyboard-stickers.js?v=2.98.46-chat-v139"></script>
 </body>
 </html>

@@ -1386,6 +1386,16 @@ const panel = document.getElementById('chatStickerPanel');
 setStickerPanelVisible(Boolean(panel?.classList.contains('hidden')));
 closeComposerActions(true);
 });
+/* The same panel, opened on its GIF shelf (55-gifs-and-keyboard-stickers.js).
+   Bound here, beside the sticker row, for the same reason that row stops the
+   click: the outside-click closer below would shut the panel it just opened. */
+document.getElementById('chatGifBtn')?.addEventListener('click', (event) => {
+event.preventDefault();
+event.stopPropagation();
+if (!guardGroupSend('sendStickers')) return;
+toggleGifShelf();
+closeComposerActions(true);
+});
 document.getElementById('chatStickerCloseBtn')?.addEventListener('click', () => setStickerPanelVisible(false));
 document.getElementById('chatStickerImportBtn')?.addEventListener('click', openStickerImport);
 document.getElementById('chatStickerManageBtn')?.addEventListener('click', () => {

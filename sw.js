@@ -106,6 +106,7 @@ const LAZY_ASSETS = [
   './js/chat/52-relay-mirrors.js',
   './js/chat/53-native-proxy.js',
   './js/chat/54-link-preview.js',
+  './js/chat/55-gifs-and-keyboard-stickers.js',
   './js/dialogs.js',
   './js/desktop-bridge.js',
   './js/metadata.js',
