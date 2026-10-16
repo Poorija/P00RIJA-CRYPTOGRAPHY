@@ -314,11 +314,16 @@ async function serveDeltaRequest(request) {
 /* ---- live mirror --------------------------------------------------------- */
 
 /* A message this device sends appears on the account's other online devices
-   at once, not at the next sync. Batched briefly so a burst is one envelope. */
+   at once, not at the next sync. Batched briefly so a burst is one envelope.
+   So does one that reached this device down a live channel (`incoming`): the
+   channel runs between two devices, not two accounts, so a contact's message
+   on it arrives here and nowhere else. One that came through the relay is not
+   handed on — the relay delivered it to every device already. */
 const mirrorQueue = new Map();
 let mirrorTimer = null;
-function mirrorToSiblings(conversationKey, entry) {
-  if (!conversationKey || !entry?.id || entry.direction !== 'out') return;
+function mirrorToSiblings(conversationKey, entry, { incoming = false } = {}) {
+  if (!conversationKey || !entry?.id) return;
+  if (entry.direction !== 'out' && !(incoming && entry.direction === 'in')) return;
   if ((chatState.linkedDevices || []).length < 2 && !chatState.remoteSiblings?.size) return;
   const list = mirrorQueue.get(conversationKey) || [];
   list.push(entry);

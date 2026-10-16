@@ -211,7 +211,12 @@ try {
   await openConversation(SARA, fpAli);
   await type(SARA, incoming);
   await send(SARA);
-  await waitFor(ALI, (value) => Object.values(chatState.history).some((list) => list.some((e) => e.text === value)), { timeoutMs: 60000, arg: incoming });
+  /* Both of ALI's devices, whichever one SARA's live channel reached: the one
+     it reached hands it on to the other (mirrorToSiblings). Before, the other
+     device never had it while both were online, and the forward below found
+     no message to forward about half the time. */
+  const onBoth = await Promise.all([ALI, ALI2].map((page) => waitFor(page, (value) => Object.values(chatState.history).some((list) => list.some((e) => e.text === value && e.direction === 'in')), { timeoutMs: 60000, arg: incoming })));
+  check('a message from a contact reaches both of ALI\'s devices', onBoth.every(Boolean), JSON.stringify({ ALI: onBoth[0], ALI2: onBoth[1] }));
   const forwarded = await ALI.evaluate(async (value) => {
     const entry = Object.values(chatState.history).flat().find((e) => e.text === value);
     await forwardEntryToDestination(entry, 'saved');

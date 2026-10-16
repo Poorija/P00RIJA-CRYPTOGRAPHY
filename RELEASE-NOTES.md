@@ -1,10 +1,39 @@
-# P00RIJA Cryptography 2.98.47
+# P00RIJA Cryptography 2.98.48
 
-Version 2.98.47 · build chat-v140
+Version 2.98.48 · build chat-v141
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پیام روی همهٔ دستگاه‌های شما · A message on all your devices
+
+- **پیامی که از کانال مستقیم می‌رسد، به دستگاه‌های دیگر شما هم می‌رسد**: وقتی با
+  چند دستگاه هم‌زمان آنلاین بودید، پیامی که یک مخاطب از کانال مستقیم می‌فرستاد فقط
+  به یکی از دستگاه‌های شما می‌رسید، همان که کانال به آن وصل بود. بقیه تا همگام‌سازی
+  بعدی آن را نداشتند. حالا دستگاهی که پیام را می‌گیرد، همان لحظه آن را به دستگاه‌های
+  آنلاین دیگر شما می‌دهد؛ رمزنگاری‌شده با کلید خودتان و مستقیم از طریق رله، بدون
+  این‌که رله چیزی نگه دارد. پیامی که از رله می‌رسد از قبل به همهٔ دستگاه‌ها می‌رسید.
+- **هدایت به پیام‌های ذخیره‌شده**: یکی از نتیجه‌های همین مشکل این بود که روی دستگاه
+  دوم، پیام برای هدایت به «پیام‌های ذخیره‌شده» پیدا نمی‌شد. این هم درست شد.
+- **A message that arrives down a live channel reaches your other devices too**:
+  with several devices online at once, a contact's message sent down a live
+  channel reached only the one device that channel was connected to, and the
+  others did not have it until the next sync. The device that receives it now
+  hands it on at once to your other online devices, sealed to your own key and
+  passed through the relay, which keeps none of it. A message that comes
+  through the relay already reached every device.
+- **Forwarding into Saved Messages**: one result of the same gap was that on the
+  second device the message could not be found to forward into Saved Messages.
+  That is fixed as well.
+
+---
+
+# P00RIJA Cryptography 2.98.47
+
+Version 2.98.47 · build chat-v140
 
 ---
 

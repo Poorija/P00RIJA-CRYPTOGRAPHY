@@ -2360,6 +2360,16 @@ return;
 if (session.cryptoKey && session.keyNegotiatedFor === session.connection) return;
 await mintSessionKey(session, remotePeerRecord);
 }
+/* Where a message that came down a live channel is written. The same as
+   appendHistory, and then handed on to the account's other online devices,
+   because this device is the only one the channel reached
+   (mirrorToSiblings, 44-device-beacon.js). A redelivery of something already
+   here is not handed on twice. */
+function appendDirectArrival(conversationKey, entry) {
+const known = Boolean(entry?.id) && (chatState.history[conversationKey] || []).some((item) => item.id === entry.id);
+appendHistory(conversationKey, entry);
+if (!known && typeof mirrorToSiblings === 'function') mirrorToSiblings(conversationKey, entry, { incoming: true });
+}
 async function handleSessionMessage(session, message) {
 if (!message) return;
 /* A blocked peer is dropped before anything is decrypted, stored, rendered or
@@ -2575,7 +2585,7 @@ preview = sanitizeLinkPreview(JSON.parse(new TextDecoder().decode(await decryptF
    spent — sometimes all of it, so it vanished before it could be opened.
    markConversationRead() sets expiresAt instead. */
 const expiresAt = message.expiresAt || '';
-appendHistory(getPeerHistoryKey(findPeerBySession(session), session), {
+appendDirectArrival(getPeerHistoryKey(findPeerBySession(session), session), {
 id: sanitizeRemoteId(message.id) || generateId('msg'),
 direction: 'in',
 type: 'text',
@@ -2642,7 +2652,7 @@ return;
 }
 if (!RICH_KINDS.has(body.kind)) return;
 	const timerSeconds = Number(message.timerSeconds || 0);
-	appendHistory(historyKey, {
+	appendDirectArrival(historyKey, {
 	id: sanitizeRemoteId(message.id) || sanitizeRemoteId(body.id) || generateId('rich'),
 	direction: 'in',
 	type: 'rich',
@@ -2683,7 +2693,7 @@ if (!conversationId || isReservedConversationKey(conversationId)) return;
 const timerSeconds = Number(payload.timerSeconds || 0);
 // Started on read, not on arrival — see markConversationRead().
 const expiresAt = payload.expiresAt || '';
-	appendHistory(conversationId, {
+	appendDirectArrival(conversationId, {
 	id: sanitizeRemoteId(payload.messageId) || sanitizeRemoteId(message.id) || generateId('msg'),
 	direction: 'in',
 	type: 'text',
@@ -2944,7 +2954,7 @@ stickerKind: transfer.meta.stickerKind || '',
 createdAt: transfer.meta.createdAt || new Date().toISOString(),
 }, blob);
 chatState.mediaUrls.set(incomingId, url);
-appendHistory(historyKey, {
+appendDirectArrival(historyKey, {
 id: incomingId,
 direction: 'in',
 type: incomingBlobType(transfer.meta.kind),
@@ -2989,7 +2999,7 @@ stickerKind: message.stickerKind || '',
 createdAt: message.createdAt || new Date().toISOString(),
 }, blob);
 chatState.mediaUrls.set(singleShotId, url);
-appendHistory(singleShotKey, {
+appendDirectArrival(singleShotKey, {
 id: singleShotId,
 direction: 'in',
 type: message.type,
