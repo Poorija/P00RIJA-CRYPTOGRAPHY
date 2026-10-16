@@ -22,7 +22,11 @@ import { fileURLToPath } from 'node:url';
 const BASE_URL = process.env.PKG_URL || 'https://localhost:8585';
 const FIX = fileURLToPath(new URL('./fixtures', import.meta.url));
 const PASS = 'Harness#Pass2026!';
-const browser = await chromium.launch();
+/* The two flags every call suite launches with. Granting media lets Chromium
+   hand WebRTC the machine's real addresses instead of mDNS names; without it,
+   the data channel between the two pages formed only some of the time, and
+   pairing failed with "Secure session is not ready yet". */
+const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 const results = [];
 const check = (name, ok, detail = '') => {
   results.push({ name, ok, detail });
@@ -174,7 +178,8 @@ await B.evaluate(() => document.querySelector('.chat-peer-card, [data-conversati
 await B.waitForTimeout(3500);
 await B.fill('#chatComposer', 'hello-for-pairing');
 await B.click('#chatSendMessageBtn');
-await A.waitForTimeout(5000);
+/* Waited for, not timed: the first message waits on the secure session. */
+await A.waitForFunction(() => Object.values(chatState.history).flat().some((e) => e.direction === 'in' && e.text === 'hello-for-pairing'), null, { timeout: 60000 }).catch(() => {});
 await A.evaluate(() => { allConversationRecords().filter((r) => isMessageRequest(r)).forEach((r) => acceptMessageRequest(r)); });
 await A.waitForTimeout(800);
 await A.evaluate(() => document.querySelector('.chat-peer-card, [data-conversation-key]')?.click());
