@@ -2547,7 +2547,12 @@ async function graveTime(names, { contact = false } = {}) {
   let latest = 0;
   for (const name of names) {
     if (!name) continue;
-    const at = Date.parse(map[await graveHash(name)] || 0) || 0;
+    /* No grave is 0, never Date.parse(0): that reads "0" as a year and
+       answers 1 January 2000, which made every name look deleted — a
+       sibling's contacts were all refused, and an entry with no date was
+       dropped from every sync. */
+    const stamp = map[await graveHash(name)];
+    const at = stamp ? (Date.parse(stamp) || 0) : 0;
     if (at > latest) latest = at;
   }
   return latest;

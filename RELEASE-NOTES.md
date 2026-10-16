@@ -1,10 +1,33 @@
-# P00RIJA Cryptography 2.98.48
+# P00RIJA Cryptography 2.98.49
 
-Version 2.98.48 · build chat-v141
+Version 2.98.49 · build chat-v142
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## همگام‌سازی مخاطبان بین دستگاه‌ها · Contacts between your devices
+
+- **مخاطب جدید دوباره به دستگاه‌های دیگر شما می‌رسد**: از نسخهٔ 2.98.43، مخاطبی که
+  روی یک دستگاه اضافه می‌کردید به دستگاه‌های دیگرتان نمی‌رسید. علتش این بود که
+  برنامه هر نامی را که هرگز حذف نشده بود، حذف‌شده در اول ژانویهٔ ۲۰۰۰ می‌دید، چون
+  `Date.parse(0)` در جاوااسکریپت سال ۲۰۰۰ را برمی‌گرداند. به همین دلیل دستگاه دوم
+  همهٔ مخاطبان رسیده را کنار می‌گذاشت. پیام یا تماسی هم که تاریخ ثبت‌شده نداشت، در
+  همگام‌سازی جا می‌ماند. هر دو درست شد. حذف گفتگو مثل قبل کار می‌کند.
+- **A new contact reaches your other devices again**: since 2.98.43, a contact
+  added on one device did not reach your others. The app read every name that
+  had never been deleted as deleted on 1 January 2000, because JavaScript's
+  `Date.parse(0)` answers the year 2000, so the second device refused every
+  contact it was sent. A message or call with no recorded date was also left
+  out of a sync. Both are fixed, and deleting a conversation works as before.
+
+---
+
+# P00RIJA Cryptography 2.98.48
+
+Version 2.98.48 · build chat-v141
 
 ---
 

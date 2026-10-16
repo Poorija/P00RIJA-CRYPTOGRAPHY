@@ -202,6 +202,28 @@ try {
   }, setup.conv);
   check('a sibling\'s old copy does not bring the messages back, and something newer still lands',
     !resurrect.includes('stale-from-a-sibling') && resurrect.includes('newer-from-a-sibling'), JSON.stringify(resurrect));
+  /* Nothing deleted means no grave at all — not one dated 1 January 2000,
+     which is what Date.parse(0) answers, and which once made a sibling refuse
+     every contact and drop every undated entry. */
+  const untouched = await AVA2.evaluate(async () => {
+    const stranger = 'e'.repeat(64);
+    const before = await graveTime(['peer-never-deleted', stranger], { contact: true });
+    await mergeDeviceSyncBundle({ contacts: [normalizePeerRecord({ peerId: 'peer-never-deleted', username: 'Never', name: 'Never', fingerprint: stranger, publicKeyData: '', manual: true })] });
+    await mergeDeviceSyncBundle({ conversation: 'never-deleted-conv', entries: [{ id: 'undated-entry', direction: 'in', type: 'text', text: 'no date' }] });
+    return {
+      grave: before,
+      contact: chatState.peers.some((peer) => peer.peerId === 'peer-never-deleted'),
+      undated: (chatState.history['never-deleted-conv'] || []).some((e) => e.id === 'undated-entry'),
+    };
+  });
+  check('something never deleted has no grave, and a sibling\'s contact and undated entry for it land',
+    untouched.grave === 0 && untouched.contact && untouched.undated, JSON.stringify(untouched));
+  await AVA2.evaluate(() => {
+    chatState.peers = chatState.peers.filter((peer) => peer.peerId !== 'peer-never-deleted');
+    delete chatState.history['never-deleted-conv'];
+    saveContacts();
+    storeHistory();
+  });
   await AVA.evaluate((conv) => {
     chatState.history[conv] = (chatState.history[conv] || []).filter((e) => e.id !== 'newer-from-a-sibling');
     if (!chatState.history[conv].length) delete chatState.history[conv];
