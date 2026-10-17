@@ -217,6 +217,23 @@
       en: { t: 'The voice changer', b: 'It has several modes, in two kinds. The effect modes change how you sound but anyone who knows you will still know you. The disguise modes move pitch and formants together and are hard to undo - hard, not impossible: your rhythm, your pauses and your accent all survive. Everything is processed on this device, and you can save the result.' },
     },
     {
+      id: 'gifs-keyboard', tab: 'chat', cat: 'chat',
+      fa: { t: 'گیف و استیکر از کیبورد گوشی', b: 'برنامه گیف و استیکر را از هر راهی که برسد می‌فرستد. محدودیت از خود سیستم است: روی اندروید، Chrome و WebView اندروید (که نسخهٔ نیتیو روی آن اجرا می‌شود) هنوز اجازه نمی‌دهند Gboard گیف یا استیکر را مستقیم در کادر متن یک صفحه بگذارد، و Gboard پیام «این برنامه از گیف پشتیبانی نمی‌کند» را نشان می‌دهد. روی آیفون و آیپد، استیکرها، Memoji و Genmoji از «کادر کیبورد» در پنل استیکر فرستاده می‌شوند.',
+        steps: [
+          'راهی که همیشه کار می‌کند: در برنامه یا سایتی که گیف در آن است، روی گیف نگه دارید و «کپی تصویر» را بزنید، بعد در کادر پیام پیست کنید؛ همان لحظه فرستاده می‌شود',
+          'گیف‌هایی که زیاد می‌فرستید را در قفسهٔ گیف نگه دارید: از منوی + گزینهٔ «گیف» و بعد «وارد کردن»، یا نشانک روی گیفی که در گفتگو آمده',
+          'نسخهٔ PWA در Chrome اندروید (آزمایشی): آدرس chrome://flags را باز کنید، «media insertion» را جستجو کنید، گزینهٔ Enable IME media insertion را روی Enabled بگذارید و Chrome را دوباره باز کنید. بعد از آن نوار گیف و استیکر Gboard در کادر پیام باز می‌شود. این پرچم آزمایشی است و ممکن است در همهٔ نسخه‌های Chrome کار نکند یا برداشته شود',
+          'نسخهٔ نیتیو اندروید: WebView اندروید فعلاً گیف کیبورد را نمی‌پذیرد؛ از دو راه اول استفاده کنید',
+        ] },
+      en: { t: 'GIFs and stickers from the phone keyboard', b: 'The app sends a GIF or a sticker however it arrives. The limit is the system’s: on Android, Chrome and the Android WebView (which the native app runs on) do not yet let Gboard put a GIF or a sticker straight into a web page’s text box, and Gboard says "This app doesn’t support GIFs". On iPhone and iPad, stickers, Memoji and Genmoji go through the keyboard box in the sticker panel.',
+        steps: [
+          'The way that always works: in the app or site the GIF is in, long-press it and choose "Copy image", then paste it into the message box; it is sent at once',
+          'Keep the GIFs you send often on the GIF shelf: + menu, GIF, then Import, or the bookmark on a GIF in a conversation',
+          'The PWA in Chrome on Android (experimental): open chrome://flags, search for "media insertion", set Enable IME media insertion to Enabled and relaunch Chrome. Gboard’s GIF and sticker bar then opens in the message box. The flag is experimental, and may not work in every Chrome version or may be removed',
+          'The native Android app: the Android WebView does not accept keyboard GIFs yet; use the first two ways',
+        ] },
+    },
+    {
       id: 'voice-message-disguise', tab: 'chat', cat: 'security',
       fa: { t: 'پیام صوتی با صدای تغییریافته', b: 'کنار دکمهٔ ارسال پیام صوتی، دکمهٔ جداگانه‌ای هست که همان ضبط را با صدای پوشانده می‌فرستد. اگر تبدیل به هر دلیلی شکست بخورد، هیچ چیزی فرستاده نمی‌شود — نه اینکه نسخهٔ اصلی برود.' },
       en: { t: 'Voice messages with your voice disguised', b: 'Next to the send button for a voice message there is a separate one that sends the same recording with the speaker disguised. If the transform fails for any reason, nothing is sent at all - it does not quietly fall back to your real voice.' },

@@ -1664,18 +1664,34 @@ banner.classList.add('hidden');
 scheduleSessionWarmup(directPeer);
 renderMessages();
 }
-function scheduleSessionWarmup(peerRecord, delayMs = 250) {
+/* `reason: 'compose'` is somebody reaching for the message box: then a live
+   channel is dialled even when a key from an earlier session is kept, so the
+   message about to be written goes straight down it rather than the long way
+   through the relay. A redraw alone does not dial a peer whose key is kept —
+   the other side may have just closed the channel on purpose (a deleted
+   conversation, a block), and dialling straight back would undo that. Once a
+   minute at most per person for the compose dial, so a network with no
+   direct path is not dialled on every tap. */
+const SESSION_WARMUP_RETRY_MS = 60 * 1000;
+function scheduleSessionWarmup(peerRecord, delayMs = 250, { reason = 'render' } = {}) {
 if (!peerRecord || peerRecord.type || isSelfPeerRecord(peerRecord)) return;
 if (peerRecord.status !== 'online' || !chatState.connected || !chatState.peer) return;
 const existing = chatState.sessions.get(peerRecord.peerId);
-if (existing?.cryptoKey || existing?.connection?.open) return;
+const compose = reason === 'compose';
+if (existing?.connection?.open || (existing?.cryptoKey && !compose)) return;
 if (chatState.sessionWarmupTimers.has(peerRecord.peerId) || chatState.sessionWarmupInFlight.has(peerRecord.peerId)) return;
+const dialledAt = (chatState.sessionWarmupLastAt ||= new Map());
+if (compose && Date.now() - (dialledAt.get(peerRecord.peerId) || 0) < SESSION_WARMUP_RETRY_MS) return;
 const timer = setTimeout(async () => {
 chatState.sessionWarmupTimers.delete(peerRecord.peerId);
 if (chatState.sessionWarmupInFlight.has(peerRecord.peerId)) return;
 chatState.sessionWarmupInFlight.add(peerRecord.peerId);
+if (compose) dialledAt.set(peerRecord.peerId, Date.now());
 try {
-await ensureDirectSession(peerRecord, { silent: true });
+const current = chatState.sessions.get(peerRecord.peerId);
+if (current?.connection?.open) return;
+if (current?.cryptoKey) await startSecureSession(peerRecord, { silent: true });
+else await ensureDirectSession(peerRecord, { silent: true });
 } catch (error) {
 console.warn('Secure chat session warmup failed:', error);
 } finally {
@@ -1684,6 +1700,12 @@ chatState.sessionWarmupInFlight.delete(peerRecord.peerId);
 }, delayMs);
 chatState.sessionWarmupTimers.set(peerRecord.peerId, timer);
 }
+/* Reaching for the message box is the clearest sign of a message on its way. */
+document.addEventListener('focusin', (event) => {
+if (event.target?.id !== 'chatComposer') return;
+const peer = typeof activePeer === 'function' ? activePeer() : null;
+if (peer) scheduleSessionWarmup(peer, 0, { reason: 'compose' });
+});
 function appendHistory(conversationId, entry) {
 /* Saved Messages only ever holds what this account wrote. Whatever else
    tries to land there arrived from outside under a borrowed key. */

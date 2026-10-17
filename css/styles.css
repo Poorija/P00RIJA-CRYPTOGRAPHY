@@ -27860,3 +27860,21 @@ html body #mainApp #content-chat .chat-composer-surface.is-dropping {
 html.keyboard-pictures body #mainApp #content-chat #chatComposer {
   -webkit-user-modify: read-write;
 }
+
+/* ============================================================================
+   A settings switch keeps its width beside a long description
+   ----------------------------------------------------------------------------
+   Each switch is a w-12 box beside its text in a flex row, and a flex item
+   shrinks by default. Beside "Screen guard", whose description runs three
+   lines on a phone, the box was squeezed to the width of its knob: off, only
+   the knob showed; on, the knob sat outside a track no wider than itself.
+   Desktop had the room and never showed it.
+   ========================================================================== */
+html body .flex > .relative.inline-block.w-12 {
+  flex: 0 0 3rem;
+  margin-inline-start: 0.75rem;
+}
+html body .flex > .relative.inline-block.w-12 ~ * ,
+html body .flex > div:has(+ .relative.inline-block.w-12) {
+  min-width: 0;
+}

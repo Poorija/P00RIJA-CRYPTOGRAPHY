@@ -1,10 +1,85 @@
-# P00RIJA Cryptography 2.98.49
+# P00RIJA Cryptography 2.98.50
 
-Version 2.98.49 · build chat-v142
+Version 2.98.50 · build chat-v143
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پیام همیشه می‌رسد · A message always arrives
+
+- **دیگر «سشن امن آماده نیست، دوباره تلاش کنید» نیست**: اگر کانال مستقیم به‌موقع
+  برقرار نشود، پیام به‌جای «ناموفق» از راه رله فرستاده می‌شود، رمزنگاری‌شده با کلید
+  هویت طرف مقابل، همان‌طور که پیام به کسی که آفلاین است همیشه می‌رفت. فایل، استیکر،
+  گیف و پیام‌های ساختاریافته هم همین‌طور.
+- **پیامی که در راه گم می‌شد دوباره فرستاده می‌شود**: کانال مستقیم گاهی باز به نظر
+  می‌رسد ولی طرف مقابل دیگر آنجا نیست، یا دو طرف کلید متفاوتی دارند و پیام باز
+  نمی‌شود. در هر دو حالت پیام بی‌صدا گم می‌شد و باید چند بار فرستاده می‌شد، یا صبر
+  می‌کردید طرف مقابل اول پیام بدهد. حالا اگر چند ثانیه بعد از ارسال، رسید تحویل
+  نرسد، پیام خودکار از راه رله دوباره فرستاده می‌شود. طرف مقابل فقط یک نسخه از آن
+  را می‌بیند.
+- **سشن امن خودکار**: وقتی هر دو آنلاین هستید و شما سراغ کادر پیام می‌روید یا پیامی
+  می‌فرستید، کانال مستقیم خودکار برقرار می‌شود، حتی اگر کلیدی از قبل مانده باشد.
+- **اگر از رله رفت، می‌گوید**: وقتی طرف مقابل آنلاین است ولی کانال مستقیم برقرار
+  نشد و پیام از راه رله رفت، یک بار برای هر گفتگو اطلاع داده می‌شود.
+- **No more "the secure session is not ready, try again"**: when a live channel
+  does not come up in time, the message goes through the relay instead of
+  failing, sealed to the other person's identity key, the way a message to
+  somebody offline always has. Files, stickers, GIFs, and structured messages
+  do the same.
+- **A message lost on the way is sent again**: a live channel can look open
+  after the other end has gone, or the two ends can hold different keys, so
+  the message cannot be opened. Either way the message used to vanish without
+  a word, and had to be sent two or three times, or until the other person
+  wrote first. Now a message with no delivery receipt a few seconds after it
+  was sent goes again through the relay on its own. The other person sees one
+  copy.
+- **Automatic secure session**: when you are both online and you reach for the
+  message box or send, a live channel is opened on its own, even when a key
+  from an earlier session is kept.
+- **Told when it took the relay**: when the other person is online but no live
+  channel could be opened and the message took the relay, you are told, once
+  per conversation.
+
+## گیفی که بعد از مدتی دیده نمی‌شد · A GIF that went blank
+
+- **گیف فرستاده‌شده دیگر خالی نمی‌شود**: روی اندروید، گیف یا استیکری که پیست یا از
+  کیبورد گذاشته می‌شود یک فایل موقت است که سیستم بعداً پاکش می‌کند، و حباب پیام از
+  همان فایل نمایش داده می‌شد. برای همین بعد از مدتی خالی می‌شد و فقط با بستن و باز
+  کردن برنامه برمی‌گشت. حالا یک نسخه از آن پیش از نمایش در حافظه نگه داشته می‌شود.
+- **خودترمیم**: تصویر یا ویدیوی کوتاهی که به هر دلیل از بارگذاری بماند، خودکار از
+  خزانهٔ رمزنگاری‌شدهٔ دستگاه دوباره خوانده می‌شود.
+- **A sent GIF no longer goes blank**: on Android, a GIF or sticker pasted or put
+  in by the keyboard is a temporary file the system deletes later, and the
+  message bubble was drawn from it. So it went blank after a while and came back
+  only when the app was closed and reopened. A copy is now held in memory
+  before it is drawn.
+- **It heals itself**: a picture or a short clip that fails to load for any
+  reason is read again from the device's encrypted vault.
+
+## راهنمای گیف و استیکر از کیبورد · A guide to keyboard GIFs and stickers
+
+- در «راهنما» و با دکمهٔ ؟ در قفسهٔ گیف: روی اندروید چه چیزی امروز کار می‌کند،
+  پرچم Chrome برای نسخهٔ PWA، و این‌که چرا WebView اندروید در نسخهٔ نیتیو هنوز گیف
+  کیبورد را نمی‌پذیرد.
+- In Help, and behind the ? button on the GIF shelf: what works on Android today,
+  the Chrome flag for the PWA, and why the native app's Android WebView does not
+  accept keyboard GIFs yet.
+
+## کلید محافظ صفحه · The screen guard switch
+
+- کلید «محافظ صفحه» روی گوشی کنار توضیح بلندش فشرده می‌شد و فقط دایره‌اش دیده می‌شد.
+  حالا همهٔ کلیدهای تنظیمات اندازهٔ خودشان را نگه می‌دارند.
+- The screen guard switch was squeezed beside its long description on a phone,
+  leaving only its knob. Every settings switch now keeps its size.
+
+---
+
+# P00RIJA Cryptography 2.98.49
+
+Version 2.98.49 · build chat-v142
 
 ---
 

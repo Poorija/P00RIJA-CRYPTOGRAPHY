@@ -357,12 +357,14 @@ resolve(true);
    A live file-start is also an offer: above FILE_GATE_MIN_BYTES the recipient
    answers file-accept / file-decline before any chunk moves, so the quota they
    set (or a declination) decides whether the upload happens at all. */
-async function sendBlobChunks(blob, { session, peerRecord, transferId, startMessage, createdAt, onProgress, scope = '' }) {
+async function sendBlobChunks(blob, { session, peerRecord, transferId, startMessage, createdAt, onProgress, scope = '', relayOnly = false }) {
   if (!session?.cryptoKey) return false;
   const totalChunks = Math.max(1, Math.ceil(blob.size / FILE_CHUNK_BYTES));
   let startWentLive = false;
   const deliver = async (build, onLive = null) => {
-    if (session.connection?.open) {
+    /* relayOnly: a second try after the live channel took a transfer and
+       nothing came back (watchLiveDelivery). */
+    if (!relayOnly && session.connection?.open) {
       await awaitChannelDrain(session.connection);
       if (session.connection?.open && safeConnectionSend(session.connection, build(true), 'file')) {
         if (onLive) onLive();

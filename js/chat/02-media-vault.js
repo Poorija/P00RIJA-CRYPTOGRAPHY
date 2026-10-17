@@ -270,6 +270,29 @@ function dropConversationMedia(conversationId) {
     .catch(() => {});
 }
 
+/* A picture or a clip in a bubble whose object URL stops answering is drawn
+   again from the vault, which keeps its own copy. The URL dies when what it
+   was made from goes away under it — a temporary file a paste or a keyboard
+   handed over — and the bubble stayed blank until a restart. Once per message
+   per page, so something that really is gone cannot loop. */
+const mediaReloadTried = new Set();
+document.addEventListener('error', (event) => {
+  const node = event.target;
+  if (!(node instanceof HTMLImageElement || node instanceof HTMLVideoElement)) return;
+  const bubble = node.closest('#chatMessages [data-id]');
+  if (!bubble) return;
+  const src = node.currentSrc || node.getAttribute('src') || '';
+  if (!src.startsWith('blob:')) return;
+  const conversationId = chatState.activeConversationId;
+  const id = bubble.getAttribute('data-id');
+  const entry = (chatState.history[conversationId] || []).find((item) => item.id === id);
+  if (!entry || entry.downloadUrl !== src || entry.viewOnce || mediaReloadTried.has(id)) return;
+  mediaReloadTried.add(id);
+  if (chatState.mediaUrls.get(id) === src) chatState.mediaUrls.delete(id);
+  entry.downloadUrl = '';
+  hydrateConversationMedia(conversationId).catch((error) => console.warn('[Media] reloading from the vault failed', error));
+}, true);
+
 /* Rehydrates every attachment in one conversation that lost its object URL,
    then asks for a single re-render. Guarded per conversation so a render
    triggered by the hydration cannot start another hydration. */

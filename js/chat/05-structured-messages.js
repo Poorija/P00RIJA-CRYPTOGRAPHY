@@ -135,9 +135,12 @@ async function sendRichMessage(kind, data) {
   appendHistory(getConversationKey(peer), entry);
   let session = activeSession();
   if (!session?.cryptoKey) session = await ensureDirectSession(peer);
+  /* No live channel in time: the relay carries it (relaySessionFor), as it
+     does a text. */
+  if (!session?.cryptoKey && typeof relaySessionFor === 'function') session = await relaySessionFor(peer);
   if (!session?.cryptoKey) {
     markMessageStatus(getConversationKey(peer), messageId, 'failed');
-    notify(t('سشن امن هنوز آماده نیست.', 'The secure session is not ready yet.'), 'warning');
+    notify(t('برای این مخاطب کلیدی در دست نیست؛ پیام فرستاده نشد.', 'There is no key for this contact, so the message was not sent.'), 'warning');
     return;
   }
   const body = JSON.stringify(rich);
@@ -159,6 +162,10 @@ async function sendRichMessage(kind, data) {
     const ok = safeConnectionSend(session.connection, outbound, 'rich');
     if (ok) {
       markMessageStatus(conversationKey, messageId, 'sent');
+      /* No answer, and it goes again through the relay (watchLiveDelivery). */
+      if (typeof watchLiveDelivery === 'function') {
+        watchLiveDelivery(peer, messageId, () => sendSealedRelay(peer, session, outbound, { createdAt }));
+      }
     } else {
       const relayed = await sendSealedRelay(peer, session, outbound, { createdAt });
       markMessageStatus(conversationKey, messageId, relayed ? 'queued' : 'failed');
@@ -168,6 +175,7 @@ async function sendRichMessage(kind, data) {
     const relayed = await sendSealedRelay(peer, session, outbound, { createdAt });
     markMessageStatus(conversationKey, messageId, relayed ? 'queued' : 'failed');
     if (!relayed) notify(t('ارسال ناموفق بود.', 'Sending failed.'), 'warning');
+    else if (typeof noteRelayRoute === 'function') noteRelayRoute(peer);
   }
   renderMessages();
 }

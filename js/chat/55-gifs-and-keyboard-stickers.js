@@ -771,6 +771,7 @@ function syncStickerPanelShelf() {
     document.getElementById(id)?.classList.toggle('hidden', gifs);
   });
   document.getElementById('chatGifImportBtn')?.classList.toggle('hidden', !gifs);
+  document.getElementById('chatGifHelpBtn')?.classList.toggle('hidden', !gifs);
   document.getElementById('chatStickerTabs')?.classList.toggle('hidden', gifs);
   document.getElementById('chatStickerGrid')?.classList.toggle('is-gif-shelf', gifs);
   if (gifs) document.getElementById('chatStickerSelbar')?.classList.add('hidden');
@@ -788,6 +789,7 @@ function renderGifShelf() {
         'گیف را در کادر پیام پیست کنید یا از کیبورد انتخاب کنید تا فرستاده شود. برای نگه داشتن، روی گیف داخل گفتگو نشانک را بزنید یا فایل .gif وارد کنید.',
         'Paste a GIF into the message box, or pick one on your keyboard, to send it. To keep one here, tap the bookmark on a GIF in a conversation, or import .gif files.'))}</div>
       <button type="button" data-chat-gif-import class="chat-sticker-empty-btn"><i class="fas fa-file-import"></i> ${app().escapeHTML(t('وارد کردن گیف', 'Import GIFs'))}</button>
+      <button type="button" data-chat-gif-help class="chat-sticker-empty-btn"><i class="fas fa-circle-question"></i> ${app().escapeHTML(t('گیف از کیبورد گوشی', 'GIFs from the phone keyboard'))}</button>
     </div>`;
     return;
   }
@@ -796,6 +798,19 @@ function renderGifShelf() {
       <span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
         title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>
     </button>`).join('');
+}
+
+/* The guide, from the same entry the Help tab shows (js/help-content.js), so
+   the two can never say different things. The steps are numbered here; the
+   dialog keeps line breaks. */
+function showGifKeyboardGuide() {
+  const lang = app().state?.language === 'en' ? 'en' : 'fa';
+  const entry = (window.PoorijaHelp?.ENTRIES || []).find((item) => item.id === 'gifs-keyboard');
+  const text = entry?.[lang];
+  if (!text) return;
+  const digits = (n) => (lang === 'fa' ? String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]) : String(n));
+  const steps = (text.steps || []).map((step, index) => `${digits(index + 1)}. ${step}`).join('\n\n');
+  PoorijaDialogs.alert(`${text.b}\n\n${steps}`, { title: text.t });
 }
 
 function toggleGifShelf() {
@@ -819,6 +834,10 @@ function bindGifShelf() {
       chatState.stickerManageMode = false;
       document.getElementById('chatStickerManageBtn')?.classList.remove('is-active');
       renderStickerPanel();
+      return;
+    }
+    if (event.target.closest('#chatGifHelpBtn') || event.target.closest('[data-chat-gif-help]')) {
+      showGifKeyboardGuide();
       return;
     }
     if (event.target.closest('[data-chat-gif-import]') || event.target.closest('#chatGifImportBtn')) {

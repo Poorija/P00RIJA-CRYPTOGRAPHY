@@ -1636,7 +1636,7 @@ await deliverTextEntry(targetPeer, entry || { id: messageId, text, timerSeconds,
  * copies of this logic would be two places for the next fix to miss.
  * `interactive` is false when nobody just pressed send: the toasts that
  * explain a slow first send are then left out. */
-async function deliverTextEntry(conversation, entry, { interactive = true } = {}) {
+async function deliverTextEntry(conversation, entry, { interactive = true, forceRelay = false } = {}) {
 if (!conversation || !entry?.id) return false;
 const messageId = entry.id;
 const text = String(entry.text || '');
@@ -1722,11 +1722,22 @@ if (!session?.cryptoKey) {
 if (interactive) notify(t('در حال ساخت سشن امن برای ارسال پیام...', 'Creating secure session before sending...'), 'info');
 session = await ensureDirectSession(targetPeer);
 }
+/* The live channel did not come up in time. That used to end the send with
+   "not ready yet, try again", and the message sat marked failed until
+   somebody pressed send a second or third time, or the other person wrote
+   first. The relay needs no channel: the key is made here and travels sealed
+   to their identity key inside the envelope, the way a message to somebody
+   offline always has. */
+if (!session?.cryptoKey) session = await relaySessionFor(targetPeer);
 if (!session?.cryptoKey) {
 markMessageStatus(conversationKey, messageId, 'failed');
-if (interactive) notify(t('سشن امن هنوز آماده نیست. چند ثانیه بعد دوباره ارسال کنید یا اتصال را بررسی کنید.', 'Secure session is not ready yet. Try again in a few seconds or check the connection.'), 'warning');
+if (interactive) notify(t('برای این مخاطب کلیدی در دست نیست؛ پیام فرستاده نشد. کارت مخاطب را دوباره اضافه کنید.', 'There is no key for this contact, so the message was not sent. Add their contact card again.'), 'warning');
 return false;
 }
+/* A key from before, no channel, and they are online: a channel is dialled
+   for the message now, and waited for briefly. Only when it does not open
+   does the message take the relay — and the sender is told. */
+if (!forceRelay && !session.connection?.open) session = await dialForSend(targetPeer, session);
 const payload = await encryptForSession(session, new TextEncoder().encode(text));
 const outbound = {
 type: 'text',
@@ -1742,14 +1753,86 @@ if (preview) outbound.previewPayload = await encryptForSession(session, new Text
 /* Same rule as the group path: a data-channel send that throws must not be
    reported as sent. Fall through to the relay queue so the message survives
    a flaky channel instead of dying with a confident tick. */
-if (session.connection?.open
+if (!forceRelay && session.connection?.open
 && safeConnectionSend(session.connection, outbound, 'text-message')) {
 markMessageStatus(conversationKey, messageId, 'sent');
+/* "Sent" on a live channel means handed to it, not received: a channel
+   can look open after the other end has gone, and a message the other end
+   could not open is dropped there. Neither comes back as anything, so an
+   answer is waited for, and without one the message goes again through
+   the relay (watchLiveDelivery). */
+watchLiveDelivery(targetPeer, messageId, () => deliverTextEntry(targetPeer, entry, { interactive: false, forceRelay: true }));
 } else {
 await sendSealedRelay(targetPeer, session, outbound, { createdAt: outbound.createdAt });
 markMessageStatus(conversationKey, messageId, 'queued');
+if (interactive && !forceRelay) noteRelayRoute(targetPeer);
 }
 return true;
+}
+
+const SEND_DIAL_WAIT_MS = 5000;
+async function dialForSend(peerRecord, session) {
+const online = typeof peerLooksOnline === 'function' ? peerLooksOnline(peerRecord) : peerRecord?.status === 'online';
+if (!online || !chatState.connected || !chatState.peer) return session;
+try {
+if (!session.connection) await startSecureSession(peerRecord, { silent: true });
+const startedAt = Date.now();
+while (Date.now() - startedAt < SEND_DIAL_WAIT_MS) {
+const current = chatState.sessions.get(peerRecord.peerId) || session;
+/* Open, and its key agreed on this connection — sending under the old key
+   down a new channel would only be refused at the other end. */
+if (current.connection?.open && current.cryptoKey && current.keyNegotiatedFor === current.connection) return current;
+await new Promise((resolve) => setTimeout(resolve, 150));
+}
+} catch (error) {
+console.warn('[Chat] dialling for a send failed:', error);
+}
+return chatState.sessions.get(peerRecord.peerId) || session;
+}
+
+/* A session that can send whatever the channel. When no live channel came up,
+   the key is minted here for the relay route (prepareOfflineSession); null
+   only when there is no public key to seal it to. */
+async function relaySessionFor(peerRecord) {
+const session = await ensureStoredSession(peerRecord);
+if (session && !session.cryptoKey) {
+try { await prepareOfflineSession(session, peerRecord); } catch (error) { console.warn('[Chat] a relay session could not be made:', error); }
+}
+return session?.cryptoKey ? session : null;
+}
+
+/* Said once per conversation per run, and only while they look online: going
+   through the relay to somebody who is away is the normal road, not news. */
+const relayRouteNoted = new Set();
+function noteRelayRoute(peerRecord) {
+const key = getConversationKey(peerRecord);
+if (!key || relayRouteNoted.has(key)) return;
+const online = typeof peerLooksOnline === 'function' ? peerLooksOnline(peerRecord) : peerRecord?.status === 'online';
+if (!online) return;
+relayRouteNoted.add(key);
+const name = peerRecord.username || peerRecord.name || t('این مخاطب', 'this contact');
+notify(t(
+`کانال امن مستقیم با «${name}» برقرار نشد؛ پیام از راه رله فرستاده شد و همچنان رمزنگاری سرتاسری است.`,
+`A direct secure channel to "${name}" could not be opened; the message went through the relay and is still end-to-end encrypted.`,
+), 'info');
+}
+
+/* Waits for a message handed to a live channel to be acknowledged, and sends
+   it again through the relay when it is not. The far side keeps one copy of a
+   message it gets twice (by id), so a late answer costs a duplicate envelope,
+   never a duplicate message. */
+const LIVE_DELIVERY_WAIT_MS = 10000;
+function watchLiveDelivery(peerRecord, messageId, resend, waitMs = LIVE_DELIVERY_WAIT_MS) {
+const conversationKey = getConversationKey(peerRecord);
+if (!conversationKey || !messageId || typeof resend !== 'function') return;
+setTimeout(() => {
+const entry = (chatState.history[conversationKey] || []).find((item) => item.id === messageId);
+if (!entry || entry.direction !== 'out') return;
+if (chatStatusRank(entry.status) >= chatStatusRank('delivered')) return;
+if (entry.status === 'failed') return;
+console.warn(`[Chat] no answer for ${messageId} on the live channel; sending it again through the relay`);
+Promise.resolve(resend()).catch((error) => console.warn('[Chat] resending through the relay failed:', error));
+}, waitMs);
 }
 // A file upload used to happen in complete silence, so a slow transfer looked
 // like nothing was happening at all. Telegram shows progress at the top of the
@@ -1957,6 +2040,21 @@ async function stripFileMetadataForSend(file) {
 }
 window.__metadataOnSendProbe = (file) => stripFileMetadataForSend(file);
 
+/* A File is a handle, not the bytes. What a paste, a drop or a keyboard hands
+   over on Android is a temporary file the system deletes when it pleases, and
+   the bubble of a sent GIF drew from it — so after a while the picture went
+   blank, and came back only when a restart redrew it from the vault. Anything
+   the vault would keep is copied into memory first; larger files stay handles,
+   because reading gigabytes in would cost more than it saves. */
+async function holdFileInMemory(file) {
+if (!file || file.size > MEDIA_VAULT_MAX_FILE_BYTES) return file;
+try {
+return new File([await file.arrayBuffer()], file.name || 'file', { type: file.type || '', lastModified: file.lastModified || Date.now() });
+} catch (error) {
+console.warn('[Chat] the file could not be read into memory; sending the handle:', error);
+return file;
+}
+}
 async function sendEncryptedBlob(file, kind = 'file', durationMs = 0, extra = {}) {
 /* One gate per kind of thing, because "no media" and "no files" are different
    rules a group might want: a voice note is not a photo and a spreadsheet is
@@ -1972,6 +2070,7 @@ file = await stripFileMetadataForSend(file);
 /* null means the question about this file was cancelled, not that anything
    failed - so the send stops here rather than going ahead with nothing. */
 if (!file) return;
+file = await holdFileInMemory(file);
 /* Same one-shot toggle as hidden text: consumed by this send. */
 const privateSend = isHiddenComposeActive();
 if (privateSend) {
@@ -2228,9 +2327,13 @@ timerSeconds,
 if (!session?.cryptoKey) {
 session = await ensureDirectSession(peer);
 }
+/* No live channel came up: the relay carries it, sealed the way a text is
+   (relaySessionFor). The size gate above has already kept anything too big
+   for a mailbox from getting here without a channel. */
+if (!session?.cryptoKey) session = await relaySessionFor(peer);
 if (!session?.cryptoKey) {
 markMessageStatus(getConversationKey(peer), historyId, 'failed');
-notify(t('برای ارسال فایل/صدا باید سشن امن آماده باشد.', 'A secure session is required before sending files or voice messages.'), 'warning');
+notify(t('برای این مخاطب کلیدی در دست نیست؛ فایل فرستاده نشد. کارت مخاطب را دوباره اضافه کنید.', 'There is no key for this contact, so the file was not sent. Add their contact card again.'), 'warning');
 return;
 }
 const transferId = generateId('transfer');
@@ -2278,8 +2381,27 @@ if (!wasRefused) {
 notify(t('ارسال فایل کامل نشد؛ دوباره تلاش کنید.', 'The file transfer did not finish; please try again.'), 'warning');
 }
 } else {
-markMessageStatus(getConversationKey(peer), historyId, session.connection?.open ? 'sent' : 'queued');
+const wentLive = Boolean(session.connection?.open);
+markMessageStatus(getConversationKey(peer), historyId, wentLive ? 'sent' : 'queued');
 setTransferBanner(t('ارسال شد', 'Sent'), 100, { owner });
+if (!wentLive) noteRelayRoute(peer);
+/* The same answer is waited for as for a text (watchLiveDelivery); a file
+   small enough for a mailbox goes again through the relay without one. A
+   larger one stays as it is — its receiver asks for missing chunks itself. */
+if (wentLive && file.size <= MAX_OFFLINE_FILE_BYTES) {
+watchLiveDelivery(peer, historyId, () => {
+const retryId = generateId('transfer');
+const retryAt = new Date().toISOString();
+return sendBlobChunks(file, {
+session,
+peerRecord: peer,
+transferId: retryId,
+startMessage: { ...startMessage, transferId: retryId, createdAt: retryAt },
+createdAt: retryAt,
+relayOnly: true,
+});
+}, 15000);
+}
 }
 clearTransferBanner(700, owner);
 renderMessages();
