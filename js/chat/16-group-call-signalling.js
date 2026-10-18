@@ -206,6 +206,10 @@ const STICKER_MAX_PER_PACK = 240;
 const STICKER_MAX_BYTES = 6 * 1024 * 1024;
 const STICKER_TARGET_EDGE = 512;
 const STICKER_RECOMPRESS_OVER = 220 * 1024;
+/* The picker draws thumbnails, not the stickers: a pack holds up to 240, each
+   512 px, and decoding every one at once is a quarter of a gigabyte — on a
+   phone, a frozen app. 160 px covers a cell on a 2x screen. */
+const STICKER_THUMB_EDGE = 160;
 const STICKER_IMAGE_EXT = /\.(webp|png|gif|jpe?g|avif|svg)$/i;
 const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
@@ -282,17 +286,23 @@ async function stickerDbPutPack(pack) {
   const result = await stickerDbPutPackRecord(pack);
   try {
     const stored = await stickerDbGetPack(pack.id);
-    const fresh = new Map((stored?.stickers || []).map((record) => [record.id, record.blob]));
+    const fresh = new Map((stored?.stickers || []).map((record) => [record.id, record]));
     let changed = 0;
     for (const record of pack.stickers || []) {
-      const blob = fresh.get(record.id);
-      if (!blob || blob === record.blob) continue;
-      record.blob = blob;
-      const url = chatState.stickerUrls.get(record.id);
-      if (url) { URL.revokeObjectURL(url); chatState.stickerUrls.delete(record.id); }
+      const again = fresh.get(record.id);
+      if (!again?.blob || again.blob === record.blob) continue;
+      record.blob = again.blob;
+      if (again.thumb instanceof Blob) record.thumb = again.thumb;
+      forgetStickerRecordUrls(record);
       changed += 1;
     }
-    if (changed && !document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
+    /* Drawn again whether the panel is showing or not: a hidden panel still
+       holds pictures pointing at the URLs just dropped, and each would fail
+       the moment it was looked at. */
+    if (changed) {
+      renderStickerPanel();
+      if (typeof renderPackManagerList === 'function' && packManagerElement) renderPackManagerList();
+    }
   } catch (error) {
     console.warn('[Stickers] the written pack was not read back', error);
   }
@@ -374,13 +384,120 @@ function stickerObjectUrl(record) {
   return url;
 }
 
-function releaseStickerUrls(pack) {
-  (pack?.stickers || []).forEach((record) => {
-    const url = chatState.stickerUrls.get(record.id);
-    if (!url) return;
+/* The picture the picker draws: the sticker's thumbnail when it has one, the
+   sticker itself when it moves (a thumbnail is a single frame) or has none
+   yet. Only a real Blob counts — a restored backup drops thumbnails, and they
+   are made again (ensurePackThumbs). */
+const stickerThumbKey = (record) => `${record.id}#thumb`;
+function stickerThumbUrl(record) {
+  if (!(record?.thumb instanceof Blob)) return stickerObjectUrl(record);
+  const key = stickerThumbKey(record);
+  const cached = chatState.stickerUrls.get(key);
+  if (cached) return cached;
+  const url = URL.createObjectURL(record.thumb);
+  chatState.stickerUrls.set(key, url);
+  return url;
+}
+function forgetStickerRecordUrls(record) {
+  for (const key of [record.id, stickerThumbKey(record)]) {
+    const url = chatState.stickerUrls.get(key);
+    if (!url) continue;
     URL.revokeObjectURL(url);
-    chatState.stickerUrls.delete(record.id);
-  });
+    chatState.stickerUrls.delete(key);
+  }
+}
+function releaseStickerUrls(pack) {
+  (pack?.stickers || []).forEach(forgetStickerRecordUrls);
+}
+
+/* A small still of a sticker, or null for one that moves or cannot be read:
+   an animated sticker keeps drawing itself, only when it is on screen
+   (observeLazyMedia). */
+async function makeStickerThumb(blob) {
+  if (!(blob instanceof Blob) || typeof createImageBitmap !== 'function') return null;
+  try {
+    if (typeof pictureIsAnimated === 'function' && typeof sniffPictureType === 'function'
+      && await pictureIsAnimated(blob, await sniffPictureType(blob))) return null;
+    const bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, STICKER_THUMB_EDGE / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1 && blob.size < 24 * 1024) { bitmap.close?.(); return null; }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
+    return thumb && thumb.size < blob.size ? thumb : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+/* Thumbnails for a pack imported before there were thumbnails, made in the
+   background a few at a time so the picker stays usable while it happens,
+   and stored once at the end. thumbChecked keeps a sticker that has none to
+   give — one that moves — from being asked again. */
+const packThumbJobs = new Set();
+async function ensurePackThumbs(pack) {
+  if (!pack?.stickers?.length || packThumbJobs.has(pack.id)) return;
+  const pending = pack.stickers.filter((record) => record.kind === 'image' && !(record.thumb instanceof Blob) && !record.thumbChecked);
+  if (!pending.length) return;
+  packThumbJobs.add(pack.id);
+  try {
+    let made = 0;
+    for (const record of pending) {
+      const thumb = await makeStickerThumb(record.blob);
+      if (thumb) { record.thumb = thumb; made += 1; } else { record.thumbChecked = true; }
+      await yieldToPage();
+    }
+    if (chatState.stickerPacks.includes(pack)) {
+      await stickerDbPutPack(pack);
+      if (made && !document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
+    }
+  } finally {
+    packThumbJobs.delete(pack.id);
+  }
+}
+
+/* A breath for the page between two pieces of heavy work, so a tap or a frame
+   gets in: decoding a pack of 512 px WebPs in one go is what froze a phone. */
+function yieldToPage() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/* Pictures drawn only while they are on screen, and let go when they are far
+   off it: a grid of hundreds of stickers, or of GIFs that all move at once,
+   decoded the lot. Each <img>/<video> written with data-lazy-src gets its
+   source as it nears the visible part of its scroller. */
+const lazyMediaObservers = new WeakMap();
+function observeLazyMedia(container) {
+  if (!container) return;
+  const nodes = container.querySelectorAll('[data-lazy-src]');
+  if (!nodes.length) return;
+  if (typeof IntersectionObserver !== 'function') {
+    nodes.forEach((node) => { node.src = node.getAttribute('data-lazy-src'); });
+    return;
+  }
+  let observer = lazyMediaObservers.get(container);
+  if (!observer) {
+    observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const node = entry.target;
+        const wanted = node.getAttribute('data-lazy-src');
+        if (entry.isIntersecting) {
+          if (node.getAttribute('src') !== wanted) node.setAttribute('src', wanted);
+          if (node instanceof HTMLVideoElement) node.play?.().catch(() => {});
+        } else if (node.hasAttribute('src')) {
+          if (node instanceof HTMLVideoElement) node.pause?.();
+          node.removeAttribute('src');
+          if (node instanceof HTMLVideoElement) node.load?.();
+        }
+      }
+    }, { root: container, rootMargin: '240px 0px' });
+    lazyMediaObservers.set(container, observer);
+  }
+  observer.disconnect();
+  nodes.forEach((node) => observer.observe(node));
 }
 
 /* Re-decides which pack is open, from storage.
@@ -527,6 +644,7 @@ async function buildStickerRecord(name, blob, emoji = '') {
   }
   const usable = kind === 'image' ? await normalizeStickerImage(blob, cleanName) : blob;
   if (usable.size > STICKER_MAX_BYTES) return null;
+  const thumb = kind === 'image' ? await makeStickerThumb(usable) : null;
   return {
     id: makeStickerId(),
     name: cleanName,
@@ -534,6 +652,7 @@ async function buildStickerRecord(name, blob, emoji = '') {
     kind,
     emoji,
     blob: usable,
+    ...(thumb ? { thumb } : { thumbChecked: kind === 'image' }),
   };
 }
 
@@ -553,6 +672,14 @@ function stickerEntryIsUsable(path) {
    - A plain .zip of stickers (what Telegram Desktop produces when you save a
      pack folder, and what most third-party exporters emit): no manifest, so
      every image in the archive becomes a sticker. */
+/* How far an import has got, in the transfer banner, so a large pack reads as
+   work in progress rather than a hung app. */
+function noteStickerImportProgress(done, total) {
+  if (typeof setTransferBanner !== 'function' || total < 12) return;
+  const owner = 'sticker-import';
+  if (done >= total) { clearTransferBanner(600, owner); return; }
+  setTransferBanner(t(`وارد کردن استیکرها ${done} از ${total}`, `Importing stickers ${done} of ${total}`), (done / total) * 100, { owner, incoming: true });
+}
 async function readStickerArchive(file) {
   if (!window.JSZip) throw new Error('JSZip missing');
   const zip = await window.JSZip.loadAsync(file);
@@ -576,6 +703,7 @@ async function readStickerArchive(file) {
   paths.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const stickers = [];
+  const total = Math.min(paths.length, STICKER_MAX_PER_PACK);
   for (const path of paths) {
     if (stickers.length >= STICKER_MAX_PER_PACK) break;
     const base = path.split('/').pop().toLowerCase();
@@ -583,6 +711,8 @@ async function readStickerArchive(file) {
     const raw = await zip.file(path).async('blob');
     const record = await buildStickerRecord(path, raw, emojiByFile.get(base) || '');
     if (record) stickers.push(record);
+    noteStickerImportProgress(stickers.length, total);
+    await yieldToPage();
   }
   const fallbackTitle = file.name.replace(STICKER_ARCHIVE_EXT, '');
   return {
@@ -617,12 +747,15 @@ async function importStickerFiles(fileList) {
 
   if (loose.length) {
     const stickers = [];
-    for (const file of loose.slice(0, STICKER_MAX_PER_PACK)) {
+    const chosen = loose.slice(0, STICKER_MAX_PER_PACK);
+    for (const file of chosen) {
       try {
         const record = await buildStickerRecord(file.name, file, '');
         if (record) stickers.push(record);
         else skipped += 1;
       } catch (_error) { skipped += 1; }
+      noteStickerImportProgress(stickers.length + skipped, chosen.length);
+      await yieldToPage();
     }
     if (stickers.length) {
       /* Loose files land in one pack rather than one pack per file: dragging in
@@ -678,6 +811,113 @@ async function importStickerFiles(fileList) {
   }
 }
 
+/* ---- a Telegram pack from its share link ---------------------------------
+ *
+ * Telegram gives a pack out only through its Bot API, so the relay fetches it
+ * (scripts/lib/telegram-stickers.js): first the list of stickers, then each
+ * file. The relay sees which pack is asked for and Telegram sees the relay,
+ * never this device. Files come four at a time, in order, and each is built
+ * the way an imported sticker is — a .webp gets its thumbnail, a .tgs becomes
+ * a Lottie animation, a .webm a video sticker. */
+function telegramPackName(text) {
+  const raw = String(text || '').trim();
+  const match = raw.match(/(?:t(?:elegram)?\.me|telegram\.dog)\/addstickers\/([A-Za-z0-9_]{1,64})/i)
+    || raw.match(/addstickers\?set=([A-Za-z0-9_]{1,64})/i)
+    || raw.match(/^([A-Za-z0-9_]{1,64})$/);
+  return match ? match[1] : '';
+}
+
+function telegramImportReason(reason) {
+  return ({
+    'not-configured': t('رلهٔ شما نمی‌تواند پک تلگرام بگیرد: مدیر سرور باید یک توکن ربات تلگرام (TELEGRAM_BOT_TOKEN) تنظیم کند.', 'Your relay cannot fetch Telegram packs: its operator has to set a Telegram bot token (TELEGRAM_BOT_TOKEN).'),
+    'pack-not-found': t('پکی با این نام در تلگرام نیست.', 'Telegram has no pack by that name.'),
+    'pack-empty': t('این پک تلگرام خالی است.', 'That Telegram pack is empty.'),
+    'bad-name': t('این لینک پک استیکر تلگرام نیست.', 'That is not a Telegram sticker pack link.'),
+    'token-refused': t('تلگرام توکن ربات رله را نپذیرفت.', 'Telegram refused the relay\'s bot token.'),
+    busy: t('رله مشغول است؛ چند لحظه بعد دوباره امتحان کنید.', 'The relay is busy; try again in a moment.'),
+    'rate-limited': t('درخواست‌ها زیاد بود؛ یک دقیقه بعد دوباره امتحان کنید.', 'Too many requests; try again in a minute.'),
+  })[reason] || t('رله نتوانست به تلگرام برسد.', 'The relay could not reach Telegram.');
+}
+
+async function importTelegramStickerPack(text) {
+  const name = telegramPackName(text);
+  if (!name) {
+    notify(telegramImportReason('bad-name'), 'warning');
+    return null;
+  }
+  if (chatState.stickerPacks.length >= STICKER_MAX_PACKS) {
+    notify(t(`سقف ${STICKER_MAX_PACKS} پک استیکر پر است.`, `The ${STICKER_MAX_PACKS} sticker-pack limit is full.`), 'warning');
+    return null;
+  }
+  const already = chatState.stickerPacks.find((pack) => String(pack.telegramName || '').toLowerCase() === name.toLowerCase());
+  if (already && !await PoorijaDialogs.confirm(t(`پک «${already.title}» را قبلاً وارد کرده‌اید. دوباره وارد شود؟`, `You already have "${already.title}". Import it again?`))) return null;
+  const origin = chatServerOrigin();
+  let described;
+  try {
+    const response = await fetch(new URL(`/telegram-stickers/set?name=${encodeURIComponent(name)}`, origin), { cache: 'no-store', mode: 'cors' });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok || !Array.isArray(body.pack?.stickers)) {
+      notify(telegramImportReason(body?.reason || (response.status === 429 ? 'rate-limited' : '')), 'warning');
+      return null;
+    }
+    described = body.pack;
+  } catch (_error) {
+    notify(t('به رله نرسیدیم؛ اتصال را بررسی کنید.', 'The relay could not be reached; check the connection.'), 'warning');
+    return null;
+  }
+  const list = described.stickers.slice(0, STICKER_MAX_PER_PACK);
+  const records = new Array(list.length).fill(null);
+  let done = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const index = next;
+      next += 1;
+      const item = list[index];
+      try {
+        const response = await fetch(new URL(`/telegram-stickers/file?id=${encodeURIComponent(item.file)}`, origin), { cache: 'no-store', mode: 'cors' });
+        if (response.ok) {
+          const blob = await response.blob();
+          const ext = /^(webp|webm|tgs)$/.test(item.ext) ? item.ext : 'webp';
+          records[index] = await buildStickerRecord(`sticker_${String(index + 1).padStart(3, '0')}.${ext}`, blob, item.emoji || '');
+        }
+      } catch (_error) { /* one sticker that did not come is counted below */ }
+      done += 1;
+      noteStickerImportProgress(done, list.length);
+      await yieldToPage();
+    }
+  };
+  setTransferBanner(t(`دریافت پک «${described.title}» از تلگرام…`, `Fetching "${described.title}" from Telegram…`), null, { owner: 'sticker-import', incoming: true });
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  noteStickerImportProgress(list.length, list.length);
+  clearTransferBanner(600, 'sticker-import');
+  const stickers = records.filter(Boolean);
+  if (!stickers.length) {
+    notify(t('هیچ استیکری از این پک دریافت نشد.', 'Not one sticker of that pack came through.'), 'warning');
+    return null;
+  }
+  const pack = {
+    id: makeStickerId(),
+    title: String(described.title || name).slice(0, 60),
+    author: 'Telegram',
+    source: 'telegram',
+    telegramName: String(described.name || name).slice(0, 64),
+    createdAt: new Date().toISOString(),
+    stickers,
+  };
+  await stickerDbPutPack(pack);
+  chatState.stickerPacks.push(pack);
+  chatState.stickerActivePackId = pack.id;
+  rememberActiveStickerPack(pack.id);
+  renderStickerPanel();
+  renderStorageCard().catch(() => {});
+  const missing = list.length - stickers.length;
+  notify(missing
+    ? t(`پک «${pack.title}» با ${stickers.length} استیکر اضافه شد؛ ${missing} استیکر نرسید.`, `Added "${pack.title}" with ${stickers.length} stickers; ${missing} did not come through.`)
+    : t(`پک «${pack.title}» با ${stickers.length} استیکر اضافه شد.`, `Added "${pack.title}" with ${stickers.length} stickers.`), missing ? 'warning' : 'success');
+  return pack;
+}
+
 /* ---- the pack manager --------------------------------------------------
  *
  * One panel, two shapes. A centred card on a desktop, where the backdrop is
@@ -728,7 +968,7 @@ function renderPackManagerList() {
   }
   list.innerHTML = packs.map((pack, index) => {
     const first = pack.stickers?.[0];
-    const url = first ? stickerObjectUrl(first) : '';
+    const url = first ? stickerThumbUrl(first) : '';
     const thumb = url
       ? `<img class="packman-thumb" src="${app().escapeHTML(url)}" alt="">`
       : '<span class="packman-thumb"></span>';
@@ -967,7 +1207,7 @@ function hydrateLottieNodes(root = document) {
   });
 }
 
-function stickerMediaHtml(url, kind, className, { width = 0, height = 0 } = {}) {
+function stickerMediaHtml(url, kind, className, { width = 0, height = 0, lazy = false } = {}) {
   /* The URL can originate off the wire (relay broadcasts, archive imports);
      anything that is not https/blob/data renders as nothing rather than as
      an attacker-chosen src. */
@@ -983,8 +1223,10 @@ function stickerMediaHtml(url, kind, className, { width = 0, height = 0 } = {}) 
   const h = Math.round(Number(height));
   const shape = w > 0 && h > 0 && w <= 10000 && h <= 10000 ? ` style="aspect-ratio:${w} / ${h}"` : '';
   if (kind === 'lottie') return `<div class="${className} chat-lottie" data-lottie-src="${src}"></div>`;
-  if (kind === 'video') return `<video class="${className}" src="${src}"${shape} autoplay loop muted playsinline disablepictureinpicture></video>`;
-  return `<img class="${className}" src="${src}"${shape} alt="" draggable="false" loading="lazy">`;
+  /* lazy: the source is given only while it is on screen (observeLazyMedia). */
+  const source = lazy ? `data-lazy-src="${src}"` : `src="${src}"`;
+  if (kind === 'video') return `<video class="${className}" ${source}${shape} ${lazy ? '' : 'autoplay '}loop muted playsinline disablepictureinpicture></video>`;
+  return `<img class="${className}" ${source}${shape} alt="" draggable="false" ${lazy ? 'decoding="async"' : 'loading="lazy"'}>`;
 }
 
 /* ---- recent, favourites, and the order packs sit in ---------------------- */
@@ -1254,8 +1496,7 @@ async function deleteSelectedStickers() {
   const mapping = new Map();
   for (const { pack, record } of chosen) {
     pack.stickers = pack.stickers.filter((item) => item !== record);
-    const url = chatState.stickerUrls.get(record.id);
-    if (url) { URL.revokeObjectURL(url); chatState.stickerUrls.delete(record.id); }
+    forgetStickerRecordUrls(record);
     mapping.set(stickerRef(pack.id, record.id), null);
     touched.add(pack);
   }
@@ -1366,7 +1607,7 @@ const STICKER_VIRTUAL_RECENT = '__recent__';
 const STICKER_VIRTUAL_FAVOURITE = '__favourite__';
 
 function stickerCellHtml(pack, record, { selectable }) {
-  const url = stickerObjectUrl(record);
+  const url = stickerThumbUrl(record);
   const ref = stickerRef(pack.id, record.id);
   const chosen = stickerSelection.has(ref);
   const starred = stickerIsFavourite(pack.id, record.id);
@@ -1375,7 +1616,7 @@ function stickerCellHtml(pack, record, { selectable }) {
     data-chat-sticker-send="${record.id}"
     data-chat-sticker-pack-id="${pack.id}"
     title="${app().escapeHTML(record.emoji || record.name)}">
-    ${stickerMediaHtml(url, record.kind, 'chat-sticker-thumb')}
+    ${stickerMediaHtml(url, record.kind, 'chat-sticker-thumb', { lazy: true })}
     <span class="chat-sticker-star ${starred ? 'is-on' : ''}"
       data-chat-sticker-fav="${record.id}"
       data-chat-sticker-fav-pack="${pack.id}"
@@ -1399,7 +1640,7 @@ function stickerStripHtml(pack) {
   const stickers = pack?.stickers || [];
   if (!stickers.length) return '';
   const shown = stickers.slice(0, STICKER_STRIP_MAX)
-    .map((record) => stickerMediaHtml(stickerObjectUrl(record), record.kind, 'chat-sticker-manage-thumb'))
+    .map((record) => stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-manage-thumb'))
     .filter(Boolean)
     .join('');
   if (!shown) return '';
@@ -1473,7 +1714,7 @@ function renderStickerPanel() {
 
   tabs.innerHTML = virtualTabs + packs.map((pack) => {
     const cover = pack.stickers[0];
-    const coverUrl = cover ? stickerObjectUrl(cover) : '';
+    const coverUrl = cover ? stickerThumbUrl(cover) : '';
     const coverHtml = cover && cover.kind === 'image'
       ? `<img src="${coverUrl}" alt="" draggable="false">`
       : '<i class="fas fa-layer-group"></i>';
@@ -1535,6 +1776,8 @@ function renderStickerPanel() {
 
   grid.innerHTML = cells;
   hydrateLottieNodes(grid);
+  observeLazyMedia(grid);
+  if (activePack && !virtual) ensurePackThumbs(activePack).catch(() => {});
 }
 
 /* The sticker library, reachable from a test.
@@ -1560,6 +1803,8 @@ window.__stickerProbe = {
   selection: () => [...stickerSelection],
   clearSelection: () => clearStickerSelection(),
   makePack: (title) => buildPackFromSelection(title),
+  telegramName: (text) => telegramPackName(text),
+  importTelegram: (text) => importTelegramStickerPack(text),
   deleteSelected: () => deleteSelectedStickers(),
   copySelected: (packId, move = false) => copySelectedStickersTo(packId === '__gifs__' ? '__gifs__' : chatState.stickerPacks.find((pack) => pack.id === packId), { move }),
   pickMode: (on) => { setStickerPickMode(on); renderStickerPanel(); },

@@ -1,10 +1,67 @@
-# P00RIJA Cryptography 2.98.54
+# P00RIJA Cryptography 2.98.55
 
-Version 2.98.54 · build chat-v147
+Version 2.98.55 · build chat-v148
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پک‌های استیکر سنگین دیگر گوشی را قفل نمی‌کنند · Heavy sticker packs no longer freeze a phone
+
+- **مشکل**: هر پک تا ۲۴۰ استیکر دارد، و پنل همهٔ آن‌ها را با اندازهٔ کامل ۵۱۲ پیکسل و
+  همه را با هم بارگذاری می‌کرد؛ روی گوشی یعنی حدود ۲۴۰ مگابایت تصویر هم‌زمان و یک برنامهٔ
+  قفل‌شده. پک‌های تلگرام دقیقاً همین شکل‌اند: پر و با فایل‌های .webp ۵۱۲ پیکسلی.
+- **حالا**:
+  - هر استیکر ثابت هنگام وارد شدن یک تصویر کوچک ۱۶۰ پیکسلی می‌گیرد و پنل همان را نشان
+    می‌دهد؛ برای ارسال، خود استیکر کامل فرستاده می‌شود. پک‌هایی که قبلاً وارد شده‌اند در
+    پس‌زمینه تصویر کوچک می‌گیرند.
+  - فقط استیکرهایی که روی صفحه یا نزدیک آن هستند بارگذاری می‌شوند و آن‌هایی که دور شده‌اند
+    آزاد می‌شوند. قفسهٔ گیف هم همین‌طور.
+  - وارد کردن پک بزرگ بین استیکرها به برنامه فرصت نفس کشیدن می‌دهد و پیشرفتش را نشان
+    می‌دهد.
+- **The problem**: a pack holds up to 240 stickers, and the panel loaded every one
+  at its full 512 px, all at once; on a phone that is about 240 MB of pictures at
+  the same moment and a frozen app. Telegram packs are exactly that shape: full,
+  and 512 px .webp files.
+- **Now**:
+  - Each static sticker gets a 160 px thumbnail as it is imported, and the panel
+    shows that; sending sends the full sticker. Packs imported before get their
+    thumbnails in the background.
+  - Only the stickers on screen or near it are loaded, and the ones scrolled far
+    away are let go. The GIF shelf works the same way.
+  - Importing a large pack lets the app breathe between stickers and shows its
+    progress.
+
+## وارد کردن پک استیکر از لینک تلگرام · Importing a sticker pack from a Telegram link
+
+- در پنل استیکر، دکمهٔ «وارد کردن» حالا دو گزینه دارد: «از فایل» و «از لینک تلگرام». لینک
+  اشتراک پک را (مثل t.me/addstickers/نام_پک) بچسبانید تا پک با عنوان و ایموجی‌هایش اضافه
+  شود؛ استیکرهای ثابت، متحرک (.tgs) و ویدیویی (.webm).
+- تلگرام پک را فقط از راه API ربات می‌دهد، پس رله آن را می‌گیرد: رله با توکن ربات خودش
+  (TELEGRAM_BOT_TOKEN) از تلگرام می‌پرسد، و رله‌ای که به تلگرام دسترسی ندارد سؤال را به
+  رله‌ای که دارد می‌سپارد (TELEGRAM_STICKERS_UPSTREAM). توکن هرگز از رله بیرون نمی‌رود و
+  تلگرام آدرس رله را می‌بیند، نه آدرس شما. رله فقط فایل‌های همان پکی را می‌گیرد که توصیفش
+  کرده است.
+- اگر رله هیچ‌کدام را نداشته باشد، برنامه همین را توضیح می‌دهد.
+- In the sticker panel, the Import button now offers "From a file" and "From a
+  Telegram link". Paste a pack's share link (like t.me/addstickers/pack_name) and
+  the pack is added with its title and emoji: static, animated (.tgs), and video
+  (.webm) stickers.
+- Telegram hands packs out only through its bot API, so the relay fetches it: a
+  relay asks Telegram with its own bot token (TELEGRAM_BOT_TOKEN), and a relay
+  that cannot reach Telegram hands the question to one that can
+  (TELEGRAM_STICKERS_UPSTREAM). The token never leaves the relay, and Telegram
+  sees the relay's address, not yours. The relay fetches only the files of a pack
+  it has described.
+- A relay with neither says so, and the app explains.
+
+---
+
+# P00RIJA Cryptography 2.98.54
+
+Version 2.98.54 · build chat-v147
 
 ---
 

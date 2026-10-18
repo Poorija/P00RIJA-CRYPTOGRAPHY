@@ -1383,7 +1383,27 @@ notify(t('ارسال کارت مخاطب ناموفق بود.', 'Sharing the con
 }
 });
 // --- stickers ---------------------------------------------------------
-const openStickerImport = () => document.getElementById('chatStickerInput')?.click();
+/* Import from a file, as before, or from a Telegram pack's share link
+   (importTelegramStickerPack). */
+const openStickerImport = async () => {
+const choice = await PoorijaDialogs.choose(t('استیکرها از کجا وارد شوند؟', 'Import stickers from where?'), [
+{ value: 'file', label: t('از فایل', 'From a file'), hint: t('zip، wastickers، یا استیکرهای تکی', 'zip, wastickers, or single stickers') },
+{ value: 'telegram', label: t('از لینک تلگرام', 'From a Telegram link'), hint: t('مثل t.me/addstickers/نام_پک', 'like t.me/addstickers/pack_name') },
+], { cancelLabel: t('انصراف', 'Cancel') });
+if (choice === 'file') {
+document.getElementById('chatStickerInput')?.click();
+return;
+}
+if (choice !== 'telegram') return;
+const link = await PoorijaDialogs.prompt(t('لینک اشتراک پک استیکر تلگرام را بچسبانید:', 'Paste the Telegram sticker pack\'s share link:'), { placeholder: 'https://t.me/addstickers/…' });
+if (!link) return;
+try {
+await importTelegramStickerPack(link);
+} catch (error) {
+console.error('[Stickers] Telegram import failed', error);
+notify(t('وارد کردن پک تلگرام ناموفق بود.', 'Importing the Telegram pack failed.'), 'error');
+}
+};
 document.getElementById('chatStickerBtn')?.addEventListener('click', (event) => {
 event.preventDefault();
 event.stopPropagation();

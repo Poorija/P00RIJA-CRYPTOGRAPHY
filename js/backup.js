@@ -135,8 +135,11 @@
     for (const pack of packRows) {
       const stickers = [];
       for (const sticker of pack.stickers || []) {
+        /* The picker's thumbnail is left out: it is made again from the
+           sticker after a restore, and a Blob does not survive JSON. */
+        const { thumb, thumbChecked, ...kept } = sticker;
         stickers.push({
-          ...sticker,
+          ...kept,
           blob: await blobToBase64(sticker.blob),
           blobType: sticker.blob?.type || '',
         });

@@ -115,6 +115,10 @@ services:
       # Link previews for the web and phone apps: the relay fetches the page a
       # person is about to share (it sees the link; nothing is kept). 0 = off.
       CHAT_LINK_PREVIEWS: ${CHAT_LINK_PREVIEWS:-1}
+      # Telegram sticker packs from a share link: a bot token lets this relay
+      # ask Telegram; without one, an upstream relay that has a token is asked.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_STICKERS_UPSTREAM: ${TELEGRAM_STICKERS_UPSTREAM:-}
       # The relay's own plain-http ports (9000, 9001, 9080) answer only this
       # machine and nginx, never the internet. docker0 stands for the Docker
       # bridge address nginx reaches the relay at (chat-signal:host-gateway).

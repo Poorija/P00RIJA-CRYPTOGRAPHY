@@ -217,6 +217,11 @@
       en: { t: 'The voice changer', b: 'It has several modes, in two kinds. The effect modes change how you sound but anyone who knows you will still know you. The disguise modes move pitch and formants together and are hard to undo - hard, not impossible: your rhythm, your pauses and your accent all survive. Everything is processed on this device, and you can save the result.' },
     },
     {
+      id: 'telegram-stickers', tab: 'chat', cat: 'chat',
+      fa: { t: 'وارد کردن پک استیکر از لینک تلگرام', b: 'در پنل استیکر، دکمهٔ «وارد کردن» را بزنید، «از لینک تلگرام» را انتخاب کنید و لینک اشتراک پک را (مثل t.me/addstickers/نام_پک) بچسبانید. تلگرام پک را فقط از راه API ربات می‌دهد، پس رلهٔ شما آن را می‌گیرد: رله می‌بیند کدام پک خواسته شده و تلگرام آدرس رله را می‌بیند، نه آدرس شما. برای این کار مدیر رله باید یک توکن ربات تلگرام تنظیم کرده باشد؛ رله‌ای که به تلگرام دسترسی ندارد می‌تواند از رلهٔ دیگری کمک بگیرد.' },
+      en: { t: 'Importing a sticker pack from a Telegram link', b: 'In the sticker panel, press Import, choose "From a Telegram link", and paste the pack\'s share link (like t.me/addstickers/pack_name). Telegram hands packs out only through its bot API, so your relay fetches it: the relay sees which pack is asked for, and Telegram sees the relay\'s address, not yours. The relay\'s operator has to have set a Telegram bot token for this; a relay that cannot reach Telegram can ask another relay that can.' },
+    },
+    {
       id: 'gifs-keyboard', tab: 'chat', cat: 'chat',
       fa: { t: 'گیف و استیکر از کیبورد گوشی', b: 'برنامه گیف و استیکر را از هر راهی که برسد می‌فرستد. محدودیت از خود سیستم است: روی اندروید، Chrome و WebView اندروید (که نسخهٔ نیتیو روی آن اجرا می‌شود) هنوز اجازه نمی‌دهند Gboard گیف یا استیکر را مستقیم در کادر متن یک صفحه بگذارد، و Gboard پیام «این برنامه از گیف پشتیبانی نمی‌کند» را نشان می‌دهد. روی آیفون و آیپد، استیکرها، Memoji و Genmoji از «کادر کیبورد» در پنل استیکر فرستاده می‌شوند.',
         steps: [

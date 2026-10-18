@@ -81,7 +81,7 @@ function proxyTo(staticPort, relayPort) {
    relay-front.js), as the relay outside Iran does for the one inside — at
    a.frontUrl, through a proxy standing in for nginx's 8586. `bNames` are extra
    origins B calls its own (a public-looking name a client may know B by). */
-export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = false, bNames = [] } = {}) {
+export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = false, bNames = [], envA = {}, envB = {} } = {}) {
   const children = [];
   const logs = [];
   const run = (file, env, label) => {
@@ -148,6 +148,10 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = fals
         CHAT_MIRROR_ORIGINS: other.frontUrl,
         CHAT_ALLOWED_ORIGINS: [side.url, ...bNames].join(','),
       } : {}),
+      /* Whatever a suite needs one side to carry on top — a fake Telegram, an
+         upstream to ask. Functions are called with both sides, so one side
+         can name the other's address. */
+      ...Object.fromEntries(Object.entries(name === 'a' ? envA : envB).map(([key, value]) => [key, typeof value === 'function' ? value(sides) : value])),
     }, `relay-${name}`);
     side.proxyServer = proxyTo(staticPort, side.signal);
     await new Promise((resolve, reject) => {

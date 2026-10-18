@@ -907,12 +907,15 @@ function renderGifShelf() {
     return;
   }
   grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell ${gifSelection.has(record.id) ? 'is-picked' : ''}" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
-      ${stickerMediaHtml(stickerObjectUrl(record), 'gif', 'chat-gif-thumb')}
+      ${stickerMediaHtml(stickerObjectUrl(record), 'gif', 'chat-gif-thumb', { lazy: true })}
       ${picking ? '<span class="chat-sticker-tick chat-gif-tick"><i class="fas fa-check"></i></span>' : ''}
       ${managing ? `<span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
         title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>` : ''}
     </button>`).join('');
   grid.scrollTop = keepScroll;
+  /* A hundred GIFs all moving at once is a hundred decoders running: only
+     the ones on screen are given their picture (observeLazyMedia). */
+  observeLazyMedia(grid);
 }
 
 /* The guide, from the same entry the Help tab shows (js/help-content.js), so

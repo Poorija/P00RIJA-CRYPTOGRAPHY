@@ -27,6 +27,7 @@ const { openTransit, transitFacts } = require('./lib/relay-transit.js');
    in its own module so the server file stays about the server. */
 const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
 const { linkPreview } = require('./lib/link-preview.js');
+const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { WebSocketServer, WebSocket } = require('ws');
@@ -689,6 +690,9 @@ const RATE_LIMITS = {
   /* Each preview is an outbound fetch of up to two pages on someone's behalf;
      a person typing links does a handful a minute. */
   preview: Number(process.env.CHAT_RATE_PREVIEW || 20),
+  /* A Telegram pack is one description and up to 240 files, asked for one
+     after another by a person importing it. */
+  telegram: Number(process.env.CHAT_RATE_TELEGRAM || 300),
 };
 const rateBuckets = new Map();
 
@@ -746,6 +750,7 @@ app.use('/self-destruct', rateLimit('write'));
 app.use('/relay-prove', rateLimit('write'));
 app.use('/relay-mirrors', rateLimit('write'));
 app.use('/link-preview', rateLimit('preview'));
+app.use('/telegram-stickers', rateLimit('telegram'));
 app.use(rateLimit('default'));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -4082,6 +4087,9 @@ app.get('/chat-health', (req, res) => {
     /* Whether POST /link-preview answers, so a client offers the switch only
        against a relay that will do the fetch. */
     linkPreviews: LINK_PREVIEWS_ENABLED,
+    /* Whether this relay can fetch a Telegram sticker pack from a link,
+       itself or through the relay it hands the question to. */
+    telegramStickers: TELEGRAM_STICKERS_AVAILABLE,
     /* So a client learns the relay's name in the probe it already makes. */
     relayId: relayIdentity.id,
     /* Which tree this relay was built from, so a deploy can check it. */
@@ -4207,6 +4215,54 @@ app.post('/link-preview', async (req, res) => {
     linkPreviewsInFlight -= 1;
   }
 });
+
+/* A Telegram sticker pack from its share link (scripts/lib/telegram-stickers.js
+   has the checks). TELEGRAM_BOT_TOKEN lets this relay ask Telegram itself;
+   without one, TELEGRAM_STICKERS_UPSTREAM names a relay that can, and the
+   question is passed to it — the relay inside a network that cannot reach
+   Telegram asks the one outside. Neither set: the endpoint says so, and the
+   app explains. Nothing about who asked is logged or kept. */
+const TELEGRAM_BOT_TOKEN = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const TELEGRAM_STICKERS_UPSTREAM = String(process.env.TELEGRAM_STICKERS_UPSTREAM || '').trim();
+const TELEGRAM_STICKERS_AVAILABLE = Boolean(TELEGRAM_BOT_TOKEN || TELEGRAM_STICKERS_UPSTREAM);
+const TELEGRAM_MAX_IN_FLIGHT = Number(process.env.CHAT_TELEGRAM_MAX_IN_FLIGHT || 12);
+let telegramInFlight = 0;
+function telegramFailure(res, error) {
+  const reason = String(error?.message || 'refused').slice(0, 60);
+  const status = { 'bad-name': 400, 'bad-file': 400, 'pack-not-found': 404, 'pack-empty': 404, 'unknown-file': 409, 'token-refused': 503 }[reason] || 502;
+  return res.status(status).json({ ok: false, reason });
+}
+async function telegramGate(req, res, work) {
+  if (sendRestrictionResponse(req, res)) return;
+  setNoStoreHeaders(res);
+  if (!TELEGRAM_STICKERS_AVAILABLE) return res.status(404).json({ ok: false, reason: 'not-configured' });
+  if (telegramInFlight >= TELEGRAM_MAX_IN_FLIGHT) return res.status(503).json({ ok: false, reason: 'busy' });
+  telegramInFlight += 1;
+  try {
+    return await work();
+  } catch (error) {
+    return telegramFailure(res, error);
+  } finally {
+    telegramInFlight -= 1;
+  }
+}
+app.get('/telegram-stickers/set', (req, res) => telegramGate(req, res, async () => {
+  const name = String(req.query.name || '');
+  if (!telegramStickers.PACK_NAME.test(name)) throw new Error('bad-name');
+  if (TELEGRAM_BOT_TOKEN) return res.json({ ok: true, pack: await telegramStickers.stickerPack(TELEGRAM_BOT_TOKEN, name) });
+  const answer = await telegramStickers.fromUpstream(TELEGRAM_STICKERS_UPSTREAM, `/telegram-stickers/set?name=${encodeURIComponent(name)}`, telegramStickers.MAX_JSON_BYTES);
+  return res.status(answer.status || 502).type('application/json').send(answer.body);
+}));
+app.get('/telegram-stickers/file', (req, res) => telegramGate(req, res, async () => {
+  const id = String(req.query.id || '');
+  if (!telegramStickers.FILE_ID.test(id)) throw new Error('bad-file');
+  if (TELEGRAM_BOT_TOKEN) {
+    const file = await telegramStickers.stickerFile(TELEGRAM_BOT_TOKEN, id);
+    return res.status(200).type(file.type).send(file.body);
+  }
+  const answer = await telegramStickers.fromUpstream(TELEGRAM_STICKERS_UPSTREAM, `/telegram-stickers/file?id=${encodeURIComponent(id)}`, telegramStickers.MAX_FILE_BYTES);
+  return res.status(answer.status || 502).type(answer.type || 'application/octet-stream').send(answer.body);
+}));
 
 /* The relays this one answers for at addresses of its own (CHAT_FRONTS), so a
    client that cannot reach its relay directly can find the door. Public on
