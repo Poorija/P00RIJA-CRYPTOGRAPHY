@@ -1,10 +1,72 @@
-# P00RIJA Cryptography 2.98.50
+# P00RIJA Cryptography 2.98.51
 
-Version 2.98.50 · build chat-v143
+Version 2.98.51 · build chat-v144
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## قفسهٔ گیف · The GIF shelf
+
+- **با گیف‌های زیاد هم درست نمایش داده می‌شود**: روی آیفون، وقتی تعداد گیف‌ها زیاد
+  می‌شد، خانه‌ها روی هم می‌افتادند. حالا هر ردیف ارتفاع خودش را دارد و روی گوشی سه
+  گیف در هر ردیف کنار هم قرار می‌گیرند، مثل استیکرها.
+- **دیگر به اول قفسه برنمی‌گردد**: فرستادن یک گیف قفسه را به اولین گیف می‌برد، چون
+  گیف فرستاده‌شده همان لحظه به اول فهرست منتقل می‌شد. حالا قفسه سر جایش می‌ماند و
+  ترتیب «آخرین استفاده‌شده اول» دفعهٔ بعد که قفسه باز می‌شود اعمال می‌شود.
+- **حذف در حالت مدیریت**: ضربدر حذف گیف فقط با دکمهٔ مدیریت نشان داده می‌شود، مثل
+  حذف پک استیکر، و دیگر روی همهٔ گیف‌ها نیست.
+- **Many GIFs display properly**: on an iPhone, with enough GIFs the cells fell on
+  top of one another. Each row now has a height of its own, and a phone shows
+  three to a row, like the stickers.
+- **No more jumping back to the top**: sending a GIF threw the shelf back to its
+  first GIF, because the GIF just sent moved to the front at once. The shelf now
+  stays where it is, and "used last, shown first" applies the next time it opens.
+- **Removing in the manage view**: the cross that removes a GIF shows only with
+  the manage button, like deleting a sticker pack, instead of on every GIF.
+
+## استیکر متحرک · Animated stickers
+
+- استیکر متحرکی که از گفتگو نگه داشته می‌شد، برای استفادهٔ دوباره ثابت شده بود: هر
+  استیکر بزرگ‌تر از ۲۲۰ کیلوبایت برای کوچک شدن دوباره کشیده می‌شد و فقط فریم اولش
+  می‌ماند. حالا استیکر متحرک همان‌طور که رسیده نگه داشته می‌شود.
+- An animated sticker kept from a conversation came back still: any sticker over
+  220 KB was redrawn to make it smaller, which keeps only the first frame. An
+  animated sticker is now kept exactly as it came.
+
+## انتخاب چندتایی پیام‌ها · Picking several messages
+
+- **یک ضربه، یک انتخاب**: در حالت انتخاب چندتایی، ضربه روی پیام نوار گزینه‌های همان
+  پیام را هم باز می‌کرد، پس برای هر پیام دو ضربه لازم بود و نوار جلوی پیام بعدی را
+  می‌گرفت. حالا هر ضربه فقط پیام را انتخاب می‌کند.
+- **ذخیرهٔ همه با هم**: دکمهٔ جدید دانلود در نوار انتخاب همهٔ فایل‌های انتخاب‌شده را
+  یک‌جا ذخیره می‌کند: یک فایل به همان شکل خودش، چند فایل در یک zip، و روی آیفون از
+  راه منوی اشتراک‌گذاری، تا عکس‌ها مستقیم به Photos بروند.
+- **One tap, one pick**: while picking several messages, a tap also opened that
+  message's toolbar, so each message took two taps and the toolbar covered the
+  next one. A tap now only picks.
+- **Save them all at once**: a new download button on the selection bar saves
+  every picked file in one go: one file as itself, several in one zip, and on an
+  iPhone through the share sheet, so photos can go straight to Photos.
+
+## دانلود عکس پروفایل روی آیفون · Saving a profile photo on an iPhone
+
+- دکمهٔ «دانلود عکس» روی آیفون کاری نمی‌کرد، چون برنامهٔ وب نصب‌شده روی آیفون لینک
+  دانلودی را که به داده‌ی خود تصویر اشاره دارد نادیده می‌گیرد. حالا عکس به‌صورت فایل از
+  منوی اشتراک‌گذاری آیفون ذخیره می‌شود (Save Image یا Save to Files). اندروید و
+  دسکتاپ مثل قبل دانلود می‌کنند.
+- "Download photo" did nothing on an iPhone, because a home-screen web app there
+  ignores a download link to the picture's own data. The photo now saves as a
+  file through the iPhone's share sheet (Save Image or Save to Files). Android and
+  desktop download as before.
+
+---
+
+# P00RIJA Cryptography 2.98.50
+
+Version 2.98.50 · build chat-v143
 
 ---
 

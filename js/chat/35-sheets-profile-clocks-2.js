@@ -1074,6 +1074,12 @@ if (code) await redeemGroupInvite(code);
 // --- multi-select --------------------------------------------------------
 document.getElementById('chatSelectionCancelBtn')?.addEventListener('click', exitSelectionMode);
 document.getElementById('chatSelectionCopyBtn')?.addEventListener('click', copySelection);
+document.getElementById('chatSelectionDownloadBtn')?.addEventListener('click', () => {
+downloadSelection().catch((error) => {
+console.warn('[Chat] saving the selection failed:', error);
+notify(t('ذخیرهٔ فایل‌ها ناموفق بود.', 'Saving the files failed.'), 'error');
+});
+});
 document.getElementById('chatSelectionDeleteBtn')?.addEventListener('click', () => { deleteSelection(); });
 document.getElementById('chatSelectionForwardBtn')?.addEventListener('click', () => {
 if (!selectionCount()) return;

@@ -931,6 +931,9 @@ chatState.activeReactionMessageId = '';
 }
 panel.querySelectorAll('.chat-message-bubble').forEach((bubble) => {
 bubble.onclick = () => {
+/* While picking several messages a tap picks; the toolbar opening on the
+   same tap is what took two taps per message and covered the next one. */
+if (chatState.selectionMode) return;
 const id = bubble.dataset.id || '';
 const opening = chatState.activeMessageId !== id;
 chatState.activeMessageId = opening ? id : '';
@@ -1873,14 +1876,14 @@ function openPeerPhotoCard(peer) {
     if (event.target.closest('[data-peer-photo-close]')) closePeerPhotoCard();
     const download = event.target.closest('[data-peer-photo-download]');
     if (download && photoSrc) {
-      /* A plain anchor on a data: URL — no blob to revoke, no fetch to fail,
-         and the browser names the file from the download attribute. */
-      const link = document.createElement('a');
-      link.href = photoSrc;
-      link.download = `${name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'photo'}.${photoExtension}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      /* Decoded here, in the tap, and saved as a file: an iPhone ignores a
+         download link to a data: URL, so it goes through the share sheet
+         there (saveFilesToDevice) and is a plain download elsewhere. */
+      const [head, body] = photoSrc.split(',');
+      const mime = (/^data:([^;,]+)/.exec(head) || [])[1] || 'image/jpeg';
+      const bytes = Uint8Array.from(atob(body || ''), (c) => c.charCodeAt(0));
+      const fileName = `${name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'photo'}.${photoExtension}`;
+      saveFilesToDevice([new File([bytes], fileName, { type: mime })]);
     }
   });
   document.addEventListener('keydown', peerPhotoCardKeydown);

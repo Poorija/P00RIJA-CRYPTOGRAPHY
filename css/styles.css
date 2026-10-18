@@ -27878,3 +27878,47 @@ html body .flex > .relative.inline-block.w-12 ~ * ,
 html body .flex > div:has(+ .relative.inline-block.w-12) {
   min-width: 0;
 }
+
+/* ============================================================================
+   The GIF shelf holds its rows
+   ----------------------------------------------------------------------------
+   Each cell took its height from aspect-ratio alone. Inside a grid capped by
+   max-height, WebKit counts such a cell as having no minimum height, so with
+   enough GIFs it shrank every row to fit the cap and the cells piled over one
+   another. Rows now have a height of their own and a cell fills its row,
+   three to a line on a phone like the sticker grid beside it. The cross that
+   removes a GIF is drawn only in the manage view, as a sticker's delete is.
+   ========================================================================== */
+html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf {
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  grid-auto-rows: 5.25rem;
+  align-content: start;
+  gap: 0.4rem;
+}
+html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf > .chat-sticker-empty {
+  grid-column: 1 / -1;
+}
+html body #mainApp #content-chat .chat-gif-cell {
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf.is-managing .chat-gif-remove {
+  opacity: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: rgba(220, 38, 38, 0.85);
+}
+@media (max-width: 480px) {
+  html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: 5.5rem;
+  }
+}
+html body #mainApp #content-chat .chat-selection-icon.hidden {
+  display: none !important;
+}
+html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf.is-empty {
+  grid-auto-rows: auto;
+}

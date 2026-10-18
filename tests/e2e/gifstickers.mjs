@@ -207,8 +207,10 @@ const shelf = await A.evaluate(() => {
 });
 check('the + menu GIF row opens the panel on the GIF shelf', shelf.open && shelf.active === 'gifs', JSON.stringify(shelf));
 check('an empty GIF shelf says how to fill it', shelf.empty);
-check('the GIF shelf shows its own import and hides the sticker tools',
-  shelf.gifImport && !shelf.stickerImport && !shelf.manage && !shelf.tabs, JSON.stringify(shelf));
+/* The manage button stays: on the GIF shelf it is what shows the cross that
+   removes a GIF, as it shows a sticker pack's delete. */
+check('the GIF shelf shows its own import and manage, and hides the sticker tools',
+  shelf.gifImport && !shelf.stickerImport && shelf.manage && !shelf.tabs, JSON.stringify(shelf));
 check('the + menu closes behind it', shelf.sheetClosed);
 await A.evaluate(() => document.querySelector('[data-chat-panel-shelf="stickers"]')?.click());
 await A.waitForTimeout(300);
@@ -393,6 +395,10 @@ const reloaded = await B.evaluate(() => ({ library: window.__gifProbe.library().
 check('the GIF shelf and the sticker pack both come back, apart', reloaded.library === 1 && reloaded.packs === 1, JSON.stringify(reloaded));
 await B.evaluate(() => setStickerPanelVisible(true, { shelf: 'gifs' }));
 await B.waitForTimeout(400);
+const crossBeforeManage = await B.evaluate(() => document.querySelectorAll('#chatStickerGrid [data-chat-gif-remove]').length);
+await B.evaluate(() => document.getElementById('chatStickerManageBtn')?.click());
+await B.waitForTimeout(300);
+check('the remove cross waits for the manage view', crossBeforeManage === 0);
 await B.evaluate(() => document.querySelector('#chatStickerGrid [data-chat-gif-remove]')?.click());
 await B.waitForTimeout(800);
 check('the cross removes a GIF from the shelf, and does not send it',

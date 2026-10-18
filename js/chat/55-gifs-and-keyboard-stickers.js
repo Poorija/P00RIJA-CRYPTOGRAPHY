@@ -676,6 +676,7 @@ async function saveGif(blob) {
   const hash = await gifContentHash(blob);
   const existing = library.stickers.find((record) => record.hash === hash);
   if (existing) {
+    existing.usedAt = Date.now();
     library.stickers = [existing, ...library.stickers.filter((record) => record !== existing)];
   } else {
     library.stickers.unshift({
@@ -767,7 +768,7 @@ function syncStickerPanelShelf() {
     button.classList.toggle('is-active', on);
     button.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  ['chatStickerImportBtn', 'chatStickerManageBtn', 'chatStickerPacksBtn'].forEach((id) => {
+  ['chatStickerImportBtn', 'chatStickerPacksBtn'].forEach((id) => {
     document.getElementById(id)?.classList.toggle('hidden', gifs);
   });
   document.getElementById('chatGifImportBtn')?.classList.toggle('hidden', !gifs);
@@ -777,10 +778,21 @@ function syncStickerPanelShelf() {
   if (gifs) document.getElementById('chatStickerSelbar')?.classList.add('hidden');
 }
 
+/* Used last, shown first — decided when the shelf is drawn, not when a GIF is
+   sent: moving the GIF under the finger to the top and redrawing is what
+   threw the shelf back to its first row on every send. */
+function gifShelfOrder(records) {
+  const stamp = (record) => Number(record.usedAt || 0) || Date.parse(record.addedAt || 0) || 0;
+  return records.slice().sort((a, b) => stamp(b) - stamp(a));
+}
 function renderGifShelf() {
   const grid = document.getElementById('chatStickerGrid');
   if (!grid) return;
-  const records = gifLibraryRecords();
+  const keepScroll = grid.classList.contains('is-gif-shelf') ? grid.scrollTop : 0;
+  const managing = Boolean(chatState.stickerManageMode);
+  grid.classList.toggle('is-managing', managing);
+  const records = gifShelfOrder(gifLibraryRecords());
+  grid.classList.toggle('is-empty', !records.length);
   if (!records.length) {
     grid.innerHTML = `<div class="chat-sticker-empty">
       <i class="fas fa-photo-film"></i>
@@ -795,9 +807,10 @@ function renderGifShelf() {
   }
   grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
       ${stickerMediaHtml(stickerObjectUrl(record), 'gif', 'chat-gif-thumb')}
-      <span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
-        title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>
+      ${managing ? `<span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
+        title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>` : ''}
     </button>`).join('');
+  grid.scrollTop = keepScroll;
 }
 
 /* The guide, from the same entry the Help tab shows (js/help-content.js), so
@@ -862,11 +875,10 @@ function bindGifShelf() {
     cell.classList.add('is-sending');
     try {
       if (await sendGifBlob(record.blob)) {
-        /* Used last, shown first. */
-        const library = chatState.gifLibrary;
-        library.stickers = [record, ...library.stickers.filter((item) => item !== record)];
-        stickerDbPutPack(library).catch(() => {});
-        renderStickerPanel();
+        /* Noted, not acted on: the shelf reorders the next time it opens
+           (gifShelfOrder), so the GIF stays where the finger is. */
+        record.usedAt = Date.now();
+        stickerDbPutPack(chatState.gifLibrary).catch(() => {});
       }
     } catch (error) {
       console.error('[GIF] send failed', error);

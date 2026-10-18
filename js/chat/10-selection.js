@@ -111,6 +111,11 @@ function enterSelectionMode(firstId) {
   chatState.selectionMode = true;
   chatState.selectedMessages.clear();
   if (firstId) chatState.selectedMessages.add(firstId);
+  /* A message toolbar left open would sit over the very messages being
+     picked. */
+  chatState.activeMessageId = '';
+  chatState.activeReactionMessageId = '';
+  if (typeof closeReactionPopup === 'function') closeReactionPopup();
   syncSelectionBar();
   renderMessages();
 }
@@ -137,6 +142,59 @@ function syncSelectionBar() {
   bar.classList.toggle('hidden', !chatState.selectionMode);
   const count = document.getElementById('chatSelectionCount');
   if (count) count.textContent = String(selectionCount());
+  const download = document.getElementById('chatSelectionDownloadBtn');
+  if (download) download.classList.toggle('hidden', !selectedMediaEntries().length);
+}
+/* The picked messages that carry a file of their own: attachments, voice
+   notes, stickers, GIFs. */
+function selectedMediaEntries() {
+  if (!chatState.selectionMode) return [];
+  return selectedEntriesInOrder().filter((entry) => isMediaEntry(entry) && !entry.viewOnce && !entry.viewOnceConsumed);
+}
+
+/* Every picked file at once. One goes as itself; several go as one zip, since
+   a browser asks before letting a page start a run of downloads and a phone
+   would scatter them. An iPhone gets the share sheet with all of them instead,
+   where photos can go straight to Photos. */
+async function downloadSelection() {
+  const entries = selectedMediaEntries();
+  if (!entries.length) return;
+  const files = [];
+  const used = new Set();
+  for (const entry of entries) {
+    let blob = null;
+    try {
+      if (entry.downloadUrl) blob = await (await fetch(entry.downloadUrl)).blob();
+      if (!blob) blob = (await readMessageMedia(entry.id))?.blob || null;
+    } catch (_error) { blob = null; }
+    if (!blob) continue;
+    let base = String(entry.name || '').split('/').pop() || `${entry.type || 'file'}-${entry.id}`;
+    if (!/\.[a-z0-9]{1,6}$/i.test(base)) {
+      const ext = (blob.type.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 6) || 'bin';
+      base = `${base}.${ext}`;
+    }
+    let name = base;
+    for (let n = 2; used.has(name.toLowerCase()); n += 1) name = base.replace(/(\.[^.]+)?$/, ` (${n})$1`);
+    used.add(name.toLowerCase());
+    files.push(new File([blob], name, { type: blob.type || entry.mime || 'application/octet-stream' }));
+  }
+  if (!files.length) {
+    notify(t('هیچ‌کدام از فایل‌های انتخاب‌شده روی این دستگاه نیست.', 'None of the selected files is on this device.'), 'warning');
+    return;
+  }
+  const missing = entries.length - files.length;
+  if (files.length === 1 || chatIsAppleMobile() || typeof window.JSZip !== 'function') {
+    await saveFilesToDevice(files);
+  } else {
+    const zip = new window.JSZip();
+    files.forEach((file) => zip.file(file.name, file));
+    const archive = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    chatDownloadBlob(archive, `poorija-files-${stamp}.zip`);
+  }
+  notify(missing
+    ? t(`${files.length} فایل ذخیره شد؛ ${missing} فایل روی این دستگاه نبود.`, `${files.length} file(s) saved; ${missing} were not on this device.`)
+    : t(`${files.length} فایل ذخیره شد.`, `${files.length} file(s) saved.`), missing ? 'warning' : 'success');
 }
 function selectedEntriesInOrder() {
   const history = chatState.history[chatState.activeConversationId] || [];

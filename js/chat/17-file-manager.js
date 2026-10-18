@@ -287,6 +287,29 @@ function findLocalFile(id) {
   return (chatState.fileManagerCache || []).find((file) => file.id === id) || null;
 }
 
+/* An iPhone or iPad saves through the share sheet ("Save Image", "Save to
+   Files"): a home-screen web app there ignores a download link to a data: URL
+   outright, and a blob link only opens a preview. Elsewhere a plain download.
+   A share the system refuses — it wants the tap that started it, and an await
+   in between can spend that — falls back to the link. */
+function chatIsAppleMobile() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(navigator.platform || '') && (navigator.maxTouchPoints || 0) > 1);
+}
+async function saveFilesToDevice(files) {
+  const list = (files || []).filter(Boolean);
+  if (!list.length) return false;
+  if (chatIsAppleMobile() && navigator.canShare?.({ files: list })) {
+    try {
+      await navigator.share({ files: list });
+      return true;
+    } catch (error) {
+      if (error?.name === 'AbortError') return false;
+    }
+  }
+  list.forEach((file) => chatDownloadBlob(file, file.name));
+  return true;
+}
 function chatDownloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

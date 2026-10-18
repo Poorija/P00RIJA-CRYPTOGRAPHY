@@ -440,6 +440,12 @@ async function normalizeStickerImage(blob, name) {
   if (blob.size <= STICKER_RECOMPRESS_OVER) return blob;
   if (/\.svg$/i.test(name) || /svg/i.test(blob.type)) return blob;
   if (typeof createImageBitmap !== 'function') return blob;
+  /* A canvas keeps the first frame and nothing else, so an animated WebP, PNG
+     or GIF is kept exactly as it came. The note below promised that and the
+     check was never made: an animated sticker kept from a chat came back
+     still. Read from the bytes, not the name (55-gifs-and-keyboard-stickers.js). */
+  if (typeof pictureIsAnimated === 'function' && typeof sniffPictureType === 'function'
+    && await pictureIsAnimated(blob, await sniffPictureType(blob))) return blob;
   try {
     const bitmap = await createImageBitmap(blob);
     const scale = Math.min(1, STICKER_TARGET_EDGE / Math.max(bitmap.width, bitmap.height));
@@ -1206,6 +1212,7 @@ function renderStickerPanel() {
     renderGifShelf();
     return;
   }
+  grid.classList.remove('is-managing', 'is-empty');
   const packs = orderedStickerPacks();
   /* Leaving the manage view ends the pick: a tick that survives into the
      sticker grid and reappears weeks later is a question with no answer. */
