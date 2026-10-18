@@ -1,10 +1,50 @@
-# P00RIJA Cryptography 2.98.56
+# P00RIJA Cryptography 2.98.57
 
-Version 2.98.56 · build chat-v149
+Version 2.98.57 · build chat-v150
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پک‌های استیکر روی آیفون دیگر خراب نمی‌شوند · Sticker packs no longer break on an iPhone
+
+- **مشکل**: روی آیفون، تصویری که از حافظهٔ برنامه (IndexedDB) خوانده می‌شود به فایلی وصل
+  است که Safari برای همان رکورد نگه می‌دارد. اگر رکورد دوباره با همان تصویرها نوشته شود،
+  رکورد تازه به فایل‌هایی اشاره می‌کند که Safari بعداً دور می‌ریزد. در نسخهٔ 2.98.55 برای
+  پک‌های قدیمی تصویر کوچک ساخته و پک دوباره نوشته می‌شد، و همین پک‌هایی را که سالم بودند
+  خراب کرد: تصویر شکسته یا خانهٔ خالی. اصلاح نسخهٔ 2.98.54 هم که بعد از نوشتن تصویرها را
+  دوباره می‌خواند، گاهی تصویر استیکر دیگری را برمی‌گرداند؛ تکراری دیده شدن پک تلگرام از
+  همین بود.
+- **حالا**: پیش از هر نوشتن، از هر تصویر یک نسخه در حافظه گرفته می‌شود؛ Safari فایل تازهٔ
+  خودش را ذخیره می‌کند و برنامه از همان نسخه نمایش می‌دهد. بعد از نوشتن هم چیزی دوباره
+  خوانده نمی‌شود. این برای همهٔ نوشتن‌هاست: تصویر کوچک، کپی و انتقال و حذف استیکر، تغییر
+  نام پک، ذخیره و حذف گیف.
+- **پکی که قبلاً خراب شده**: اگر تصویرهای یک پک دیگر خوانده نشوند، برنامه هنگام نمایش آن
+  پک می‌گوید که دوباره واردش کنید. استیکرهایی که از دست رفته‌اند برنمی‌گردند؛ پک را حذف
+  و دوباره وارد کنید (پک تلگرام را از همان لینک).
+- **The problem**: on an iPhone, a picture read from the app's storage (IndexedDB)
+  is tied to a file Safari keeps for that record. Writing the record again with
+  those same pictures leaves the new record pointing at files Safari later throws
+  away. In 2.98.55 thumbnails were made for older packs and the pack written
+  again, and that is what broke packs that had been fine: broken images or empty
+  cells. The 2.98.54 attempt, which read the pictures back after writing, could
+  return another sticker's picture; that is why a Telegram pack showed repeats.
+- **Now**: before every write, each picture is copied into memory; Safari stores
+  fresh files of its own and the app draws from the copies. Nothing is read back
+  after a write. This holds for every write: thumbnails, copying, moving and
+  deleting stickers, renaming a pack, saving and removing GIFs.
+- **A pack damaged already**: when a pack's pictures can no longer be read, the app
+  says so as it is shown and asks for it to be imported again. Stickers already
+  lost do not come back; delete the pack and import it again (a Telegram pack from
+  the same link).
+
+---
+
+# P00RIJA Cryptography 2.98.56
+
+Version 2.98.56 · build chat-v149
 
 ---
 

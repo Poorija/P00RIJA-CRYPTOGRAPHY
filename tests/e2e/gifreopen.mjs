@@ -75,7 +75,7 @@ try {
       count: kept.length,
     };
   }, GIF_B64);
-  check('after a write, the pictures in memory are the ones read back, and old URLs are gone', fresh.handlesReplaced && fresh.oldUrlsDropped && fresh.count === 9, JSON.stringify(fresh));
+  check('after a write, the pictures in memory are fresh copies, and old URLs are gone', fresh.handlesReplaced && fresh.oldUrlsDropped && fresh.count === 9, JSON.stringify(fresh));
 
   const healed = await PAGE.evaluate(async () => {
     /* Every picture's URL dead at once, the way a dropped stored copy leaves

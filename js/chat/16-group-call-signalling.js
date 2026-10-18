@@ -273,40 +273,98 @@ function stickerDbRequest(storeName, mode, run) {
 
 const stickerDbGetAllPacks = () => stickerDbRequest(STICKER_PACK_STORE, 'readonly', (store) => store.getAll());
 const stickerDbPutPackRecord = (pack) => stickerDbRequest(STICKER_PACK_STORE, 'readwrite', (store) => store.put(pack));
-const stickerDbGetPack = (id) => stickerDbRequest(STICKER_PACK_STORE, 'readonly', (store) => store.get(id));
-/* Writing a pack, and then taking its pictures back from what was written.
-   On an iPhone a picture read from IndexedDB is a handle onto the stored copy,
-   and writing the record again throws that copy away: every handle read
-   before the write — and every object URL made from one — goes dead. Sending
-   a GIF rewrote the GIF library to note when it was used, and the next time
-   the shelf opened every GIF was a broken image. So after each write the
-   pack's pictures are read back fresh, and the URLs made from the old ones are
-   dropped, to be made again on the next draw. */
+/* Writing a pack without handing Safari back its own pictures.
+   On an iPhone a picture read from IndexedDB is a handle onto a file Safari
+   keeps for that record. Putting the record again with those same handles in
+   it leaves the new record pointing at the old files — which Safari then
+   throws away — so every sticker of a pack written that way became a broken
+   image, at once or on the next start. That is what broke the GIF shelf after
+   a send (the library was rewritten to note the send), and every older pack
+   once thumbnails were made for it and stored. Reading the record back after
+   the write (the previous attempt at this) made it worse: what came back could
+   be another sticker's picture.
+   So every picture is copied into memory before the write: Safari then stores
+   fresh files of its own, the page keeps drawing from the copies, and nothing
+   is read back. A picture that can no longer be read at all — lost before
+   this was fixed — is dropped from the pack rather than written again, and the
+   person is told which pack to import again (warnLostStickers). */
+const stickerMemoryBlobs = new WeakSet();
+function stickerBlobInMemory(blob) {
+  if (blob instanceof Blob) stickerMemoryBlobs.add(blob);
+  return blob;
+}
+async function stickerBlobCopy(blob) {
+  if (stickerMemoryBlobs.has(blob)) return blob;
+  const copy = new Blob([await blob.arrayBuffer()], { type: blob.type });
+  stickerMemoryBlobs.add(copy);
+  return copy;
+}
 async function stickerDbPutPack(pack) {
+  let changed = 0;
+  let lost = 0;
+  const kept = [];
+  for (const record of pack.stickers || []) {
+    let gone = false;
+    for (const field of ['blob', 'thumb']) {
+      const value = record[field];
+      if (!(value instanceof Blob)) continue;
+      try {
+        const copy = await stickerBlobCopy(value);
+        if (copy !== value) { record[field] = copy; changed += 1; }
+      } catch (_error) {
+        if (field === 'blob') gone = true;
+        else delete record.thumb;
+      }
+    }
+    if (gone) { lost += 1; forgetStickerRecordUrls(record); continue; }
+    kept.push(record);
+  }
+  if (lost) {
+    pack.stickers = kept;
+    warnLostStickers(pack, lost);
+  }
   const result = await stickerDbPutPackRecord(pack);
-  try {
-    const stored = await stickerDbGetPack(pack.id);
-    const fresh = new Map((stored?.stickers || []).map((record) => [record.id, record]));
-    let changed = 0;
-    for (const record of pack.stickers || []) {
-      const again = fresh.get(record.id);
-      if (!again?.blob || again.blob === record.blob) continue;
-      record.blob = again.blob;
-      if (again.thumb instanceof Blob) record.thumb = again.thumb;
-      forgetStickerRecordUrls(record);
-      changed += 1;
-    }
-    /* Drawn again whether the panel is showing or not: a hidden panel still
-       holds pictures pointing at the URLs just dropped, and each would fail
-       the moment it was looked at. */
-    if (changed) {
-      renderStickerPanel();
-      if (typeof renderPackManagerList === 'function' && packManagerElement) renderPackManagerList();
-    }
-  } catch (error) {
-    console.warn('[Stickers] the written pack was not read back', error);
+  /* The URLs made from the old handles may stop answering once the write has
+     gone through; the copies get URLs of their own on the next draw. */
+  if (changed || lost) {
+    releaseStickerUrls(pack);
+    renderStickerPanel();
+    if (typeof renderPackManagerList === 'function' && packManagerElement) renderPackManagerList();
   }
   return result;
+}
+
+/* Said once per pack per run: stickers whose pictures this device can no
+   longer read are not coming back, and importing the pack again is the cure. */
+const lostStickerWarned = new Set();
+function warnLostStickers(pack, count) {
+  if (!pack?.id || lostStickerWarned.has(pack.id)) return;
+  lostStickerWarned.add(pack.id);
+  const title = pack.title || (pack.id === GIF_LIBRARY_ID ? t('گیف‌ها', 'GIFs') : t('پک', 'pack'));
+  notify(t(
+    `${count} مورد از «${title}» روی این دستگاه دیگر خوانده نمی‌شود؛ آن را دوباره وارد کنید.`,
+    `${count} item(s) of "${title}" can no longer be read on this device; import it again.`,
+  ), 'warning');
+}
+/* Whether a pack's pictures can still be read, tried on a few of them when it
+   is shown: a pack damaged before the fix above draws as broken images, and
+   saying so beats leaving the person to wonder. */
+const packReadChecked = new Set();
+async function checkPackReadable(pack) {
+  if (!pack?.stickers?.length || packReadChecked.has(pack.id)) return;
+  packReadChecked.add(pack.id);
+  let lost = 0;
+  for (const record of pack.stickers.slice(0, 4)) {
+    if (!(record.blob instanceof Blob) || stickerMemoryBlobs.has(record.blob)) continue;
+    try { await record.blob.slice(0, 16).arrayBuffer(); } catch (_error) { lost += 1; }
+  }
+  if (lost) {
+    let total = 0;
+    for (const record of pack.stickers) {
+      try { await record.blob.slice(0, 16).arrayBuffer(); } catch (_error) { total += 1; }
+    }
+    warnLostStickers(pack, total || lost);
+  }
 }
 
 /* A picture in the sticker panel that will not load — a handle the system
@@ -427,7 +485,7 @@ async function makeStickerThumb(blob) {
     canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
     const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
-    return thumb && thumb.size < blob.size ? thumb : null;
+    return thumb && thumb.size < blob.size ? stickerBlobInMemory(thumb) : null;
   } catch (_error) {
     return null;
   }
@@ -1777,7 +1835,10 @@ function renderStickerPanel() {
   grid.innerHTML = cells;
   hydrateLottieNodes(grid);
   observeLazyMedia(grid);
-  if (activePack && !virtual) ensurePackThumbs(activePack).catch(() => {});
+  if (activePack && !virtual) {
+    checkPackReadable(activePack).catch(() => {});
+    ensurePackThumbs(activePack).catch(() => {});
+  }
 }
 
 /* The sticker library, reachable from a test.
