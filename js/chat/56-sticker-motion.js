@@ -141,10 +141,13 @@ async function loopForeverBlob(blob, type = '') {
 }
 
 /* Video stickers. WebKit pauses a muted looping video it decides nobody is
-   watching, and now and then stalls one at its loop point while it still
-   claims to be playing; both looked like a sticker that froze until the
-   panel was touched. Every sticker video that should be moving is checked
-   on a slow tick and started again — from the top when it has stalled. */
+   watching, and on an iPhone a WebM sticker plays its loop two or three
+   times and then stops on its last frame while still claiming to play; both
+   looked like a sticker that froze until the panel was touched. Every sticker
+   video that should be moving is watched frame by frame: one that has stopped
+   at its end is sent back to the start at once — a frame or two, where the
+   slow check this began with left a two- or three-second pause before every
+   replay — and one that was paused is played again. */
 const loopingVideos = new Set();
 function videoShouldMove(video) {
   return video.isConnected && video.__onScreen !== false && Boolean(video.getAttribute('src'))
@@ -155,9 +158,36 @@ function resumeStickerVideo(video) {
   if (video.ended) video.currentTime = 0;
   video.play?.().catch(() => {});
 }
+let loopWatchFrame = 0;
+function watchLoopingVideos() {
+  if (loopWatchFrame || !loopingVideos.size) return;
+  const tick = (now) => {
+    loopWatchFrame = 0;
+    loopingVideos.forEach((video) => {
+      if (!video.isConnected) { loopingVideos.delete(video); return; }
+      if (!videoShouldMove(video)) { video.__movedAt = now; return; }
+      if (video.paused || video.ended) { resumeStickerVideo(video); video.__movedAt = now; return; }
+      const time = video.currentTime;
+      if (time !== video.__lastTime) {
+        video.__lastTime = time;
+        video.__movedAt = now;
+        return;
+      }
+      const nearEnd = video.duration > 0 && video.duration - time < 0.35;
+      if (video.readyState >= 2 && now - (video.__movedAt || now) > (nearEnd ? 80 : 700)) {
+        video.__movedAt = now;
+        if (nearEnd) video.currentTime = 0;
+        video.play?.().catch(() => {});
+      }
+    });
+    if (loopingVideos.size) loopWatchFrame = requestAnimationFrame(tick);
+  };
+  loopWatchFrame = requestAnimationFrame(tick);
+}
 function keepVideoLooping(video) {
   if (!(video instanceof HTMLVideoElement)) return;
   loopingVideos.add(video);
+  watchLoopingVideos();
   if (video.__looping) return;
   video.__looping = true;
   video.loop = true;
@@ -168,15 +198,10 @@ function keepVideoLooping(video) {
 }
 function sweepStickerMotion() {
   loopingVideos.forEach((video) => {
-    if (!video.isConnected) { loopingVideos.delete(video); return; }
-    if (!videoShouldMove(video)) return;
-    if (video.paused || video.ended) { resumeStickerVideo(video); return; }
-    if (video.readyState >= 2 && video.currentTime === video.__lastTime) {
-      video.currentTime = 0;
-      video.play?.().catch(() => {});
-    }
-    video.__lastTime = video.currentTime;
+    if (!video.isConnected) loopingVideos.delete(video);
+    else resumeStickerVideo(video);
   });
+  watchLoopingVideos();
   if (typeof sweepLottieNodes === 'function') sweepLottieNodes();
 }
 window.setInterval(sweepStickerMotion, 1500);

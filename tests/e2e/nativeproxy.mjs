@@ -120,7 +120,14 @@ try {
   const plain = await browser.newPage();
   await plain.goto(`${stacks.a.url}/index.html`, { waitUntil: 'load' });
   await plain.waitForTimeout(2500);
-  check('in a browser there is no proxy row at all', await plain.evaluate(() => document.getElementById('chatProxyRow')?.classList.contains('hidden')));
+  /* A page cannot set a proxy for itself, so the web app and the PWA get the
+     way that works — a VPN-mode client on the device — and no field. */
+  const plainRow = await plain.evaluate(() => ({
+    shown: !document.getElementById('chatProxyRow')?.classList.contains('hidden'),
+    inputHidden: document.querySelector('#chatProxyRow .chat-proxy-input')?.classList.contains('hidden'),
+    note: document.getElementById('chatProxyNote')?.textContent || '',
+  }));
+  check('in a browser the row says to use a VPN-mode client, with no field to fill', plainRow.shown && plainRow.inputHidden && /VPN/.test(plainRow.note), JSON.stringify(plainRow));
 } catch (error) {
   check('the suite ran to the end', false, error?.stack || String(error));
 } finally {

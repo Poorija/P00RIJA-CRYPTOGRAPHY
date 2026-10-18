@@ -25,6 +25,9 @@
      Android, iOS     a VPN-mode client (v2rayNG, Streisand, …): the system
                       routes the app through it. Phones have no per-app proxy
                       for a web view.
+     the web, a PWA   the same VPN-mode client. No page can set a proxy for
+                      itself — the browser does not let it — so the row is
+                      shown with the way that works instead of a field.
 
    What a proxy does not carry, said plainly: WebRTC media over UDP. So while
    a proxy is set, calls and direct transfers are made relay-only — through
@@ -53,7 +56,11 @@ const nativeProxyReady = (() => {
   return Promise.race([answered, new Promise((resolve) => window.setTimeout(() => resolve(true), NATIVE_PROXY_WAIT_MS))]);
 })();
 
-function nativeProxyHint(os, phone) {
+function nativeProxyHint(os, phone, browser = false) {
+  if (browser) {
+    return t('نسخهٔ وب و PWA نمی‌تواند خودش از پراکسی عبور کند؛ مرورگر به هیچ صفحه‌ای اجازهٔ تنظیم پراکسی نمی‌دهد. راهی که کار می‌کند: یک برنامهٔ v2ray/xray را روی دستگاه در حالت VPN روشن کنید (آیفون: Streisand یا V2Box؛ اندروید: v2rayNG)؛ سیستم مرورگر و همین برنامه را از آن عبور می‌دهد. برنامهٔ دسکتاپ روی ویندوز و لینوکس پراکسی را در خودش تنظیم می‌کند.',
+      'The web app and the PWA cannot go through a proxy on their own: the browser lets no page set one. What works: turn on a v2ray/xray client on the device in VPN mode (iPhone: Streisand or V2Box; Android: v2rayNG); the system routes the browser, and this app with it, through it. The desktop app on Windows and Linux sets a proxy itself.');
+  }
   if (phone) {
     return t('روی گوشی، از برنامه‌ای مثل v2rayNG در حالت VPN استفاده کنید؛ سیستم این برنامه را از آن عبور می‌دهد.',
       'On a phone, use a client such as v2rayNG in VPN mode; the system routes this app through it.');
@@ -70,7 +77,14 @@ async function renderNativeProxyRow() {
   const row = document.getElementById('chatProxyRow');
   const desktop = window.PoorijaDesktop;
   if (!row) return;
-  if (!desktop?.available) { row.classList.add('hidden'); return; }
+  if (!desktop?.available) {
+    /* The web and the PWA: the row says how, since it cannot be a setting. */
+    row.classList.remove('hidden');
+    row.querySelector('.chat-proxy-input')?.classList.add('hidden');
+    const note = document.getElementById('chatProxyNote');
+    if (note) note.textContent = nativeProxyHint('', false, true);
+    return;
+  }
   row.classList.remove('hidden');
   const phone = Boolean(window.__POORIJA_NATIVE_MOBILE__);
   let os = '';

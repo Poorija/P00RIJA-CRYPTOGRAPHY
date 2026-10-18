@@ -212,6 +212,9 @@ const STICKER_RECOMPRESS_OVER = 220 * 1024;
    points, 210 pixels) and is still a quarter of the pixels; 160 px, the size
    before, was soft on an iPhone. */
 const STICKER_THUMB_EDGE = 256;
+/* The first cells of a pack are drawn with the grid, not when the observer
+   gets round to them: about the first three screenfuls on a phone. */
+const STICKER_EAGER_CELLS = 30;
 const STICKER_IMAGE_EXT = /\.(webp|png|gif|jpe?g|avif|svg)$/i;
 const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
@@ -518,16 +521,24 @@ async function ensurePackThumbs(pack) {
   if (!pending.length) return;
   packThumbJobs.add(pack);
   try {
-    for (const record of pending) {
-      if (typeof upkeepStickerRecord === 'function') {
-        await upkeepStickerRecord(record);
-        if (typeof paintStillIntoCell === 'function') paintStillIntoCell(record);
-      } else {
-        const thumb = await makeStickerThumb(record.blob);
-        if (thumb) record.thumb = thumb; else record.thumbChecked = true;
+    /* Three at a time: a video's still waits on the decoder far more than it
+       works the page, so three overlap where one left the phone idle. */
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length) {
+        const record = pending[next];
+        next += 1;
+        if (typeof upkeepStickerRecord === 'function') {
+          await upkeepStickerRecord(record);
+          if (typeof paintStillIntoCell === 'function') paintStillIntoCell(record);
+        } else {
+          const thumb = await makeStickerThumb(record.blob);
+          if (thumb) record.thumb = thumb; else record.thumbChecked = true;
+        }
+        await yieldToPage();
       }
-      await yieldToPage();
-    }
+    };
+    await Promise.all([worker(), worker(), worker()]);
     if (chatState.stickerPacks.includes(pack) || pack === chatState.gifLibrary) {
       await stickerDbPutPack(pack);
       if (!document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
@@ -551,6 +562,23 @@ function packCoverUrl(pack) {
   if (record.thumb instanceof Blob) return stickerThumbUrl(record);
   return record.kind === 'image' ? stickerObjectUrl(record) : '';
 }
+/* The cover as it is drawn: a sticker that moves moves here too, over its
+   still, the way the picker's cells do; one that does not is its picture. */
+function packCoverHtml(pack, className = '') {
+  const record = packCoverRecord(pack);
+  const stillUrl = packCoverUrl(pack);
+  const animated = record && typeof stickerIsAnimated === 'function' && stickerIsAnimated(record);
+  if (!record || (!animated && !stillUrl)) return `<span class="${className}"><i class="fas fa-layer-group" aria-hidden="true"></i></span>`;
+  if (!animated) return `<img class="${className}" src="${app().escapeHTML(stillUrl)}" alt="" draggable="false">`;
+  return `<span class="sticker-cover ${className}">${stillUrl ? `<img class="sticker-cover-still" src="${app().escapeHTML(stillUrl)}" alt="" draggable="false">` : ''}${stickerMediaHtml(stickerObjectUrl(record), record.kind, 'sticker-cover-motion is-motion', { lazy: true })}</span>`;
+}
+/* After covers are written into a container: their moving stickers start
+   when they are in view of the scroller given. */
+function startPackCovers(container, scroller = container) {
+  if (!container) return;
+  observeLazyMedia(scroller);
+  hydrateLottieNodes(container);
+}
 const packCoverJobs = new Set();
 function ensurePackCovers(packs) {
   if (typeof upkeepStickerRecord !== 'function') return;
@@ -561,8 +589,13 @@ function ensurePackCovers(packs) {
     upkeepStickerRecord(record).then(() => {
       packCoverJobs.delete(record.id);
       if (!(record.thumb instanceof Blob)) return;
-      const tab = document.querySelector(`#chatStickerTabs [data-chat-sticker-pack="${CSS.escape(pack.id)}"]`);
-      if (tab) tab.innerHTML = `<img src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false">`;
+      const tabs = document.getElementById('chatStickerTabs');
+      const tab = tabs?.querySelector(`[data-chat-sticker-pack="${CSS.escape(pack.id)}"]`);
+      if (tab) {
+        tab.innerHTML = packCoverHtml(pack);
+        tabs.__html = '';
+        startPackCovers(tabs);
+      }
       if (packManagerElement) renderPackManagerList();
     }).catch(() => packCoverJobs.delete(record.id));
   });
@@ -594,9 +627,32 @@ function yieldToPage() {
    its still, and fades in once it has a frame (is-ready), so a cell never
    goes blank on its way from one to the other. */
 const lazyMediaObservers = new WeakMap();
+/* What holds a still and a moving sticker over it: a picker cell, a GIF cell,
+   a pack's cover. */
+const MOTION_HOLDERS = '.chat-sticker-cell, .chat-gif-cell, .sticker-cover';
+/* Moving stickers are started a few per frame rather than all at once: a
+   screenful of video and Lottie stickers starting together is a screenful of
+   decoders spinning up in the same frame, which is the stutter as a big pack
+   opens. Their stills are already there, so nothing waits on this. */
+const motionQueue = [];
+let motionPump = 0;
+function queueMotion(node, run) {
+  if (!motionQueue.some((item) => item.node === node)) motionQueue.push({ node, run });
+  if (!motionPump) motionPump = requestAnimationFrame(pumpMotion);
+}
+function pumpMotion() {
+  motionPump = 0;
+  for (let started = 0; started < 3 && motionQueue.length;) {
+    const { node, run } = motionQueue.shift();
+    if (!node.isConnected || node.__wanted === false) continue;
+    run(node);
+    started += 1;
+  }
+  if (motionQueue.length) motionPump = requestAnimationFrame(pumpMotion);
+}
 function markMediaReady(node) {
   node.classList.add('is-ready');
-  if (node.classList.contains('is-motion')) node.closest('.chat-sticker-cell, .chat-gif-cell')?.classList.add('motion-ready');
+  if (node.classList.contains('is-motion')) node.closest(MOTION_HOLDERS)?.classList.add('motion-ready');
 }
 function giveLazyMedia(node) {
   const wanted = node.getAttribute('data-lazy-src');
@@ -621,7 +677,7 @@ function releaseLazyMedia(node) {
   }
   node.removeAttribute('src');
   node.classList.remove('is-ready');
-  if (node.classList.contains('is-motion')) node.closest('.chat-sticker-cell, .chat-gif-cell')?.classList.remove('motion-ready');
+  if (node.classList.contains('is-motion')) node.closest(MOTION_HOLDERS)?.classList.remove('motion-ready');
   if (node instanceof HTMLVideoElement) node.load?.();
 }
 function observeLazyMedia(container) {
@@ -636,8 +692,11 @@ function observeLazyMedia(container) {
   if (!observers) {
     const watch = (entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) giveLazyMedia(entry.target);
-        else releaseLazyMedia(entry.target);
+        const node = entry.target;
+        node.__wanted = entry.isIntersecting;
+        if (!entry.isIntersecting) releaseLazyMedia(node);
+        else if (node.classList.contains('is-motion')) queueMotion(node, giveLazyMedia);
+        else giveLazyMedia(node);
       }
     };
     observers = {
@@ -711,6 +770,31 @@ async function loadStickerPacks() {
     ? wanted
     : (chatState.stickerPacks[0]?.id || '');
   renderStickerPanel();
+  upkeepPacksWhenIdle();
+}
+
+/* Every pack brought up to date in the background, once, a little after the
+   app has opened and one pack at a time — so a pack is ready with its stills
+   the first time it is opened, rather than making them while you look. The
+   open pack is done first when the panel shows it (renderStickerPanel). */
+let packUpkeepScheduled = false;
+function upkeepPacksWhenIdle() {
+  if (packUpkeepScheduled || typeof stickerNeedsUpkeep !== 'function') return;
+  packUpkeepScheduled = true;
+  const idle = (run) => (typeof window.requestIdleCallback === 'function'
+    ? window.requestIdleCallback(run, { timeout: 8000 })
+    : window.setTimeout(run, 1500));
+  window.setTimeout(() => idle(async () => {
+    try {
+      for (const pack of [...chatState.stickerPacks, chatState.gifLibrary].filter(Boolean)) {
+        if (!pack.stickers?.some(stickerNeedsUpkeep)) continue;
+        if (!chatState.stickerPacks.includes(pack) && pack !== chatState.gifLibrary) continue;
+        await ensurePackThumbs(pack);
+      }
+    } finally {
+      packUpkeepScheduled = false;
+    }
+  }), 5000);
 }
 
 /* .tgs is a gzipped Lottie JSON. DecompressionStream does the gunzip natively
@@ -1140,9 +1224,8 @@ function renderPackManagerList() {
     /* The pack's cover, and the way to change it: a tap opens its stickers
        to choose from. A video or Lottie sticker used to sit here as an <img>
        of its own bytes, which is the broken "?" a Telegram pack showed. */
-    const url = packCoverUrl(pack);
     const thumb = `<button type="button" class="packman-cover" data-pack-cover="${app().escapeHTML(pack.id)}" title="${app().escapeHTML(t('تغییر تصویر شاخص پک', 'Change the pack cover'))}" aria-label="${app().escapeHTML(t('تغییر تصویر شاخص پک', 'Change the pack cover'))}">
-      ${url ? `<img class="packman-thumb" src="${app().escapeHTML(url)}" alt="">` : '<span class="packman-thumb"><i class="fas fa-layer-group" aria-hidden="true"></i></span>'}
+      ${packCoverHtml(pack, 'packman-thumb')}
       <span class="packman-cover-edit" aria-hidden="true"><i class="fas fa-pen"></i></span>
     </button>`;
     return `<div class="packman-row">
@@ -1157,6 +1240,7 @@ function renderPackManagerList() {
       </span>
     </div>`;
   }).join('');
+  startPackCovers(list, packManagerElement.querySelector('.packman-body') || list);
   syncPackManagerFooter();
 }
 
@@ -1178,14 +1262,11 @@ function openPackCoverPicker(packId) {
     </div>
     <div class="packman-coverpick-grid">
       ${pack.stickers.map((record) => `<button type="button" class="packman-coverpick-cell ${record.id === current ? 'is-current' : ''}" data-cover-pick="${app().escapeHTML(record.id)}" aria-label="${app().escapeHTML(record.emoji || record.name || '')}">
-        ${record.thumb instanceof Blob
-          ? `<img src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async" loading="lazy">`
-          : stickerMediaHtml(stickerObjectUrl(record), record.kind, 'packman-coverpick-media')}
+        ${packCoverHtml({ stickers: [record] }, 'packman-coverpick-media')}
       </button>`).join('')}
     </div>`;
   card.appendChild(sheet);
-  hydrateLottieNodes(sheet);
-  sheet.querySelectorAll('video').forEach((video) => { video.__onScreen = true; if (typeof keepVideoLooping === 'function') keepVideoLooping(video); });
+  startPackCovers(sheet, sheet.querySelector('.packman-coverpick-grid'));
 }
 
 function closePackManager() {
@@ -1412,8 +1493,10 @@ function lottieWatcher() {
     for (const entry of entries) {
       const node = entry.target;
       node.__onScreen = entry.isIntersecting;
-      if (entry.isIntersecting) mountLottieNode(node);
-      else node.__lottie?.pause();
+      node.__wanted = entry.isIntersecting;
+      if (!entry.isIntersecting) node.__lottie?.pause();
+      else if (node.__lottie) mountLottieNode(node);
+      else queueMotion(node, mountLottieNode);
     }
   }, { rootMargin: '120px 0px' });
   return lottieObserver;
@@ -1472,7 +1555,7 @@ function hydrateLottieNodes(root = document) {
   });
 }
 
-function stickerMediaHtml(url, kind, className, { width = 0, height = 0, lazy = false } = {}) {
+function stickerMediaHtml(url, kind, className, { width = 0, height = 0, lazy = false, eager = false } = {}) {
   /* The URL can originate off the wire (relay broadcasts, archive imports);
      anything that is not https/blob/data renders as nothing rather than as
      an attacker-chosen src. */
@@ -1488,7 +1571,12 @@ function stickerMediaHtml(url, kind, className, { width = 0, height = 0, lazy = 
   const h = Math.round(Number(height));
   const shape = w > 0 && h > 0 && w <= 10000 && h <= 10000 ? ` style="aspect-ratio:${w} / ${h}"` : '';
   if (kind === 'lottie') return `<div class="${className} chat-lottie" data-lottie-src="${src}"></div>`;
-  /* lazy: the source is given only while it is on screen (observeLazyMedia). */
+  /* lazy: the source is given only while it is on screen (observeLazyMedia).
+     eager as well: given at once, and still let go when it is far off — the
+     first screenfuls of a pack open drawn, without waiting for the observer. */
+  if (lazy && eager && kind !== 'lottie' && kind !== 'video') {
+    return `<img class="${className} is-ready" src="${src}" data-lazy-src="${src}"${shape} alt="" draggable="false" decoding="async">`;
+  }
   const source = lazy ? `data-lazy-src="${src}"` : `src="${src}"`;
   if (kind === 'video') return `<video class="${className}" ${source}${shape} ${lazy ? '' : 'autoplay '}loop muted playsinline disablepictureinpicture></video>`;
   return `<img class="${className}" ${source}${shape} alt="" draggable="false" ${lazy ? 'decoding="async"' : 'loading="lazy"'}>`;
@@ -1874,15 +1962,15 @@ const STICKER_VIRTUAL_FAVOURITE = '__favourite__';
 /* What a cell draws. A sticker that stays still: its thumbnail. One that
    moves: its still, at once, and the moving sticker over it once it is on
    screen and has a frame (observeLazyMedia, hydrateLottieNodes). */
-function stickerCellMediaHtml(record) {
+function stickerCellMediaHtml(record, { eager = false } = {}) {
   const animated = typeof stickerIsAnimated === 'function' && stickerIsAnimated(record);
-  if (!animated) return stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-thumb', { lazy: true });
+  if (!animated) return stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-thumb', { lazy: true, eager });
   const still = record.thumb instanceof Blob
     ? `<img class="chat-sticker-still" src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async">`
     : '';
   return still + stickerMediaHtml(stickerObjectUrl(record), record.kind, 'chat-sticker-thumb is-motion', { lazy: true });
 }
-function stickerCellHtml(pack, record, { selectable }) {
+function stickerCellHtml(pack, record, { selectable, eager = false }) {
   const ref = stickerRef(pack.id, record.id);
   const chosen = stickerSelection.has(ref);
   const starred = stickerIsFavourite(pack.id, record.id);
@@ -1891,7 +1979,7 @@ function stickerCellHtml(pack, record, { selectable }) {
     data-chat-sticker-send="${record.id}"
     data-chat-sticker-pack-id="${pack.id}"
     title="${app().escapeHTML(record.emoji || record.name)}">
-    ${stickerCellMediaHtml(record)}
+    ${stickerCellMediaHtml(record, { eager })}
     <span class="chat-sticker-star ${starred ? 'is-on' : ''}"
       data-chat-sticker-fav="${record.id}"
       data-chat-sticker-fav-pack="${pack.id}"
@@ -1989,17 +2077,15 @@ function renderStickerPanel() {
       t('دلخواه‌ها', 'Favourites'), true) : '',
   ].filter(Boolean).join('');
 
-  const tabsHtml = virtualTabs + packs.map((pack) => {
-    const coverUrl = packCoverUrl(pack);
-    const coverHtml = coverUrl
-      ? `<img src="${app().escapeHTML(coverUrl)}" alt="" draggable="false">`
-      : '<i class="fas fa-layer-group"></i>';
-    return tabButton(pack.id, coverHtml, pack.title);
-  }).join('')
+  const tabsHtml = virtualTabs + packs.map((pack) => tabButton(pack.id, packCoverHtml(pack), pack.title)).join('')
     + `<button type="button" class="chat-sticker-tab chat-sticker-tab-add" data-chat-sticker-import title="${app().escapeHTML(t('وارد کردن استیکر', 'Import stickers'))}"><i class="fas fa-plus"></i></button>`;
   /* Written only when it changed: a redraw for something else (a sticker
      sent, a star) must not make every picture load again. */
-  if (tabs.__html !== tabsHtml) { tabs.innerHTML = tabsHtml; tabs.__html = tabsHtml; }
+  if (tabs.__html !== tabsHtml) {
+    tabs.innerHTML = tabsHtml;
+    tabs.__html = tabsHtml;
+    startPackCovers(tabs);
+  }
   ensurePackCovers(packs);
 
   if (chatState.stickerManageMode) {
@@ -2035,7 +2121,7 @@ function renderStickerPanel() {
 
   const picking = stickerSelectionActive();
   const cells = showing
-    .map(({ pack, record }) => stickerCellHtml(pack, record, { selectable: picking }))
+    .map(({ pack, record }, index) => stickerCellHtml(pack, record, { selectable: picking, eager: index < STICKER_EAGER_CELLS }))
     .join('');
 
   /* The bar lives outside the grid, because the grid is a CSS grid of sticker

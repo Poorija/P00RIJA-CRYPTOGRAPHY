@@ -192,6 +192,37 @@ try {
   check('a pack whose first sticker moves shows a picture on its tab', grid.tabPicture, JSON.stringify(grid));
   if (grid.resumed !== null) check('a video sticker paused under the picker starts again', grid.resumed === true, JSON.stringify(grid));
 
+  /* WebKit on an iPhone stops a looping WebM on its last frame while it still
+     claims to play. Stood in for here by freezing the clock near the end: it
+     must be sent back to the start within a few frames, not seconds. */
+  const replay = await ARIF.evaluate(async () => {
+    const video = document.querySelector('#chatStickerGrid video.is-motion');
+    if (!video) return null;
+    for (let i = 0; i < 30 && !(video.duration > 0); i += 1) await new Promise((r) => setTimeout(r, 100));
+    const proto = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+    const frozenAt = Math.max(0, video.duration - 0.05);
+    let sentBackAfter = null;
+    const started = performance.now();
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => frozenAt,
+      set: (value) => { if (value === 0 && sentBackAfter === null) sentBackAfter = Math.round(performance.now() - started); proto.set.call(video, value); },
+    });
+    await new Promise((r) => setTimeout(r, 1200));
+    delete video.currentTime;
+    /* And a plain end, with the browser's own loop off: started again at once. */
+    video.loop = false;
+    let endedAt = 0;
+    let gap = null;
+    video.addEventListener('ended', () => { endedAt = performance.now(); }, { once: true });
+    const onTime = () => { if (endedAt && video.currentTime < 0.3 && !video.paused) { gap = Math.round(performance.now() - endedAt); video.removeEventListener('timeupdate', onTime); } };
+    video.addEventListener('timeupdate', onTime);
+    await new Promise((r) => setTimeout(r, (video.duration || 1) * 1000 + 1200));
+    video.loop = true;
+    return { sentBackAfter, gap };
+  });
+  if (replay) check('a video sticker stuck on its last frame goes back to the start within a few frames, and one that ends starts again at once', replay.sentBackAfter !== null && replay.sentBackAfter < 400 && replay.gap !== null && replay.gap < 400, JSON.stringify(replay));
+
   const covers = await ARIF.evaluate(async () => {
     const pack = chatState.stickerPacks[0];
     const second = pack.stickers[1];
@@ -221,6 +252,31 @@ try {
   check('a chosen cover is stored with the pack and shown on its tab', covers.storedCover && covers.tabMatches, JSON.stringify(covers));
   check('the pack manager shows a real picture for it, and its picture opens a chooser that sets the cover', covers.managerOk && covers.pickCells >= 2 && covers.afterPicker, JSON.stringify(covers));
   check('one sticker picked in the panel can be made the cover from the selection bar', covers.fromBar, JSON.stringify(covers));
+
+  const movingCover = await ARIF.evaluate(async () => {
+    const pack = chatState.stickerPacks[0];
+    const moving = pack.stickers.find((r) => r.kind === 'lottie');
+    await window.__stickerProbe.setCover(pack.id, moving.id);
+    setStickerPanelVisible(true, { shelf: 'stickers' });
+    renderStickerPanel();
+    await new Promise((r) => setTimeout(r, 1500));
+    const cover = document.querySelector(`#chatStickerTabs [data-chat-sticker-pack="${pack.id}"] .sticker-cover`);
+    return { motion: Boolean(cover?.querySelector('.sticker-cover-motion')), svg: Boolean(cover?.querySelector('svg')), ready: Boolean(cover?.classList.contains('motion-ready')) };
+  });
+  check('a moving sticker made the cover moves on the pack\'s tab', movingCover.motion && movingCover.svg && movingCover.ready, JSON.stringify(movingCover));
+
+  const eager = await ARIF.evaluate(async () => {
+    const make = async (i) => { const c = document.createElement('canvas'); c.width = 400; c.height = 400; const g = c.getContext('2d'); g.fillStyle = `hsl(${i * 13} 70% 50%)`; g.fillRect(0, 0, 400, 400); return new Promise((r) => c.toBlob(r, 'image/webp', 0.9)); };
+    const stickers = [];
+    for (let i = 0; i < 60; i += 1) { const blob = await make(i); stickers.push({ id: `e-${i}`, name: `e${i}.webp`, mime: 'image/webp', kind: 'image', emoji: '', blob, thumb: blob, upkeep: 2 }); }
+    await window.__stickerProbe.addPack({ id: 'eager-pack', title: 'Eager', author: '', source: 'import', createdAt: new Date().toISOString(), stickers });
+    chatState.stickerActivePackId = 'eager-pack';
+    renderStickerPanel();
+    /* Read in the same task: nothing has had a chance to observe anything. */
+    const imgs = [...document.querySelectorAll('#chatStickerGrid .chat-sticker-thumb')];
+    return { first: imgs.slice(0, 30).filter((img) => img.getAttribute('src')).length, rest: imgs.slice(30).filter((img) => img.getAttribute('src')).length };
+  });
+  check('the first screenfuls of a pack are drawn with the grid, without waiting to be observed', eager.first === 30 && eager.rest === 0, JSON.stringify(eager));
 
   const lottie = await ARIF.evaluate(async () => {
     /* Forty Lottie stickers in one pack. */

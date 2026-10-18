@@ -1,10 +1,60 @@
-# P00RIJA Cryptography 2.98.59
+# P00RIJA Cryptography 2.98.60
 
-Version 2.98.59 · build chat-v152
+Version 2.98.60 · build chat-v153
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## استیکر بدون مکث، شاخص متحرک، پک‌های سریع‌تر · Stickers without the pause, moving covers, faster packs
+
+- **پخش دوباره بدون مکث**: روی آیفون، استیکر ویدیویی (WebM) بعد از دو سه بار پخش روی
+  فریم آخر می‌ایستاد. نسخهٔ قبل آن را دوباره راه می‌انداخت، ولی بررسی هر یک و نیم ثانیه
+  انجام می‌شد و همین دو سه ثانیه مکث می‌ساخت. حالا وضعیت پخش هر فریم بررسی می‌شود و
+  استیکری که در انتها ایستاده در کسری از ثانیه از اول پخش می‌شود. استیکری هم که خودش
+  تمام شود بلافاصله دوباره شروع می‌شود.
+- **تصویر شاخص متحرک**: اگر استیکری که شاخص پک است متحرک باشد، در نوار پک‌ها، «مدیریت
+  پک‌ها» و صفحهٔ انتخاب شاخص هم متحرک نمایش داده می‌شود.
+- **پک‌های بزرگ سریع‌تر**:
+  - تصویرهای ثابت همهٔ پک‌ها چند ثانیه بعد از باز شدن برنامه در پس‌زمینه ساخته می‌شوند،
+    نه اولین باری که پک را باز می‌کنید. ساختشان هم سه‌تا‌سه‌تا انجام می‌شود، نه یکی‌یکی.
+  - چند ردیف اول پک همراه خود پنل رسم می‌شوند، بی آن‌که منتظر نوبت بمانند.
+  - استیکرهای متحرک چندتا‌چندتا در هر فریم شروع می‌شوند، نه همه با هم؛ پس باز شدن یک
+    پک بزرگ دیگر گیر نمی‌کند.
+- **پراکسی و Xray در نسخهٔ وب و PWA**: صفحهٔ وب نمی‌تواند خودش از پراکسی عبور کند؛ مرورگر
+  به هیچ صفحه‌ای چنین اجازه‌ای نمی‌دهد. به همین دلیل این گزینه فقط در برنامهٔ دسکتاپ
+  است. در نسخهٔ وب و PWA، همان بخش حالا راهی را که کار می‌کند نشان می‌دهد: یک برنامهٔ
+  v2ray/xray را روی دستگاه در حالت VPN روشن کنید (آیفون: Streisand یا V2Box؛ اندروید:
+  v2rayNG). سیستم مرورگر و این برنامه را از آن عبور می‌دهد.
+- **Replays without the pause**: on an iPhone a video (WebM) sticker stopped on its
+  last frame after two or three plays. The last release started it again, but it
+  checked only every second and a half, which made a pause of two or three seconds.
+  Now playback is checked every frame, and a sticker stuck at its end is back at
+  the start within a fraction of a second. One that ends on its own starts again
+  at once.
+- **Moving covers**: when the sticker a pack is known by moves, it moves in the pack
+  bar, in Manage packs, and on the cover chooser too.
+- **Big packs, faster**:
+  - The stills for every pack are made in the background a few seconds after the
+    app opens, not the first time you open the pack. They are made three at a time,
+    not one by one.
+  - The first rows of a pack are drawn with the panel itself, without waiting
+    their turn.
+  - Moving stickers start a few per frame rather than all at once, so opening a big
+    pack no longer stutters.
+- **Proxy and Xray on the web and in the PWA**: a web page cannot go through a proxy
+  on its own; the browser lets no page do that. That is why the setting is only in
+  the desktop app. On the web and in the PWA the same section now shows what works:
+  turn on a v2ray/xray client on the device in VPN mode (iPhone: Streisand or V2Box;
+  Android: v2rayNG). The system routes the browser, and this app with it, through it.
+
+---
+
+# P00RIJA Cryptography 2.98.59
+
+Version 2.98.59 · build chat-v152
 
 ---
 
