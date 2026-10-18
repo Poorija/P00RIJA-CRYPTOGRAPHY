@@ -1404,6 +1404,16 @@ closeComposerActions(true);
 });
 document.getElementById('chatStickerCloseBtn')?.addEventListener('click', () => setStickerPanelVisible(false));
 document.getElementById('chatStickerImportBtn')?.addEventListener('click', openStickerImport);
+/* Picking, switched on from a button: on the sticker shelf it picks stickers,
+   on the GIF shelf GIFs. */
+document.getElementById('chatStickerSelectBtn')?.addEventListener('click', () => {
+if (chatState.stickerPanelMode === 'gifs') {
+if (typeof setGifPickMode === 'function') setGifPickMode(!gifPickActive());
+} else {
+setStickerPickMode(!stickerSelectionActive());
+}
+renderStickerPanel();
+});
 document.getElementById('chatStickerManageBtn')?.addEventListener('click', () => {
 chatState.stickerManageMode = !chatState.stickerManageMode;
 document.getElementById('chatStickerManageBtn')?.classList.toggle('is-active', chatState.stickerManageMode);
@@ -1505,6 +1515,30 @@ return;
 if (event.target.closest('[data-chat-sticker-clear-selection]')) {
 clearStickerSelection();
 renderStickerPanel();
+return;
+}
+if (event.target.closest('[data-chat-sticker-delete-selected]')) {
+const count = selectedStickerRecords().length;
+if (!count) return;
+if (!await PoorijaDialogs.confirm(t(`${count} استیکر حذف شود؟`, `Delete ${count} sticker(s)?`),
+{ okLabel: t('حذف', 'Delete'), cancelLabel: t('انصراف', 'Cancel'), danger: true })) return;
+const { removed, emptied } = await deleteSelectedStickers();
+notify(emptied
+? t(`${removed} استیکر حذف شد؛ ${emptied} پک خالی شد و برداشته شد.`, `${removed} sticker(s) deleted; ${emptied} pack(s) left empty were removed.`)
+: t(`${removed} استیکر حذف شد.`, `${removed} sticker(s) deleted.`), 'success');
+return;
+}
+const copyOrMove = event.target.closest('[data-chat-sticker-copy-selected], [data-chat-sticker-move-selected]');
+if (copyOrMove) {
+const move = copyOrMove.hasAttribute('data-chat-sticker-move-selected');
+const target = await chooseStickerTarget({ move });
+if (!target) return;
+const { done, skipped } = await copySelectedStickersTo(target, { move });
+const where = target === '__gifs__' ? t('قفسهٔ گیف', 'the GIF shelf') : `«${target.title}»`;
+notify(move
+? t(`${done} استیکر به ${where} منتقل شد.${skipped ? ` ${skipped} مورد منتقل نشد (همان پک، یا پک پر).` : ''}`, `${done} sticker(s) moved to ${where}.${skipped ? ` ${skipped} were not (same pack, or the pack is full).` : ''}`)
+: t(`${done} استیکر در ${where} کپی شد.${skipped ? ` ${skipped} مورد کپی نشد (همان پک، یا پک پر).` : ''}`, `${done} sticker(s) copied into ${where}.${skipped ? ` ${skipped} were not (same pack, or the pack is full).` : ''}`),
+done ? 'success' : 'warning');
 return;
 }
 if (event.target.closest('[data-chat-sticker-make-pack]')) {

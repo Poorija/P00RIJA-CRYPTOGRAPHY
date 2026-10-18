@@ -27922,3 +27922,35 @@ html body #mainApp #content-chat .chat-selection-icon.hidden {
 html body #mainApp #content-chat .chat-sticker-grid.is-gif-shelf.is-empty {
   grid-auto-rows: auto;
 }
+
+/* ============================================================================
+   Managing stickers and GIFs one by one
+   ----------------------------------------------------------------------------
+   The selection bar carries delete, copy and move as well as send, so a
+   delete is marked as one and a button with nothing picked reads as off.
+   A picked GIF is outlined and ticked the way a picked sticker is.
+   The pack manager's back arrow and its order arrows were text glyphs: some
+   Android fonts have no arrow, so the button showed empty, and iOS drew a
+   hairline. They are icons now, at a size that reads.
+   ========================================================================== */
+.chat-sticker-selbtn.is-danger { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.chat-sticker-selbtn:disabled { opacity: 0.4; cursor: default; }
+html body #mainApp #content-chat .chat-gif-cell .chat-gif-tick {
+  position: absolute;
+  top: 0.3rem;
+  inset-inline-start: 0.3rem;
+  z-index: 2;
+}
+html body #mainApp #content-chat .chat-gif-cell.is-picked {
+  outline: 3px solid #38bdf8;
+  outline-offset: -3px;
+}
+html body #mainApp #content-chat .chat-gif-cell.is-picked .chat-sticker-tick {
+  background: #38bdf8;
+  color: #04243a;
+  border-color: #38bdf8;
+}
+html body .packman-back { font-size: 1.15rem; }
+html body .packman-back i,
+html body .packman-move button i { pointer-events: none; }
+html body .packman-move button { font-size: 0.85rem; }

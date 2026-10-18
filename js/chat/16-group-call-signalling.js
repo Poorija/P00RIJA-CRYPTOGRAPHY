@@ -693,8 +693,8 @@ function renderPackManagerList() {
       <span class="packman-count">${pack.stickers?.length || 0}</span>
       <button type="button" class="packman-share" data-pack-one-share="${app().escapeHTML(pack.id)}" title="${app().escapeHTML(t('ارسال این پک به گفتگوی باز', 'Share this pack into the open chat'))}" aria-label="${app().escapeHTML(t('ارسال این پک', 'Share this pack'))}"><i class="fas fa-share-nodes"></i></button>
       <span class="packman-move">
-        <button type="button" data-move="up" data-pack-id="${app().escapeHTML(pack.id)}" ${index === 0 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('بالا', 'Up'))}">&#8593;</button>
-        <button type="button" data-move="down" data-pack-id="${app().escapeHTML(pack.id)}" ${index === packs.length - 1 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('پایین', 'Down'))}">&#8595;</button>
+        <button type="button" data-move="up" data-pack-id="${app().escapeHTML(pack.id)}" ${index === 0 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('بالا', 'Up'))}"><i class="fas fa-chevron-up" aria-hidden="true"></i></button>
+        <button type="button" data-move="down" data-pack-id="${app().escapeHTML(pack.id)}" ${index === packs.length - 1 ? 'disabled' : ''} aria-label="${app().escapeHTML(t('پایین', 'Down'))}"><i class="fas fa-chevron-down" aria-hidden="true"></i></button>
       </span>
     </div>`;
   }).join('');
@@ -715,7 +715,7 @@ function openPackManager() {
     <div class="packman-backdrop" data-pack-close></div>
     <div class="packman-card" role="dialog" aria-modal="true">
       <div class="packman-head">
-        <button type="button" class="packman-back" data-pack-close aria-label="${app().escapeHTML(t('بازگشت', 'Back'))}">&#8592;</button>
+        <button type="button" class="packman-back" data-pack-close aria-label="${app().escapeHTML(t('بازگشت', 'Back'))}"><i class="fas ${document.documentElement.dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'}" aria-hidden="true"></i></button>
         <h3>${app().escapeHTML(t('مدیریت پک‌های استیکر', 'Manage sticker packs'))}</h3>
       </div>
       <div class="packman-body">
@@ -1072,7 +1072,15 @@ function clearStickerManageSelection() {
  */
 const stickerSelection = new Set();
 
-function stickerSelectionActive() { return stickerSelection.size > 0; }
+/* Picking can also be switched on with nothing picked yet, from the panel's
+   select button: a long press is how a phone starts it, but nobody finds a
+   long press they were never shown. */
+let stickerPickMode = false;
+function stickerSelectionActive() { return stickerSelection.size > 0 || stickerPickMode; }
+function setStickerPickMode(on) {
+  stickerPickMode = Boolean(on);
+  if (!stickerPickMode) stickerSelection.clear();
+}
 
 function toggleStickerSelection(packId, stickerId) {
   const ref = stickerRef(packId, stickerId);
@@ -1083,6 +1091,7 @@ function toggleStickerSelection(packId, stickerId) {
 
 function clearStickerSelection() {
   stickerSelection.clear();
+  stickerPickMode = false;
 }
 
 /* Sending what is selected.
@@ -1142,6 +1151,153 @@ async function buildPackFromSelection(title) {
   renderStickerPanel();
   renderStorageCard().catch(() => {});
   return pack;
+}
+
+/* ---- managing single stickers ------------------------------------------
+ *
+ * What is picked can be deleted, or copied or moved into another pack — any
+ * pack, "My stickers" included, and from any tab, Recent and Favourites too,
+ * since a pick is a ref to the sticker in the pack it lives in. A move keeps
+ * the sticker's id and carries its Recent and Favourite entries with it; a
+ * copy is a new id over the same bytes, as buildPackFromSelection makes. A
+ * pack left with nothing in it goes: an empty tab is a question with no
+ * answer. */
+function rewriteStickerRefs(mapping) {
+  if (!mapping.size) return;
+  for (const key of [STICKER_RECENT_KEY, STICKER_FAVOURITE_KEY]) {
+    const next = [];
+    for (const ref of stickerPrefRead(key)) {
+      if (!mapping.has(ref)) next.push(ref);
+      else if (mapping.get(ref)) next.push(mapping.get(ref));
+    }
+    stickerPrefWrite(key, [...new Set(next)]);
+  }
+}
+
+async function storeTouchedStickerPacks(packs) {
+  let emptied = 0;
+  for (const pack of packs) {
+    if (!chatState.stickerPacks.includes(pack)) continue;
+    if (!pack.stickers.length) {
+      await deleteStickerPack(pack.id);
+      emptied += 1;
+      continue;
+    }
+    try { await stickerDbPutPack(pack); } catch (error) { console.warn('[Stickers] a pack was not saved', error); }
+  }
+  if (emptied) await persistStickerPackOrder();
+  return emptied;
+}
+
+function selectedStickerRecords() {
+  return resolveStickerRefs([...stickerSelection]);
+}
+
+async function deleteSelectedStickers() {
+  const chosen = selectedStickerRecords();
+  if (!chosen.length) return { removed: 0, emptied: 0 };
+  const touched = new Set();
+  const mapping = new Map();
+  for (const { pack, record } of chosen) {
+    pack.stickers = pack.stickers.filter((item) => item !== record);
+    const url = chatState.stickerUrls.get(record.id);
+    if (url) { URL.revokeObjectURL(url); chatState.stickerUrls.delete(record.id); }
+    mapping.set(stickerRef(pack.id, record.id), null);
+    touched.add(pack);
+  }
+  rewriteStickerRefs(mapping);
+  const emptied = await storeTouchedStickerPacks(touched);
+  clearStickerSelection();
+  renderStickerPanel();
+  renderStorageCard().catch(() => {});
+  return { removed: chosen.length, emptied };
+}
+
+/* A pack to put the picked stickers in: one of the packs, a new one, or —
+   for a copy of nothing but GIFs — the GIF shelf. Null when the person backs
+   out. */
+async function chooseStickerTarget({ move = false } = {}) {
+  const chosen = selectedStickerRecords();
+  if (!chosen.length) return null;
+  const allGifs = chosen.every(({ record }) => String(record.mime || '').toLowerCase() === 'image/gif');
+  return chooseStickerPackFor({
+    question: move ? t(`${chosen.length} استیکر به کدام پک منتقل شود؟`, `Move ${chosen.length} sticker(s) to which pack?`)
+      : t(`${chosen.length} استیکر در کدام پک کپی شود؟`, `Copy ${chosen.length} sticker(s) into which pack?`),
+    offerGifShelf: !move && allGifs && typeof saveGif === 'function',
+  });
+}
+/* The pack list as a question, with a new pack at the end — shared by the
+   sticker shelf and the GIF shelf ("copy into a sticker pack"). */
+async function chooseStickerPackFor({ question, offerGifShelf = false }) {
+  const choices = orderedStickerPacks().map((pack) => ({
+    value: pack.id,
+    label: `${pack.title || t('پک', 'Pack')} (${pack.stickers.length})`,
+  }));
+  choices.push({ value: '__new__', label: t('+ پک تازه', '+ A new pack') });
+  if (offerGifShelf) choices.push({ value: '__gifs__', label: t('قفسهٔ گیف', 'The GIF shelf') });
+  const choice = await PoorijaDialogs.choose(question, choices, { cancelLabel: t('انصراف', 'Cancel') });
+  if (!choice) return null;
+  if (choice === '__gifs__') return '__gifs__';
+  if (choice === '__new__') {
+    if (chatState.stickerPacks.length >= STICKER_MAX_PACKS) {
+      notify(t(`سقف ${STICKER_MAX_PACKS} پک استیکر پر است.`, `The ${STICKER_MAX_PACKS} sticker-pack limit is full.`), 'warning');
+      return null;
+    }
+    const title = await PoorijaDialogs.prompt(t('نام پک تازه؟', 'A name for the new pack?'), { value: t('پک من', 'My pack') });
+    if (title === null) return null;
+    const pack = {
+      id: makeStickerId(),
+      title: String(title || '').trim().slice(0, 60) || t('پک من', 'My pack'),
+      author: '',
+      source: 'custom',
+      createdAt: new Date().toISOString(),
+      stickers: [],
+    };
+    chatState.stickerPacks.push(pack);
+    return pack;
+  }
+  return chatState.stickerPacks.find((pack) => pack.id === choice) || null;
+}
+
+async function copySelectedStickersTo(target, { move = false } = {}) {
+  const chosen = selectedStickerRecords();
+  if (!chosen.length || !target) return { done: 0, skipped: 0 };
+  let done = 0;
+  let skipped = 0;
+  if (target === '__gifs__') {
+    for (const { record } of chosen) {
+      if (record.blob && await saveGif(record.blob)) done += 1;
+      else skipped += 1;
+    }
+    clearStickerSelection();
+    renderStickerPanel();
+    return { done, skipped, target: '__gifs__' };
+  }
+  const touched = new Set([target]);
+  const mapping = new Map();
+  for (const { pack, record } of chosen) {
+    if (pack === target) { skipped += 1; continue; }
+    if (target.stickers.length >= STICKER_MAX_PER_PACK) { skipped += 1; continue; }
+    if (move) {
+      pack.stickers = pack.stickers.filter((item) => item !== record);
+      target.stickers.push(record);
+      mapping.set(stickerRef(pack.id, record.id), stickerRef(target.id, record.id));
+      touched.add(pack);
+    } else {
+      target.stickers.push({ ...record, id: makeStickerId() });
+    }
+    done += 1;
+  }
+  rewriteStickerRefs(mapping);
+  await storeTouchedStickerPacks(touched);
+  if (chatState.stickerPacks.includes(target)) {
+    chatState.stickerActivePackId = target.id;
+    rememberActiveStickerPack(target.id);
+  }
+  clearStickerSelection();
+  renderStickerPanel();
+  renderStorageCard().catch(() => {});
+  return { done, skipped, target: target.id };
 }
 
 /* The two sections that are not packs.
@@ -1315,9 +1471,12 @@ function renderStickerPanel() {
     bar.classList.toggle('hidden', !picking);
     bar.innerHTML = picking ? `
       <span class="chat-sticker-selcount">${stickerSelection.size} ${app().escapeHTML(t('انتخاب‌شده', 'selected'))}</span>
-      <button type="button" data-chat-sticker-send-selected class="chat-sticker-selbtn is-primary"><i class="fas fa-paper-plane"></i> ${app().escapeHTML(t('ارسال', 'Send'))}</button>
-      <button type="button" data-chat-sticker-make-pack class="chat-sticker-selbtn"><i class="fas fa-layer-group"></i> ${app().escapeHTML(t('ساخت پک', 'Make a pack'))}</button>
-      <button type="button" data-chat-sticker-clear-selection class="chat-sticker-selbtn"><i class="fas fa-xmark"></i> ${app().escapeHTML(t('لغو', 'Clear'))}</button>` : '';
+      <button type="button" data-chat-sticker-send-selected class="chat-sticker-selbtn is-primary" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-paper-plane"></i> ${app().escapeHTML(t('ارسال', 'Send'))}</button>
+      <button type="button" data-chat-sticker-copy-selected class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-copy"></i> ${app().escapeHTML(t('کپی به…', 'Copy to…'))}</button>
+      <button type="button" data-chat-sticker-move-selected class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-arrow-right-arrow-left"></i> ${app().escapeHTML(t('انتقال به…', 'Move to…'))}</button>
+      <button type="button" data-chat-sticker-make-pack class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-layer-group"></i> ${app().escapeHTML(t('ساخت پک', 'Make a pack'))}</button>
+      <button type="button" data-chat-sticker-delete-selected class="chat-sticker-selbtn is-danger" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-trash"></i> ${app().escapeHTML(t('حذف', 'Delete'))}</button>
+      <button type="button" data-chat-sticker-clear-selection class="chat-sticker-selbtn"><i class="fas fa-xmark"></i> ${app().escapeHTML(t('لغو', 'Done'))}</button>` : '';
   }
 
   grid.innerHTML = cells;
@@ -1347,6 +1506,10 @@ window.__stickerProbe = {
   selection: () => [...stickerSelection],
   clearSelection: () => clearStickerSelection(),
   makePack: (title) => buildPackFromSelection(title),
+  deleteSelected: () => deleteSelectedStickers(),
+  copySelected: (packId, move = false) => copySelectedStickersTo(packId === '__gifs__' ? '__gifs__' : chatState.stickerPacks.find((pack) => pack.id === packId), { move }),
+  pickMode: (on) => { setStickerPickMode(on); renderStickerPanel(); },
+  packs: () => chatState.stickerPacks.map((pack) => ({ id: pack.id, title: pack.title, ids: pack.stickers.map((record) => record.id) })),
   addPack: async (pack) => {
     await stickerDbPutPack(pack);
     chatState.stickerPacks.push(pack);

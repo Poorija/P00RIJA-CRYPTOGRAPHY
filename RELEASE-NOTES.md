@@ -1,10 +1,55 @@
-# P00RIJA Cryptography 2.98.51
+# P00RIJA Cryptography 2.98.52
 
-Version 2.98.51 · build chat-v144
+Version 2.98.52 · build chat-v145
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## مدیریت کامل استیکرها و گیف‌ها · Full management of stickers and GIFs
+
+- **دکمهٔ «انتخاب و مدیریت»**: در سرِ پنل استیکر یک دکمهٔ تازه هست که انتخاب را شروع
+  می‌کند؛ نگه داشتن انگشت روی استیکر یا گیف هم همین کار را می‌کند. در حالت انتخاب، هر
+  ضربه یک مورد را انتخاب یا رها می‌کند و چیزی فرستاده نمی‌شود.
+- **استیکرها**: استیکرهای انتخاب‌شده را، از هر پکی و از هر بخشی (حتی «اخیر» و
+  «دلخواه‌ها» و «استیکرهای من»)، می‌توانید:
+  - **کپی کنید** در یک پک دیگر یا یک پک تازه؛
+  - **منتقل کنید** به یک پک دیگر یا یک پک تازه؛ ستارهٔ «دلخواه» همراهش می‌رود؛
+  - **حذف کنید**؛ پکی که خالی بماند خودش برداشته می‌شود؛
+  - مثل قبل **بفرستید** یا از آن‌ها **پک بسازید**.
+  استیکری که گیف است را می‌توانید در قفسهٔ گیف هم کپی کنید.
+- **گیف‌ها**: گیف‌های انتخاب‌شده را می‌توانید **بفرستید**، **در یک پک استیکر کپی کنید** یا
+  **حذف کنید**.
+- **A "Select and manage" button**: a new button at the top of the sticker panel
+  starts picking; holding a finger on a sticker or a GIF does the same. While
+  picking, each tap picks or drops one, and nothing is sent.
+- **Stickers**: picked stickers, from any pack and any tab (Recent, Favourites,
+  and My stickers included), can be:
+  - **copied** into another pack or a new one;
+  - **moved** into another pack or a new one, taking their favourite star along;
+  - **deleted**, and a pack left empty is removed on its own;
+  - **sent**, or made into a **pack**, as before.
+  A sticker that is a GIF can also be copied onto the GIF shelf.
+- **GIFs**: picked GIFs can be **sent**, **copied into a sticker pack**, or
+  **deleted**.
+
+## دکمهٔ بازگشت · The back button
+
+- دکمهٔ بازگشت در صفحهٔ مدیریت پک‌های استیکر روی اندروید خالی دیده می‌شد و روی آیفون
+  فلشش خیلی نازک بود، چون یک نویسهٔ متنی بود که بعضی فونت‌های اندروید ندارند. حالا یک
+  آیکون است، با اندازهٔ خوانا. دکمه‌های بالا و پایین بردن پک‌ها هم همین‌طور.
+- The back button in the sticker pack manager showed empty on Android and drew a
+  hairline arrow on an iPhone, because it was a text character some Android fonts
+  do not have. It is now an icon, at a size that reads. So are the buttons that
+  move a pack up and down.
+
+---
+
+# P00RIJA Cryptography 2.98.51
+
+Version 2.98.51 · build chat-v144
 
 ---
 

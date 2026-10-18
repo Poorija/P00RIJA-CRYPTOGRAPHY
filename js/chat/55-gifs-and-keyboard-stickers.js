@@ -775,7 +775,83 @@ function syncStickerPanelShelf() {
   document.getElementById('chatGifHelpBtn')?.classList.toggle('hidden', !gifs);
   document.getElementById('chatStickerTabs')?.classList.toggle('hidden', gifs);
   document.getElementById('chatStickerGrid')?.classList.toggle('is-gif-shelf', gifs);
-  if (gifs) document.getElementById('chatStickerSelbar')?.classList.add('hidden');
+  if (gifs && !gifPickActive()) document.getElementById('chatStickerSelbar')?.classList.add('hidden');
+}
+
+/* ---- picking GIFs -------------------------------------------------------
+ *
+ * The GIF shelf picks the way the sticker shelf does: a long press, or the
+ * panel's select button, and then each tap adds or drops one. What is picked
+ * can be sent, deleted, or copied into a sticker pack. */
+const gifSelection = new Set();
+let gifPickMode = false;
+function gifPickActive() { return gifPickMode || gifSelection.size > 0; }
+function setGifPickMode(on) {
+  gifPickMode = Boolean(on);
+  if (!gifPickMode) gifSelection.clear();
+}
+function toggleGifPicked(id) {
+  if (gifSelection.has(id)) gifSelection.delete(id);
+  else gifSelection.add(id);
+}
+function pickedGifRecords() {
+  return gifShelfOrder(gifLibraryRecords()).filter((record) => gifSelection.has(record.id));
+}
+function renderGifSelbar() {
+  const bar = document.getElementById('chatStickerSelbar');
+  if (!bar) return;
+  const picking = gifPickActive();
+  bar.classList.toggle('hidden', !picking);
+  const off = gifSelection.size ? '' : 'disabled';
+  bar.innerHTML = picking ? `
+      <span class="chat-sticker-selcount">${gifSelection.size} ${app().escapeHTML(t('گیف انتخاب‌شده', 'GIF(s) selected'))}</span>
+      <button type="button" data-chat-gif-send-picked class="chat-sticker-selbtn is-primary" ${off}><i class="fas fa-paper-plane"></i> ${app().escapeHTML(t('ارسال', 'Send'))}</button>
+      <button type="button" data-chat-gif-copy-picked class="chat-sticker-selbtn" ${off}><i class="fas fa-copy"></i> ${app().escapeHTML(t('کپی در پک استیکر…', 'Copy to a sticker pack…'))}</button>
+      <button type="button" data-chat-gif-delete-picked class="chat-sticker-selbtn is-danger" ${off}><i class="fas fa-trash"></i> ${app().escapeHTML(t('حذف', 'Delete'))}</button>
+      <button type="button" data-chat-gif-end-pick class="chat-sticker-selbtn"><i class="fas fa-xmark"></i> ${app().escapeHTML(t('لغو', 'Done'))}</button>` : '';
+}
+async function deletePickedGifs() {
+  const picked = pickedGifRecords();
+  const library = chatState.gifLibrary;
+  if (!picked.length || !library) return 0;
+  library.stickers = library.stickers.filter((record) => !gifSelection.has(record.id));
+  picked.forEach(forgetGifUrl);
+  await stickerDbPutPack(library);
+  setGifPickMode(false);
+  renderStickerPanel();
+  renderStorageCard().catch(() => {});
+  return picked.length;
+}
+async function copyPickedGifsToPack() {
+  const picked = pickedGifRecords();
+  if (!picked.length) return null;
+  const target = await chooseStickerPackFor({ question: t(`${picked.length} گیف در کدام پک استیکر کپی شود؟`, `Copy ${picked.length} GIF(s) into which sticker pack?`) });
+  if (!target || target === '__gifs__') return null;
+  let done = 0;
+  for (const record of picked) {
+    if (target.stickers.length >= STICKER_MAX_PER_PACK) break;
+    target.stickers.push({ id: makeStickerId(), name: 'animation.gif', mime: 'image/gif', kind: 'image', emoji: '', blob: record.blob });
+    done += 1;
+  }
+  await stickerDbPutPack(target);
+  setGifPickMode(false);
+  renderStickerPanel();
+  renderStorageCard().catch(() => {});
+  return { done, skipped: picked.length - done, title: target.title };
+}
+async function sendPickedGifs() {
+  const picked = pickedGifRecords();
+  if (!picked.length || !guardGroupSend('sendStickers')) return 0;
+  setGifPickMode(false);
+  renderStickerPanel();
+  let sent = 0;
+  for (const record of picked) {
+    try {
+      if (await sendGifBlob(record.blob)) { record.usedAt = Date.now(); sent += 1; }
+    } catch (error) { console.warn('[GIF] one GIF did not send', error); }
+  }
+  stickerDbPutPack(chatState.gifLibrary).catch(() => {});
+  return sent;
 }
 
 /* Used last, shown first — decided when the shelf is drawn, not when a GIF is
@@ -792,6 +868,11 @@ function renderGifShelf() {
   const managing = Boolean(chatState.stickerManageMode);
   grid.classList.toggle('is-managing', managing);
   const records = gifShelfOrder(gifLibraryRecords());
+  /* A pick of something that has since gone is no pick. */
+  [...gifSelection].forEach((id) => { if (!records.some((record) => record.id === id)) gifSelection.delete(id); });
+  const picking = gifPickActive();
+  grid.classList.toggle('is-picking', picking);
+  renderGifSelbar();
   grid.classList.toggle('is-empty', !records.length);
   if (!records.length) {
     grid.innerHTML = `<div class="chat-sticker-empty">
@@ -805,8 +886,9 @@ function renderGifShelf() {
     </div>`;
     return;
   }
-  grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
+  grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell ${gifSelection.has(record.id) ? 'is-picked' : ''}" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
       ${stickerMediaHtml(stickerObjectUrl(record), 'gif', 'chat-gif-thumb')}
+      ${picking ? '<span class="chat-sticker-tick chat-gif-tick"><i class="fas fa-check"></i></span>' : ''}
       ${managing ? `<span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
         title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>` : ''}
     </button>`).join('');
@@ -843,6 +925,8 @@ function bindGifShelf() {
   panel.addEventListener('click', async (event) => {
     const shelf = event.target.closest('[data-chat-panel-shelf]');
     if (shelf) {
+      setGifPickMode(false);
+      if (typeof clearStickerSelection === 'function') clearStickerSelection();
       chatState.stickerPanelMode = shelf.getAttribute('data-chat-panel-shelf') === 'gifs' ? 'gifs' : 'stickers';
       chatState.stickerManageMode = false;
       document.getElementById('chatStickerManageBtn')?.classList.remove('is-active');
@@ -867,8 +951,39 @@ function bindGifShelf() {
       notify(t('از گیف‌ها حذف شد.', 'Removed from your GIFs.'), 'info');
       return;
     }
+    if (event.target.closest('[data-chat-gif-end-pick]')) {
+      setGifPickMode(false);
+      renderStickerPanel();
+      return;
+    }
+    if (event.target.closest('[data-chat-gif-send-picked]')) {
+      const sent = await sendPickedGifs();
+      if (sent) notify(t(`${sent} گیف فرستاده شد.`, `${sent} GIF(s) sent.`), 'success');
+      return;
+    }
+    if (event.target.closest('[data-chat-gif-delete-picked]')) {
+      const count = gifSelection.size;
+      if (!count || !await PoorijaDialogs.confirm(t(`${count} گیف حذف شود؟`, `Delete ${count} GIF(s)?`),
+        { okLabel: t('حذف', 'Delete'), cancelLabel: t('انصراف', 'Cancel'), danger: true })) return;
+      const removed = await deletePickedGifs();
+      notify(t(`${removed} گیف حذف شد.`, `${removed} GIF(s) deleted.`), 'success');
+      return;
+    }
+    if (event.target.closest('[data-chat-gif-copy-picked]')) {
+      const result = await copyPickedGifsToPack();
+      if (result) {
+        notify(t(`${result.done} گیف در «${result.title}» کپی شد.${result.skipped ? ` ${result.skipped} مورد جا نشد.` : ''}`,
+          `${result.done} GIF(s) copied into "${result.title}".${result.skipped ? ` ${result.skipped} did not fit.` : ''}`), result.done ? 'success' : 'warning');
+      }
+      return;
+    }
     const cell = event.target.closest('[data-chat-gif-send]');
     if (!cell) return;
+    if (gifPickActive()) {
+      toggleGifPicked(cell.getAttribute('data-chat-gif-send'));
+      renderStickerPanel();
+      return;
+    }
     const record = gifLibraryRecords().find((item) => item.id === cell.getAttribute('data-chat-gif-send'));
     if (!record?.blob) return;
     if (!guardGroupSend('sendStickers')) return;
@@ -886,6 +1001,27 @@ function bindGifShelf() {
     } finally {
       cell.classList.remove('is-sending');
     }
+  });
+  /* A long press, or a right click on a desktop, starts picking with the GIF
+     under the finger — the same gesture the sticker shelf answers to. */
+  let holdTimer = 0;
+  const beginPick = (target) => {
+    const cell = target?.closest?.('[data-chat-gif-send]');
+    if (!cell || chatState.stickerPanelMode !== 'gifs' || gifPickActive()) return;
+    gifSelection.add(cell.getAttribute('data-chat-gif-send'));
+    renderStickerPanel();
+    navigator.vibrate?.(15);
+  };
+  panel.addEventListener('pointerdown', (event) => {
+    clearTimeout(holdTimer);
+    const target = event.target;
+    holdTimer = setTimeout(() => beginPick(target), 420);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave', 'pointermove'].forEach((name) => panel.addEventListener(name, () => clearTimeout(holdTimer)));
+  panel.addEventListener('contextmenu', (event) => {
+    if (!event.target.closest?.('[data-chat-gif-send]')) return;
+    event.preventDefault();
+    beginPick(event.target);
   });
   document.getElementById('chatGifInput')?.addEventListener('change', async (event) => {
     /* Copied before the reset: `files` is live and clearing value empties it. */
@@ -919,4 +1055,7 @@ window.__gifProbe = {
   measure: (blob) => measurePicture(blob),
   send: (files, origin) => sendPastedPictures(files, { origin }),
   keyboardPictures: () => keyboardPicturesWanted,
+  pick: (id) => { toggleGifPicked(id); renderStickerPanel(); },
+  picked: () => [...gifSelection],
+  pickMode: (on) => { setGifPickMode(on); renderStickerPanel(); },
 };
