@@ -268,7 +268,53 @@ function stickerDbRequest(storeName, mode, run) {
 }
 
 const stickerDbGetAllPacks = () => stickerDbRequest(STICKER_PACK_STORE, 'readonly', (store) => store.getAll());
-const stickerDbPutPack = (pack) => stickerDbRequest(STICKER_PACK_STORE, 'readwrite', (store) => store.put(pack));
+const stickerDbPutPackRecord = (pack) => stickerDbRequest(STICKER_PACK_STORE, 'readwrite', (store) => store.put(pack));
+const stickerDbGetPack = (id) => stickerDbRequest(STICKER_PACK_STORE, 'readonly', (store) => store.get(id));
+/* Writing a pack, and then taking its pictures back from what was written.
+   On an iPhone a picture read from IndexedDB is a handle onto the stored copy,
+   and writing the record again throws that copy away: every handle read
+   before the write — and every object URL made from one — goes dead. Sending
+   a GIF rewrote the GIF library to note when it was used, and the next time
+   the shelf opened every GIF was a broken image. So after each write the
+   pack's pictures are read back fresh, and the URLs made from the old ones are
+   dropped, to be made again on the next draw. */
+async function stickerDbPutPack(pack) {
+  const result = await stickerDbPutPackRecord(pack);
+  try {
+    const stored = await stickerDbGetPack(pack.id);
+    const fresh = new Map((stored?.stickers || []).map((record) => [record.id, record.blob]));
+    let changed = 0;
+    for (const record of pack.stickers || []) {
+      const blob = fresh.get(record.id);
+      if (!blob || blob === record.blob) continue;
+      record.blob = blob;
+      const url = chatState.stickerUrls.get(record.id);
+      if (url) { URL.revokeObjectURL(url); chatState.stickerUrls.delete(record.id); }
+      changed += 1;
+    }
+    if (changed && !document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
+  } catch (error) {
+    console.warn('[Stickers] the written pack was not read back', error);
+  }
+  return result;
+}
+
+/* A picture in the sticker panel that will not load — a handle the system
+   dropped under it — is answered by reading every pack back from storage and
+   drawing the panel again. At most once in ten seconds, so a picture that
+   really is gone cannot loop. */
+let stickerPanelReloadAt = 0;
+document.addEventListener('error', (event) => {
+  const node = event.target;
+  if (!(node instanceof HTMLImageElement || node instanceof HTMLVideoElement)) return;
+  if (!node.closest?.('#chatStickerPanel, .packman')) return;
+  if (!String(node.currentSrc || node.getAttribute('src') || '').startsWith('blob:')) return;
+  if (Date.now() - stickerPanelReloadAt < 10000) return;
+  stickerPanelReloadAt = Date.now();
+  chatState.stickerUrls.forEach((url) => URL.revokeObjectURL(url));
+  chatState.stickerUrls.clear();
+  loadStickerPacks().catch((error) => console.warn('[Stickers] reloading the packs failed', error));
+}, true);
 const stickerDbDeletePack = (id) => stickerDbRequest(STICKER_PACK_STORE, 'readwrite', (store) => store.delete(id));
 const stickerDbGetAllSounds = () => stickerDbRequest(STICKER_SOUND_STORE, 'readonly', (store) => store.getAll());
 const stickerDbPutSound = (sound) => stickerDbRequest(STICKER_SOUND_STORE, 'readwrite', (store) => store.put(sound));

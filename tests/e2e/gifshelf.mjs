@@ -120,7 +120,7 @@ try {
     setStickerPanelVisible(true, { shelf: 'gifs' });
     await new Promise((r) => setTimeout(r, 400));
     const first = document.querySelector('#chatStickerGrid .chat-gif-cell')?.getAttribute('data-chat-gif-send');
-    const used = chatState.gifLibrary.stickers.filter((record) => record.usedAt).map((record) => record.id);
+    const used = Object.keys(JSON.parse(localStorage.getItem('poorija_gif_used') || '{}'));
     return { first, used };
   });
   check('opened again, the shelf starts with the GIF used last', reopened.used.length === 1 && reopened.first === reopened.used[0], JSON.stringify(reopened));

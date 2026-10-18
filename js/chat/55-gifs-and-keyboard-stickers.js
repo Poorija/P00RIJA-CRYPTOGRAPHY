@@ -683,7 +683,7 @@ async function saveGif(blob) {
   const hash = await gifContentHash(blob);
   const existing = library.stickers.find((record) => record.hash === hash);
   if (existing) {
-    existing.usedAt = Date.now();
+    noteGifUsed(existing.id);
     library.stickers = [existing, ...library.stickers.filter((record) => record !== existing)];
   } else {
     library.stickers.unshift({
@@ -854,18 +854,31 @@ async function sendPickedGifs() {
   let sent = 0;
   for (const record of picked) {
     try {
-      if (await sendGifBlob(record.blob)) { record.usedAt = Date.now(); sent += 1; }
+      if (await sendGifBlob(record.blob)) { noteGifUsed(record.id); sent += 1; }
     } catch (error) { console.warn('[GIF] one GIF did not send', error); }
   }
-  stickerDbPutPack(chatState.gifLibrary).catch(() => {});
   return sent;
 }
 
 /* Used last, shown first — decided when the shelf is drawn, not when a GIF is
    sent: moving the GIF under the finger to the top and redrawing is what
    threw the shelf back to its first row on every send. */
+/* When each GIF was last sent, kept apart from the GIFs: writing the library
+   to note it is what threw away every picture on an iPhone (stickerDbPutPack).
+   Ids and times only, in this device's storage. */
+const GIF_USED_KEY = 'poorija_gif_used';
+function gifUsedTimes() {
+  try { return JSON.parse(localStorage.getItem(GIF_USED_KEY) || '{}') || {}; } catch (_error) { return {}; }
+}
+function noteGifUsed(id) {
+  const times = gifUsedTimes();
+  times[id] = Date.now();
+  const kept = Object.entries(times).sort((a, b) => b[1] - a[1]).slice(0, GIF_LIBRARY_MAX_ITEMS * 2);
+  try { localStorage.setItem(GIF_USED_KEY, JSON.stringify(Object.fromEntries(kept))); } catch (_error) { /* private mode */ }
+}
 function gifShelfOrder(records) {
-  const stamp = (record) => Number(record.usedAt || 0) || Date.parse(record.addedAt || 0) || 0;
+  const used = gifUsedTimes();
+  const stamp = (record) => Number(used[record.id] || 0) || Number(record.usedAt || 0) || Date.parse(record.addedAt || 0) || 0;
   return records.slice().sort((a, b) => stamp(b) - stamp(a));
 }
 function renderGifShelf() {
@@ -998,9 +1011,9 @@ function bindGifShelf() {
     try {
       if (await sendGifBlob(record.blob)) {
         /* Noted, not acted on: the shelf reorders the next time it opens
-           (gifShelfOrder), so the GIF stays where the finger is. */
-        record.usedAt = Date.now();
-        stickerDbPutPack(chatState.gifLibrary).catch(() => {});
+           (gifShelfOrder), so the GIF stays where the finger is — and the
+           library is not written for it. */
+        noteGifUsed(record.id);
       }
     } catch (error) {
       console.error('[GIF] send failed', error);

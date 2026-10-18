@@ -1,10 +1,45 @@
-# P00RIJA Cryptography 2.98.53
+# P00RIJA Cryptography 2.98.54
 
-Version 2.98.53 · build chat-v146
+Version 2.98.54 · build chat-v147
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## گیف‌های ذخیره‌شده بعد از ارسال ناپدید نمی‌شوند · Saved GIFs no longer vanish after a send
+
+- **مشکل**: روی آیفون، بعد از فرستادن یک گیف، اگر پنل گیف بسته و دوباره باز می‌شد، به‌جای
+  همهٔ گیف‌های ذخیره‌شده تصویر شکسته دیده می‌شد. روی آیفون تصویری که از حافظهٔ برنامه
+  (IndexedDB) خوانده می‌شود به نسخهٔ ذخیره‌شده وصل است و نوشتن دوبارهٔ همان رکورد آن نسخه
+  را دور می‌ریزد. فرستادن گیف، کل کتابخانهٔ گیف را فقط برای ثبت «آخرین استفاده» دوباره
+  می‌نوشت.
+- **حالا**:
+  - فرستادن گیف دیگر چیزی در کتابخانهٔ گیف نمی‌نویسد؛ زمان آخرین استفاده جداگانه نگه
+    داشته می‌شود.
+  - هر بار که یک پک یا کتابخانهٔ گیف نوشته می‌شود (ذخیرهٔ گیف تازه، انتقال یا کپی
+    استیکر)، تصویرها دوباره از همان چیزی که نوشته شد خوانده می‌شوند.
+  - اگر تصویری در پنل استیکر یا گیف به هر دلیل بارگذاری نشود، پک‌ها دوباره از حافظه
+    خوانده و پنل از نو کشیده می‌شود.
+- **The problem**: on an iPhone, after sending a GIF, closing the GIF panel and
+  opening it again showed a broken image in place of every saved GIF. On an
+  iPhone a picture read from the app's storage (IndexedDB) is tied to the stored
+  copy, and writing the same record again throws that copy away. Sending a GIF
+  rewrote the whole GIF library just to note when it was last used.
+- **Now**:
+  - Sending a GIF writes nothing to the GIF library; when it was last used is kept
+    apart.
+  - Each time a pack or the GIF library is written (a new GIF saved, a sticker
+    moved or copied), its pictures are read back from what was written.
+  - A picture in the sticker or GIF panel that fails to load for any reason has
+    the packs read back from storage and the panel drawn again.
+
+---
+
+# P00RIJA Cryptography 2.98.53
+
+Version 2.98.53 · build chat-v146
 
 ---
 
