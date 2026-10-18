@@ -68,6 +68,39 @@ panel.scrollTop = top;
 panel.style.scrollBehavior = previous;
 }
 
+/* Down at the newest message, the thread stays there while pictures fill in.
+   Whether the reader was down there is kept from the last scroll — a picture
+   growing moves nothing, so it fires no scroll, and by the time it has loaded
+   the distance to the bottom already includes it. A reader who has scrolled up
+   to read is left where they are. */
+let threadAtBottom = true;
+document.addEventListener('scroll', (event) => {
+if (event.target?.id !== 'chatMessages') return;
+const panel = event.target;
+threadAtBottom = (panel.scrollHeight - panel.scrollTop - panel.clientHeight) <= THREAD_BOTTOM_SLACK_PX;
+}, true);
+/* A GIF that arrived without its size — from an older build, or kept before
+   sizes were sent — gets it the first time it loads, so every redraw after
+   that holds its shape (stickerMediaHtml). */
+document.addEventListener('load', (event) => {
+const node = event.target;
+if (!(node instanceof HTMLImageElement || node instanceof HTMLVideoElement)) return;
+const panel = document.getElementById('chatMessages');
+if (!panel || !panel.contains(node)) return;
+if (node.classList.contains('chat-gif-media') && node instanceof HTMLImageElement && node.naturalWidth && node.naturalHeight) {
+const id = node.closest('[data-id]')?.getAttribute('data-id');
+const entry = id ? (chatState.history[chatState.activeConversationId] || []).find((item) => item.id === id) : null;
+if (entry && !(entry.mediaWidth && entry.mediaHeight)) {
+entry.mediaWidth = node.naturalWidth;
+entry.mediaHeight = node.naturalHeight;
+node.style.aspectRatio = `${node.naturalWidth} / ${node.naturalHeight}`;
+clearTimeout(chatState.mediaSizeSaveTimer);
+chatState.mediaSizeSaveTimer = setTimeout(() => storeHistory(), 1500);
+}
+}
+if (threadAtBottom) scrollThreadTo(panel, panel.scrollHeight);
+}, true);
+
 function renderMessages() {
 pruneExpiredHistory();
 const peer = getActiveConversation();
@@ -485,7 +518,7 @@ return `
 ${senderHtml}
 ${replyPreview}
 <div class="chat-sticker-body">${entry.downloadUrl
-? stickerMediaHtml(safeMediaUrl(entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media')
+? stickerMediaHtml(safeMediaUrl(entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media', gif ? { width: entry.mediaWidth, height: entry.mediaHeight } : {})
 : missingMediaHtml(gif
 ? t('این گیف روی این دستگاه ذخیره نشده است.', 'This GIF is not stored on this device.')
 : t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'))}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
@@ -1149,6 +1182,7 @@ searchTarget.classList.add('selected');
 } else if (stickToBottom || !restoreThreadAnchor(panel, threadAnchor)) {
 scrollThreadTo(panel, panel.scrollHeight);
 }
+threadAtBottom = (panel.scrollHeight - panel.scrollTop - panel.clientHeight) <= THREAD_BOTTOM_SLACK_PX;
 }
 function positionMessageOverlays(panel = document.getElementById('chatMessages')) {
 if (!panel) return;

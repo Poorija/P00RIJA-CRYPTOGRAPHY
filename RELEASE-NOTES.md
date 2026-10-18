@@ -1,10 +1,49 @@
-# P00RIJA Cryptography 2.98.52
+# P00RIJA Cryptography 2.98.53
 
-Version 2.98.52 · build chat-v145
+Version 2.98.53 · build chat-v146
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## گفتگو با چند گیف پشت سر هم ثابت می‌ماند · A thread of GIFs holds still
+
+- **علت**: هر بار گفتگو دوباره کشیده می‌شد (فرستادن، رسیدن تیک، انتخاب پیام)، همهٔ
+  پیام‌ها از نو ساخته می‌شدند و روی آیفون هر گیف دوباره بارگذاری می‌شد. ارتفاع حباب گیف
+  از خود تصویر می‌آمد، پس برای یک لحظه صفر بود؛ جای خواندن روی همان ارتفاع صفر تنظیم
+  می‌شد و وقتی گیف‌ها پر می‌شدند، گفتگو جابه‌جا می‌شد. با چند گیف پشت سر هم، بعد از
+  فرستادن گیف تازه، به‌جای آن گیف‌های قبلی دیده می‌شدند.
+- **حالا**: اندازهٔ هر گیف همراهش فرستاده می‌شود و حباب پیش از بارگذاری تصویر همان
+  شکل را دارد. گیفی که اندازه‌اش را نداشت (از نسخهٔ قدیمی‌تر)، اولین بار که بارگذاری
+  شد اندازه‌اش را یاد می‌گیرد، و تا آن موقع جای ۴ به ۳ نگه می‌دارد.
+- **پایین گفتگو می‌ماند**: اگر پایین گفتگو بودید، تا تصویرها کامل بارگذاری شوند پایین
+  می‌ماند و آخرین گیف دیده می‌شود.
+- **انتخاب پیام بدون پرش**: انتخاب پیام‌ها دیگر گفتگو را از نو نمی‌کشد و فقط پیام را
+  علامت می‌زند، و ارتفاع نوار انتخاب که بالای گفتگو باز می‌شود جبران می‌شود؛ پیامی که
+  زیر انگشت است همان‌جا می‌ماند.
+- **The cause**: every time the thread was drawn again (a send, a tick arriving,
+  picking a message), every message was rebuilt, and on an iPhone every GIF was
+  loaded again. A GIF bubble took its height from its picture, so for a moment
+  it had none; the reading position was restored against that, and the thread
+  slid as the GIFs filled in. With several GIFs in a row, sending a new one left
+  the earlier ones in view instead of it.
+- **Now**: each GIF's size travels with it, and its bubble has that shape before
+  the picture loads. A GIF that came without its size (from an older build)
+  learns it the first time it loads, and holds a 4:3 space until then.
+- **The bottom stays the bottom**: if you were at the newest message, the thread
+  stays there while pictures finish loading, and the newest GIF is the one in
+  view.
+- **Picking messages without a jump**: picking messages no longer redraws the
+  thread; it only marks them, and the height of the selection bar that opens
+  above the thread is taken up, so the message under your finger stays there.
+
+---
+
+# P00RIJA Cryptography 2.98.52
+
+Version 2.98.52 · build chat-v145
 
 ---
 

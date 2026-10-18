@@ -921,16 +921,24 @@ function hydrateLottieNodes(root = document) {
   });
 }
 
-function stickerMediaHtml(url, kind, className) {
+function stickerMediaHtml(url, kind, className, { width = 0, height = 0 } = {}) {
   /* The URL can originate off the wire (relay broadcasts, archive imports);
      anything that is not https/blob/data renders as nothing rather than as
      an attacker-chosen src. */
   const safeUrl = safeMediaUrl(url);
   if (!safeUrl) return '';
   const src = app().escapeHTML(safeUrl);
+  /* With its size known, the picture holds its shape before it has loaded.
+     A thread redraw rebuilds every bubble, and WebKit decodes each picture
+     again: without this a GIF stood at no height for a moment, the reader's
+     place was restored against that, and the thread then slid as the GIFs
+     filled in. Numbers only, so nothing else can ride into the style. */
+  const w = Math.round(Number(width));
+  const h = Math.round(Number(height));
+  const shape = w > 0 && h > 0 && w <= 10000 && h <= 10000 ? ` style="aspect-ratio:${w} / ${h}"` : '';
   if (kind === 'lottie') return `<div class="${className} chat-lottie" data-lottie-src="${src}"></div>`;
-  if (kind === 'video') return `<video class="${className}" src="${src}" autoplay loop muted playsinline disablepictureinpicture></video>`;
-  return `<img class="${className}" src="${src}" alt="" draggable="false" loading="lazy">`;
+  if (kind === 'video') return `<video class="${className}" src="${src}"${shape} autoplay loop muted playsinline disablepictureinpicture></video>`;
+  return `<img class="${className}" src="${src}"${shape} alt="" draggable="false" loading="lazy">`;
 }
 
 /* ---- recent, favourites, and the order packs sit in ---------------------- */

@@ -311,7 +311,14 @@ async function sendGifBlob(blob) {
     return false;
   }
   const file = new File([blob], 'animation.gif', { type: 'image/gif' });
-  await sendEncryptedBlob(file, 'sticker', 0, { stickerKind: 'gif', stickerEmoji: '' });
+  /* Its size travels with it, so the bubble on both sides is the right shape
+     before the picture has loaded (mediaWidth / mediaHeight). */
+  const size = await measurePicture(blob).catch(() => null);
+  await sendEncryptedBlob(file, 'sticker', 0, {
+    stickerKind: 'gif',
+    stickerEmoji: '',
+    ...(size?.width && size?.height ? { mediaWidth: size.width, mediaHeight: size.height } : {}),
+  });
   return true;
 }
 

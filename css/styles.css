@@ -27954,3 +27954,11 @@ html body .packman-back { font-size: 1.15rem; }
 html body .packman-back i,
 html body .packman-move button i { pointer-events: none; }
 html body .packman-move button { font-size: 0.85rem; }
+
+/* A GIF in the conversation holds a shape before its picture loads: its own,
+   from the size sent with it (an inline aspect-ratio), or 4:3 until that is
+   known. Without one it stood at no height while WebKit decoded it again on
+   every redraw, and the thread slid as the GIFs filled in. */
+html body #mainApp #content-chat .chat-sticker-bubble.is-gif .chat-gif-media {
+  aspect-ratio: 4 / 3;
+}

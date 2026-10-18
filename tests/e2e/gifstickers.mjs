@@ -232,6 +232,13 @@ await B.waitForTimeout(5000);
 const bGif = await bubbles(B);
 check('the receiver gets a GIF, not a file', bGif.gifs === 1 && bGif.files.length === 0, JSON.stringify(bGif));
 check('the received GIF decodes', bGif.gifDecoded.some((w) => w === 64), JSON.stringify(bGif.gifDecoded));
+/* Its size came with it, so the bubble has its shape before the picture loads
+   on every redraw (stickerMediaHtml). */
+const bGifSize = await B.evaluate(() => {
+  const entry = Object.values(chatState.history).flat().find((e) => e.direction === 'in' && isGifEntry(e));
+  return { w: entry?.mediaWidth || 0, h: entry?.mediaHeight || 0 };
+});
+check('the GIF arrives knowing its own size', bGifSize.w === 64 && bGifSize.h === 48, JSON.stringify(bGifSize));
 const gifShape = await B.evaluate(() => {
   const body = document.querySelector('.chat-sticker-bubble.is-gif .chat-sticker-body');
   const img = body?.querySelector('img');

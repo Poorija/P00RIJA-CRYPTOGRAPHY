@@ -2367,6 +2367,13 @@ await mintSessionKey(session, remotePeerRecord);
    because this device is the only one the channel reached
    (mirrorToSiblings, 44-device-beacon.js). A redelivery of something already
    here is not handed on twice. */
+/* A picture's size as the sender measured it: a whole number of pixels
+   within reason, or 0 for unknown. It only shapes a bubble, but it comes off
+   the wire, so it is checked like anything else that does. */
+function mediaDimension(value) {
+const number = Math.round(Number(value));
+return Number.isFinite(number) && number > 0 && number <= 10000 ? number : 0;
+}
 function appendDirectArrival(conversationKey, entry) {
 const known = Boolean(entry?.id) && (chatState.history[conversationKey] || []).some((item) => item.id === entry.id);
 appendHistory(conversationKey, entry);
@@ -2961,6 +2968,8 @@ id: incomingId,
 direction: 'in',
 type: incomingBlobType(transfer.meta.kind),
 stickerKind: transfer.meta.stickerKind || '',
+mediaWidth: mediaDimension(transfer.meta.mediaWidth),
+mediaHeight: mediaDimension(transfer.meta.mediaHeight),
 stickerEmoji: transfer.meta.stickerEmoji || '',
 packTitle: transfer.meta.packTitle || '',
 packCount: transfer.meta.packCount || 0,
@@ -3006,6 +3015,8 @@ id: singleShotId,
 direction: 'in',
 type: message.type,
 stickerKind: message.stickerKind || '',
+mediaWidth: mediaDimension(message.mediaWidth),
+mediaHeight: mediaDimension(message.mediaHeight),
 stickerEmoji: message.stickerEmoji || '',
 name: message.name,
 size: message.size,

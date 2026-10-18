@@ -107,7 +107,21 @@ function selectionCount() {
 /* The selection bar sits above the thread, so showing or hiding it resizes the
    pane. Do that first and the thread re-renders against the layout it will
    actually end up in, which is what keeps the scroll position exact. */
+/* Picking marks bubbles; it does not redraw the thread. A redraw rebuilt
+   every bubble, WebKit decoded every picture again, and with GIFs in view the
+   thread slid each time a message was picked. Only a message toolbar left
+   open needs the redraw, to take it away. */
+function markSelectionInThread() {
+  const panel = document.getElementById('chatMessages');
+  if (!panel) return;
+  panel.querySelectorAll('.chat-message-bubble[data-id]').forEach((bubble) => {
+    const id = bubble.getAttribute('data-id');
+    bubble.classList.toggle('is-selectable', chatState.selectionMode);
+    bubble.classList.toggle('is-selected', chatState.selectionMode && chatState.selectedMessages.has(id));
+  });
+}
 function enterSelectionMode(firstId) {
+  const toolbarOpen = Boolean(chatState.activeMessageId || chatState.activeReactionMessageId);
   chatState.selectionMode = true;
   chatState.selectedMessages.clear();
   if (firstId) chatState.selectedMessages.add(firstId);
@@ -117,13 +131,14 @@ function enterSelectionMode(firstId) {
   chatState.activeReactionMessageId = '';
   if (typeof closeReactionPopup === 'function') closeReactionPopup();
   syncSelectionBar();
-  renderMessages();
+  if (toolbarOpen) renderMessages();
+  else markSelectionInThread();
 }
 function exitSelectionMode() {
   chatState.selectionMode = false;
   chatState.selectedMessages.clear();
   syncSelectionBar();
-  renderMessages();
+  markSelectionInThread();
 }
 function toggleMessageSelected(id) {
   if (!chatState.selectionMode) return;
@@ -134,12 +149,21 @@ function toggleMessageSelected(id) {
     return;
   }
   syncSelectionBar();
-  renderMessages();
+  markSelectionInThread();
 }
+/* The bar sits above the thread, so showing it pushed every message down by
+   its height, and hiding it pulled them back. The thread's scroll takes the
+   difference, so the message under the finger stays under it. */
 function syncSelectionBar() {
   const bar = document.getElementById('chatSelectionBar');
   if (!bar) return;
+  const thread = document.getElementById('chatMessages');
+  const topBefore = thread ? thread.getBoundingClientRect().top : 0;
   bar.classList.toggle('hidden', !chatState.selectionMode);
+  if (thread) {
+    const shift = thread.getBoundingClientRect().top - topBefore;
+    if (Math.abs(shift) > 0.5 && typeof scrollThreadTo === 'function') scrollThreadTo(thread, thread.scrollTop + shift);
+  }
   const count = document.getElementById('chatSelectionCount');
   if (count) count.textContent = String(selectionCount());
   const download = document.getElementById('chatSelectionDownloadBtn');
