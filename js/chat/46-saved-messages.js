@@ -169,18 +169,21 @@ async function copyEntryToSaved(entry, fromLabel = '') {
     if (!copy.text) return null;
   } else if (entry.type === 'rich') {
     copy.rich = { ...(typeof richPayloadOf === 'function' ? richPayloadOf(entry) : entry.rich), id: copy.id };
-  } else if (entry.downloadUrl) {
-    try {
-      const blob = await (await fetch(entry.downloadUrl)).blob();
-      const file = new File([blob], entry.name || `${entry.type}.bin`, { type: blob.type || entry.mime || 'application/octet-stream' });
-      return keepBlobInSaved(file, entry.type, entry.durationMs || 0, {
-        forwardedFrom: copy.forwardedFrom,
-        ...(entry.type === 'sticker' ? { stickerKind: entry.stickerKind || '', stickerEmoji: entry.stickerEmoji || '' } : {}),
-      });
-    } catch (error) {
-      console.warn('[Saved] the attachment could not be copied:', error);
-      return null;
-    }
+  } else if (typeof isMediaEntry === 'function' && isMediaEntry(entry)) {
+    /* From the bubble's URL or the vault (forwardableBlob), and with what makes
+       it what it is: a pack keeps its title and count, a GIF its size. */
+    const blob = typeof forwardableBlob === 'function' ? await forwardableBlob(entry) : null;
+    if (!blob) return null;
+    const file = new File([blob], entry.name || `${entry.type}.bin`, { type: blob.type || entry.mime || 'application/octet-stream' });
+    return keepBlobInSaved(file, entry.type, entry.durationMs || 0, {
+      forwardedFrom: copy.forwardedFrom,
+      ...(entry.type === 'sticker' ? {
+        stickerKind: entry.stickerKind || '',
+        stickerEmoji: entry.stickerEmoji || '',
+        ...(entry.mediaWidth && entry.mediaHeight ? { mediaWidth: entry.mediaWidth, mediaHeight: entry.mediaHeight } : {}),
+      } : {}),
+      ...(entry.type === 'stickerpack' ? { packTitle: entry.packTitle || '', packCount: Number(entry.packCount || 0) } : {}),
+    });
   } else {
     copy.type = 'text';
     copy.text = typeof forwardEntryLabel === 'function' ? forwardEntryLabel(entry) : String(entry.name || '');

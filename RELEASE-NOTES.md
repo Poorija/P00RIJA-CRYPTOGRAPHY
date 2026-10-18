@@ -1,10 +1,48 @@
-# P00RIJA Cryptography 2.98.55
+# P00RIJA Cryptography 2.98.56
 
-Version 2.98.55 · build chat-v148
+Version 2.98.56 · build chat-v149
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هدایت پیام‌ها کامل شد · Forwarding sends the real thing
+
+- **پک استیکر**: هدایت یک پک استیکر فقط «هدایت‌شده: نام‌فایل.wastickers» می‌فرستاد و
+  خود پک همراهش نبود. حالا خود پک با عنوان و تعداد استیکرهایش می‌رود و طرف مقابل
+  می‌تواند اضافه‌اش کند.
+- **کارت‌ها**: نظرسنجی، موقعیت و کارت مخاطب هم فقط به‌صورت یک خط متن می‌رفتند. حالا
+  به‌صورت کارت واقعی هدایت می‌شوند. نظرسنجی با رأی‌های خالی می‌رود، و موقعیت زنده
+  به‌صورت یک موقعیت ثابت در آخرین نقطه؛ هدایت یک اشتراک زنده معنایی ندارد.
+- **فایل، پیام صوتی، استیکر و گیف** مثل قبل خودشان می‌روند؛ گیف حالا اندازه‌اش را هم
+  همراه دارد. فایلی که حبابش هنوز نمایش داده نشده، از خزانهٔ دستگاه خوانده می‌شود.
+- **چیزی خالی نمی‌رود**: پیام یک‌بار مصرف هدایت نمی‌شود، و پیامی که فایلش روی این
+  دستگاه نیست به‌جای فرستادن نامش، با یک توضیح رد می‌شود.
+- **پیام‌های ذخیره‌شده**: هدایت به پیام‌های ذخیره‌شده هم عنوان و تعداد پک و اندازهٔ گیف
+  را نگه می‌دارد.
+- **Sticker packs**: forwarding a sticker pack sent only "Forwarded:
+  name.wastickers", with no pack attached. The pack itself now goes, with its
+  title and sticker count, and the other person can add it.
+- **Cards**: polls, locations, and contact cards also went as a single line of
+  text. They now forward as real cards. A poll goes with its votes cleared, and
+  a live location as a fixed location at its last point; forwarding a live share
+  makes no sense.
+- **Files, voice notes, stickers, and GIFs** go as themselves, as before; a GIF
+  now carries its size too. A file whose bubble has not been drawn yet is read
+  from the device's vault.
+- **Nothing goes empty**: a view-once message is not forwarded, and a message
+  whose file is not on this device is refused with an explanation instead of
+  sending its name.
+- **Saved Messages**: forwarding into Saved Messages keeps a pack's title and
+  count and a GIF's size as well.
+
+---
+
+# P00RIJA Cryptography 2.98.55
+
+Version 2.98.55 · build chat-v148
 
 ---
 

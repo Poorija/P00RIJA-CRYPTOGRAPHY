@@ -173,7 +173,7 @@ notify(entry.pinned ? t('پیام سنجاق شد.', 'Message pinned.') : t('پ�
 function forwardEntryLabel(entry) {
 if (!entry) return '';
 if (entry.text) return entry.text;
-if (entry.type === 'sticker' || entry.type === 'rich') return mediaEntryLabel(entry);
+if (entry.type === 'sticker' || entry.type === 'rich' || entry.type === 'stickerpack') return mediaEntryLabel(entry);
 if (entry.name) return entry.name;
 if (entry.type === 'voice') return t('پیام صوتی', 'Voice message');
 if (entry.type === 'file') return t('فایل', 'File');
@@ -226,9 +226,47 @@ chatState.activeForwardMessageId = '';
 const modal = document.getElementById('chatForwardModal');
 modal?.classList.add('hidden');
 }
+/* The bytes of a message's attachment, wherever this device has them: the
+   object URL the bubble draws from, or the vault when the bubble has not been
+   drawn since a restart. Null when they are not on this device at all. */
+async function forwardableBlob(entry) {
+try {
+if (entry?.downloadUrl) {
+const blob = await (await fetch(entry.downloadUrl)).blob();
+if (blob?.size) return blob;
+}
+} catch (_error) { /* a dead URL: the vault has its own copy */ }
+try {
+const stored = typeof readMessageMedia === 'function' ? await readMessageMedia(entry.id) : null;
+if (stored?.blob?.size) return stored.blob;
+} catch (_error) { /* not in the vault either */ }
+return null;
+}
+/* What a card becomes when it is passed on: the same card, made fresh. A
+   poll starts again with no votes; a live location goes as the place it last
+   was — a forward is not a share that keeps moving. */
+function forwardableRich(rich) {
+if (!rich?.kind) return null;
+const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+if (rich.kind === 'poll' && rich.question && Array.isArray(rich.options) && rich.options.length) {
+return { kind: 'poll', data: { question: String(rich.question), options: rich.options.map(String), multi: Boolean(rich.multi), votes: {}, closed: false } };
+}
+if ((rich.kind === 'location' || rich.kind === 'live-location') && number(rich.lat) !== null && number(rich.lng) !== null) {
+return { kind: 'location', data: { lat: number(rich.lat), lng: number(rich.lng), accuracy: Math.round(number(rich.accuracy) || 0), at: rich.at || new Date().toISOString() } };
+}
+if (rich.kind === 'contact' && rich.publicKeyData && rich.fingerprint) {
+return { kind: 'contact', data: { name: String(rich.name || ''), fingerprint: rich.fingerprint, peerId: rich.peerId || '', publicKeyData: rich.publicKeyData, homeRelay: rich.homeRelay || null, avatarData: rich.avatarData || '' } };
+}
+return null;
+}
 async function forwardEntryToDestination(entry, destinationKey) {
 const text = forwardEntryLabel(entry).trim();
 if (!destinationKey) return;
+/* A view-once message was sent to be seen once, by one person. */
+if (entry?.viewOnce) {
+notify(t('پیام یک‌بار مصرف هدایت نمی‌شود.', 'A view-once message cannot be forwarded.'), 'warning');
+return;
+}
 /* Into Saved Messages the message itself is copied — there is nobody to send
    a "Forwarded:" line to. */
 if (destinationKey === 'saved' && typeof copyEntryToSaved === 'function') {
@@ -265,18 +303,34 @@ return;
 // label, not the thing. The bytes are already local (downloadUrl is an object
 // URL over the decrypted blob), so re-send them through the same encrypted
 // transfer instead of describing them.
-const mediaKinds = ['sticker', 'voice', 'file'];
-if (mediaKinds.includes(entry.type) && entry.downloadUrl) {
-try {
-const blob = await (await fetch(entry.downloadUrl)).blob();
-const file = new File([blob], entry.name || `${entry.type}.bin`, { type: blob.type || entry.mime || 'application/octet-stream' });
-await sendEncryptedBlob(file, entry.type, entry.durationMs || 0,
-entry.type === 'sticker'
-? { stickerKind: entry.stickerKind || stickerKindForName(entry.name || '', blob.type), stickerEmoji: entry.stickerEmoji || '' }
-: {});
+/* A sticker pack used to be missing from this list, so forwarding one sent
+   only the words "Forwarded: pack.wastickers". Every attachment now goes as
+   itself; one that is not on this device is said so, rather than replaced by
+   its file name. */
+const mediaKinds = ['sticker', 'voice', 'file', 'stickerpack'];
+if (mediaKinds.includes(entry.type)) {
+const blob = await forwardableBlob(entry);
+if (!blob) {
+notify(t('فایل این پیام روی این دستگاه نیست و هدایت نشد.', 'This message\'s file is not on this device, so it was not forwarded.'), 'warning');
 return;
-} catch (error) {
-console.warn('[Forward] media re-send failed, falling back to a text forward', error);
+}
+const file = new File([blob], entry.name || `${entry.type}.bin`, { type: blob.type || entry.mime || 'application/octet-stream' });
+const extra = entry.type === 'sticker'
+? {
+stickerKind: entry.stickerKind || stickerKindForName(entry.name || '', blob.type),
+stickerEmoji: entry.stickerEmoji || '',
+...(entry.mediaWidth && entry.mediaHeight ? { mediaWidth: entry.mediaWidth, mediaHeight: entry.mediaHeight } : {}),
+}
+: (entry.type === 'stickerpack' ? { packTitle: entry.packTitle || '', packCount: Number(entry.packCount || 0) } : {});
+await sendEncryptedBlob(file, entry.type, entry.durationMs || 0, extra);
+return;
+}
+/* A card goes as a card (forwardableRich), not as a line naming it. */
+if (entry.type === 'rich') {
+const card = forwardableRich(typeof richPayloadOf === 'function' ? richPayloadOf(entry) : entry.rich);
+if (card) {
+await sendRichMessage(card.kind, card.data);
+return;
 }
 }
 const composer = document.getElementById('chatComposer');
