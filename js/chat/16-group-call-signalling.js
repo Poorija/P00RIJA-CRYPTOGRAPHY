@@ -680,7 +680,7 @@ async function normalizeStickerImage(blob, name) {
     const shrunk = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.92));
     /* An animated source loses its animation through a canvas, so only take
        the smaller copy when it is actually smaller and the source was static. */
-    return shrunk && shrunk.size < blob.size ? shrunk : blob;
+    return shrunk && shrunk.size < blob.size ? stickerBlobInMemory(shrunk) : blob;
   } catch (_error) {
     return blob;
   }
@@ -697,7 +697,7 @@ async function buildStickerRecord(name, blob, emoji = '') {
       mime: 'application/json',
       kind: 'lottie',
       emoji,
-      blob: new Blob([json], { type: 'application/json' }),
+      blob: stickerBlobInMemory(new Blob([json], { type: 'application/json' })),
     };
   }
   const usable = kind === 'image' ? await normalizeStickerImage(blob, cleanName) : blob;
@@ -918,6 +918,13 @@ async function importTelegramStickerPack(text) {
       notify(telegramImportReason(body?.reason || (response.status === 429 ? 'rate-limited' : '')), 'warning');
       return null;
     }
+    /* The pack described has to be the pack asked for. A cache in the way
+       once answered every link with the first pack it had seen (sw.js), and
+       the second pack imported as a copy of the first. */
+    if (String(body.pack.name || '').toLowerCase() !== name.toLowerCase()) {
+      notify(telegramImportReason(''), 'warning');
+      return null;
+    }
     described = body.pack;
   } catch (_error) {
     notify(t('به رله نرسیدیم؛ اتصال را بررسی کنید.', 'The relay could not be reached; check the connection.'), 'warning');
@@ -935,7 +942,10 @@ async function importTelegramStickerPack(text) {
       try {
         const response = await fetch(new URL(`/telegram-stickers/file?id=${encodeURIComponent(item.file)}`, origin), { cache: 'no-store', mode: 'cors' });
         if (response.ok) {
-          const blob = await response.blob();
+          /* Straight off the network, never out of IndexedDB: safe to store
+             as it is, without the copy stickerDbPutPack makes of anything
+             else (118 copies of a pack is time a phone shows as a hang). */
+          const blob = stickerBlobInMemory(await response.blob());
           const ext = /^(webp|webm|tgs)$/.test(item.ext) ? item.ext : 'webp';
           records[index] = await buildStickerRecord(`sticker_${String(index + 1).padStart(3, '0')}.${ext}`, blob, item.emoji || '');
         }

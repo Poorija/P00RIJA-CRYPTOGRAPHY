@@ -1,10 +1,59 @@
-# P00RIJA Cryptography 2.98.57
+# P00RIJA Cryptography 2.98.58
 
-Version 2.98.57 · build chat-v150
+Version 2.98.58 · build chat-v151
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پک تلگرام کامل و درست وارد می‌شود · A Telegram pack imports whole and as itself
+
+- **مشکل**: هنگام وارد کردن پک از لینک تلگرام، فقط چند استیکر اول درست بودند و بقیه
+  تکرار یک استیکر بودند. پک دوم هم به‌جای خودش، دوباره همان پک اول وارد می‌شد. علت در
+  Service Worker نسخهٔ وب و PWA بود: هر درخواستی را که نمی‌شناخت، مثل یکی از فایل‌های
+  خود برنامه نگه می‌داشت، آن هم بدون بخش بعد از «?» آدرس. پس همهٔ فایل‌های پک یک آدرس
+  داشتند و پاسخ اولی به بقیه هم داده می‌شد؛ توضیح پک دوم هم همان توضیح پک اول بود.
+  وارد شدن «سریع» پک هم از همین بود: فایل‌ها اصلاً از رله گرفته نمی‌شدند.
+- **حالا**: Service Worker فقط فایل‌های خود برنامه را نگه می‌دارد (صفحه، کد، فونت،
+  تصویر). پاسخ رله‌ها همیشه از شبکه می‌آید. همین مشکل بی‌سروصدا اطلاعات رله‌ها
+  (/relay-identity، /relay-fronts و /transit-peers) را هم تا نسخهٔ بعدی روی اولین پاسخ
+  نگه می‌داشت؛ آن هم برطرف شد.
+- **یک بررسی بیشتر**: برنامه حالا مطمئن می‌شود پکی که رله توضیح داده همان پکی است
+  که خواسته شده، وگرنه آن را وارد نمی‌کند.
+- **کمتر معطلی بعد از وارد کردن**: استیکرهایی که تازه از رله رسیده‌اند پیش از ذخیره
+  دوباره کپی نمی‌شوند؛ آن کپی فقط برای تصویرهایی لازم است که از حافظهٔ برنامه خوانده
+  شده‌اند.
+- **پک‌هایی که قبلاً اشتباه وارد شده‌اند** درست نمی‌شوند: آن‌ها را حذف و دوباره از
+  همان لینک وارد کنید. وارد کردن حالا کمی بیشتر طول می‌کشد، چون همهٔ فایل‌ها واقعاً
+  از تلگرام گرفته می‌شوند؛ پیشرفت کار در نوار بالا دیده می‌شود.
+- **The problem**: importing a pack from a Telegram link gave the first few
+  stickers right and the rest as one sticker repeated, and a second pack came in as
+  the first one again. The cause was the service worker of the web app and the
+  PWA: it kept any request it did not know as if it were one of the app's own
+  files, and with the part of the address after "?" cut off. Every file of a pack
+  therefore had one address, the first answer was handed out for the rest, and the
+  second pack's description was the first one's. That is also why the import looked
+  quick: the files were never fetched from the relay.
+- **Now**: the service worker keeps only the app's own files (pages, code, fonts,
+  pictures). A relay's answers always come from the network. The same fault had
+  quietly pinned relay information (/relay-identity, /relay-fronts, and
+  /transit-peers) at its first answer until the next release; that is fixed too.
+- **One more check**: the app now makes sure the pack the relay describes is the
+  pack that was asked for, and imports nothing otherwise.
+- **Less waiting after an import**: stickers fresh from the relay are no longer
+  copied again before they are stored; that copy is only needed for pictures read
+  out of the app's storage.
+- **Packs imported wrongly before** are not repaired: delete them and import them
+  again from the same link. An import now takes a little longer, because every file
+  really is fetched from Telegram; the bar at the top shows how far it has got.
+
+---
+
+# P00RIJA Cryptography 2.98.57
+
+Version 2.98.57 · build chat-v150
 
 ---
 

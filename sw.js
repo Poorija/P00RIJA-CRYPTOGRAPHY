@@ -8,7 +8,7 @@
  * version as a network service and its users are entitled to your source.
  */
 
-const CACHE_NAME = 'poorija-cryptography-v2.98.57-chat-v150';
+const CACHE_NAME = 'poorija-cryptography-v2.98.58-chat-v151';
 
 // Live endpoints proxied by nginx: never cached, always straight to the network.
 const NETWORK_ONLY_PREFIXES = [
@@ -19,6 +19,16 @@ const NETWORK_ONLY_PREFIXES = [
 // PWAs on the next launch instead of being pinned by the cache-first match
 // below (which ignores search params and therefore defeats ?v= busting).
 const SHELL_PATTERN = /\.(?:html|css|js|webmanifest)$/i;
+// What the app itself is made of: pages, code, styles, fonts, pictures, sounds
+// and data files, all named with an extension. Only these are ever answered
+// from the cache. Everything else a page asks for is a relay's answer and goes
+// straight to the network: the cache below is keyed by path with the query cut
+// off, and it kept those answers too. A Telegram pack import got its first few
+// stickers from the relay and every one after as the same picture again, and a
+// second pack came back as the first, description and all; /relay-identity,
+// /relay-fronts and /transit-peers were pinned at their first answer the same
+// way until the next release changed the cache's name.
+const APP_FILE_PATTERN = /\.(?:html|js|mjs|css|webmanifest|json|txt|md|png|jpe?g|gif|webp|svg|ico|icns|woff2?|ttf|otf|wasm|mp3|ogg|wav|m4a)$/i;
 const NETWORK_TIMEOUT_MS = 3500;
 const SHARE_TARGET_URL = './index.html?share-target=1#share';
 const SHARE_TARGET_CACHE_KEY = './__share_target__/latest';
@@ -234,6 +244,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   const isNavigation = event.request.mode === 'navigate';
+  if (!isNavigation && !(sameOrigin && APP_FILE_PATTERN.test(url.pathname))) {
+    return; // a relay's answer, or another origin's: never kept, never replayed
+  }
   const isShell = sameOrigin && (isNavigation || SHELL_PATTERN.test(url.pathname));
 
   event.respondWith((async () => {

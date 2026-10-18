@@ -19,7 +19,8 @@
  *     a picture with a thumbnail and a .tgs as an animation;
  *   - through B, the same pack arrives by way of A;
  *   - a relay with neither a token nor an upstream says so, in words;
- *   - a pack Telegram does not have is said to be missing;
+ *   - a pack Telegram does not have is said to be missing, and a description
+ *     of another pack than the one asked for is refused;
  *   - the relay fetches only files out of a pack it has described, and the
  *     token appears in nothing it sends back.
  */
@@ -152,6 +153,21 @@ try {
     return { pack, notes: window.__notes.slice() };
   });
   check('a pack Telegram does not have is said to be missing', missing.pack === null && missing.notes.some((n) => /no pack|پکی با این نام/i.test(n)), JSON.stringify(missing.notes));
+
+  /* A cache in the way once answered a second link with the first pack. */
+  const otherPack = await A.evaluate(async () => {
+    window.__notes = [];
+    const before = chatState.stickerPacks.length;
+    const real = window.fetch;
+    window.fetch = (input, init) => (String(input).includes('/telegram-stickers/set')
+      ? real(String(input).replace(/name=[^&]+/, 'name=PoorijaTestPack'), init)
+      : real(input, init));
+    try {
+      const pack = await window.__stickerProbe.importTelegram('https://t.me/addstickers/SomeOtherPack');
+      return { pack: Boolean(pack), added: chatState.stickerPacks.length - before, notes: window.__notes.slice() };
+    } finally { window.fetch = real; }
+  });
+  check('a description of some other pack than the one asked for is refused', otherPack.pack === false && otherPack.added === 0 && otherPack.notes.length > 0, JSON.stringify(otherPack));
 
   const guarded = await A.evaluate(async () => {
     const res = await fetch('/telegram-stickers/file?id=AAQCAgADnotFromAnyPack00000000');
