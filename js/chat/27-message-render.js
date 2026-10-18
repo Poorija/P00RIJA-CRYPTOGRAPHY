@@ -518,7 +518,7 @@ return `
 ${senderHtml}
 ${replyPreview}
 <div class="chat-sticker-body">${entry.downloadUrl
-? stickerMediaHtml(safeMediaUrl(entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media', gif ? { width: entry.mediaWidth, height: entry.mediaHeight } : {})
+? stickerMediaHtml(safeMediaUrl(typeof loopedPictureUrl === 'function' ? loopedPictureUrl(entry.downloadUrl) : entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media', gif ? { width: entry.mediaWidth, height: entry.mediaHeight } : {})
 : missingMediaHtml(gif
 ? t('این گیف روی این دستگاه ذخیره نشده است.', 'This GIF is not stored on this device.')
 : t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'))}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
@@ -963,11 +963,17 @@ chatState.activeReactionMessageId = '';
 }
 }
 panel.querySelectorAll('.chat-message-bubble').forEach((bubble) => {
-bubble.onclick = () => {
+bubble.onclick = (event) => {
 /* While picking several messages a tap picks; the toolbar opening on the
    same tap is what took two taps per message and covered the next one. */
 if (chatState.selectionMode) return;
 const id = bubble.dataset.id || '';
+/* A sticker or a GIF is lifted out and shown large, with the reactions and
+   every action of its toolbar (56-sticker-motion.js). Its own buttons (the
+   reply preview, a reaction chip) keep doing what they do; a sticker that is
+   not on this device opens the toolbar as before. */
+if (bubble.classList.contains('chat-sticker-bubble') && !event?.target?.closest?.('button, a, [role="button"]')
+&& typeof openStickerFocus === 'function' && openStickerFocus(bubble, id)) return;
 const opening = chatState.activeMessageId !== id;
 chatState.activeMessageId = opening ? id : '';
 /* Closing a message's toolbar closes its picker with it: a picker floating
@@ -1174,6 +1180,8 @@ toggleMessageSelected(id);
 });
 });
 hydrateLottieNodes(panel);
+/* Every sticker and GIF here plays forever (56-sticker-motion.js). */
+if (typeof keepThreadStickersMoving === 'function') keepThreadStickersMoving(panel);
 positionMessageOverlays(panel);
 const searchTarget = activeSearchQuery ? panel.querySelector('.search-hit') : null;
 if (searchTarget) {

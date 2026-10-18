@@ -27962,3 +27962,300 @@ html body .packman-move button { font-size: 0.85rem; }
 html body #mainApp #content-chat .chat-sticker-bubble.is-gif .chat-gif-media {
   aspect-ratio: 4 / 3;
 }
+
+/* ============================================================================
+   Stickers that keep moving, a still for every sticker, a sticker held up
+   ----------------------------------------------------------------------------
+   A cell draws a sticker's still at once and lays the moving sticker over it
+   when it is on screen; the moving one fades in once it has a frame and the
+   still steps back, so a cell never goes blank in between. A lazily given
+   thumbnail fades in rather than popping. Tapping a sticker or a GIF in a
+   conversation lifts it over a blurred backdrop with its reactions and its
+   toolbar's actions (js/chat/56-sticker-motion.js).
+   ========================================================================== */
+html body #mainApp #content-chat .chat-sticker-cell > .chat-sticker-still,
+html body #mainApp #content-chat .chat-sticker-cell > .chat-sticker-thumb {
+  grid-area: 1 / 1;
+}
+html body #mainApp #content-chat .chat-sticker-still {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+html body #mainApp #content-chat .chat-sticker-thumb[data-lazy-src],
+html body #mainApp #content-chat .chat-sticker-thumb.is-motion,
+html body #mainApp #content-chat .chat-gif-thumb[data-lazy-src] {
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+html body #mainApp #content-chat .chat-sticker-thumb.is-ready,
+html body #mainApp #content-chat .chat-gif-thumb.is-ready {
+  opacity: 1;
+}
+html body #mainApp #content-chat .chat-sticker-cell.motion-ready .chat-sticker-still,
+html body #mainApp #content-chat .chat-gif-cell.motion-ready .chat-gif-still {
+  opacity: 0;
+}
+html body #mainApp #content-chat .chat-gif-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+html body #mainApp #content-chat .chat-gif-cell .chat-gif-thumb {
+  position: relative;
+  z-index: 1;
+}
+html body #mainApp #content-chat .chat-sticker-tab > i { font-size: 0.95rem; }
+html body #mainApp #content-chat .chat-sticker-body.is-lifted { visibility: hidden; }
+
+/* The pack manager: a pack's picture is the way to its cover. */
+html body .packman-cover {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  cursor: pointer;
+}
+html body .packman-cover .packman-thumb { display: grid; place-items: center; color: #94a3b8; object-fit: contain; }
+/* The name takes what the row has left, rather than an input's own default
+   width: on a 390-point phone that default pushed the order arrows off the
+   edge. */
+html body .packman-row .packman-name { width: 0; }
+html body .packman-cover-edit {
+  position: absolute;
+  inset-inline-end: -0.3rem;
+  bottom: -0.3rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 0.5rem;
+  box-shadow: 0 0 0 2px var(--app-bg, #0f172a);
+}
+html body .packman-coverpick {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg, #0f172a);
+  animation: packman-coverpick-in 0.22s ease;
+}
+html body .packman-coverpick .packman-back { display: grid; }
+html body .packman-coverpick-grid {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.4rem, 1fr));
+  gap: 0.45rem;
+  padding: 0.4rem 1rem calc(1rem + var(--pwa-safe-bottom, 0px));
+  align-content: start;
+}
+html body .packman-coverpick-cell {
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  padding: 0.3rem;
+  border: 2px solid transparent;
+  border-radius: 0.8rem;
+  background: #64748b14;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.15s ease;
+}
+html body .packman-coverpick-cell:active { transform: scale(0.94); }
+html body .packman-coverpick-cell.is-current { border-color: #38bdf8; background: rgba(56, 189, 248, 0.14); }
+html body .packman-coverpick-cell img,
+html body .packman-coverpick-cell .packman-coverpick-media { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+html body .packman-coverpick-cell .chat-lottie svg { width: 100% !important; height: 100% !important; }
+@keyframes packman-coverpick-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* A sticker held up. */
+.sticker-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  --focus-pull: 0;
+}
+.sticker-focus .hidden { display: none !important; }
+.sticker-focus-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 40%, rgba(56, 189, 248, 0.16), rgba(2, 6, 23, 0.8) 64%);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+.sticker-focus.is-open .sticker-focus-backdrop { opacity: calc(1 - var(--focus-pull) * 0.7); }
+.sticker-focus-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  width: 100%;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sticker-focus-art {
+  position: relative;
+  flex: 0 0 auto;
+  width: min(70vw, 21rem, 42dvh);
+  aspect-ratio: 1 / 1;
+  touch-action: none;
+  will-change: transform;
+  cursor: grab;
+}
+.sticker-focus-art.is-gif {
+  width: min(90vw, 30rem);
+  max-height: 52dvh;
+  aspect-ratio: 4 / 3;
+  border-radius: 1.1rem;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.sticker-focus-media {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  pointer-events: none;
+}
+.sticker-focus-art.is-gif .sticker-focus-media { object-fit: cover; filter: none; }
+.sticker-focus-media svg { width: 100% !important; height: 100% !important; }
+.sticker-focus-glow {
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.38), rgba(168, 85, 247, 0.12) 55%, transparent 72%);
+  filter: blur(26px);
+  animation: sticker-focus-breathe 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.sticker-focus-art.is-gif .sticker-focus-glow { display: none; }
+@keyframes sticker-focus-breathe {
+  0%, 100% { transform: scale(0.9); opacity: 0.65; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+.sticker-focus-badge {
+  position: absolute;
+  bottom: 0.5rem;
+  inset-inline-start: 0.5rem;
+  z-index: 2;
+  padding: 0.2rem 0.42rem;
+  border-radius: 0.35rem;
+  background: rgba(2, 6, 23, 0.62);
+  color: #f8fafc;
+  font: 700 0.7rem/1 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+}
+.sticker-focus-reactions,
+.sticker-focus-allreactions {
+  display: flex;
+  gap: 0.12rem;
+  padding: 0.32rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+.sticker-focus-allreactions {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(92vw, 22rem);
+  border-radius: 1.1rem;
+}
+.sticker-focus-reactions button,
+.sticker-focus-allreactions button {
+  width: 2.45rem;
+  height: 2.45rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 1.42rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.16s cubic-bezier(0.3, 1.6, 0.5, 1), background 0.15s ease;
+}
+.sticker-focus-reactions button:hover,
+.sticker-focus-allreactions button:hover,
+.sticker-focus-reactions button:active,
+.sticker-focus-allreactions button:active { transform: scale(1.22); }
+.sticker-focus-reactions button.is-mine,
+.sticker-focus-allreactions button.is-mine { background: rgba(56, 189, 248, 0.26); }
+.sticker-focus-reactions [data-focus-more-reactions] { font-size: 0.95rem; color: #cbd5e1; background: rgba(148, 163, 184, 0.16); }
+.sticker-focus-caption { color: #cbd5e1; font-size: 0.8rem; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.sticker-focus-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: min(82vw, 15.5rem);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+.sticker-focus-action {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.74rem 1rem;
+  border: 0;
+  background: transparent;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 0.92rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.sticker-focus-action + .sticker-focus-action { border-top: 1px solid rgba(148, 163, 184, 0.14); }
+.sticker-focus-action i { width: 1.15rem; text-align: center; color: #7dd3fc; }
+.sticker-focus-action:hover,
+.sticker-focus-action:active { background: rgba(148, 163, 184, 0.14); }
+.sticker-focus-action.is-danger,
+.sticker-focus-action.is-danger i { color: #fca5a5; }
+.sticker-focus [data-focus-part] {
+  opacity: 0;
+  transform: translateY(14px) scale(0.98);
+  transition: opacity 0.26s ease, transform 0.36s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.sticker-focus.is-open [data-focus-part] { opacity: 1; transform: none; transition-delay: 0.08s; }
+.sticker-focus.is-open .sticker-focus-menu { transition-delay: 0.15s; }
+.sticker-focus.is-closing { pointer-events: none; }
+.sticker-focus.is-closing [data-focus-part] { opacity: 0; transform: translateY(10px); transition-duration: 0.16s; transition-delay: 0s; }
+.sticker-focus.is-closing .sticker-focus-backdrop { opacity: 0; transition-duration: 0.24s; }
+html.sticker-focus-open body { overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .sticker-focus-glow { animation: none; }
+  .sticker-focus [data-focus-part],
+  .sticker-focus-backdrop { transition-duration: 0.01s; }
+}

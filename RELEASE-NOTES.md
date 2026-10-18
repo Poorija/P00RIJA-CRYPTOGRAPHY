@@ -1,10 +1,77 @@
-# P00RIJA Cryptography 2.98.58
+# P00RIJA Cryptography 2.98.59
 
-Version 2.98.58 · build chat-v151
+Version 2.98.59 · build chat-v152
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## استیکرهای روان، همیشه متحرک، و دیدن بزرگ · Smooth stickers that keep moving, seen up close
+
+- **پک‌های بزرگ بدون تکه‌تکه لود شدن**: هر استیکر حالا یک تصویر ثابت کوچک دارد: فریم
+  اول ویدیو، یک فریم از انیمیشن Lottie، یا فریم اول تصویر متحرک. پنل این تصویر را فوراً
+  نشان می‌دهد و استیکر متحرک وقتی روی صفحه است و آماده شد، نرم رویش ظاهر می‌شود. پیش از
+  این، استیکرهای ویدیویی و Lottie یک پک تلگرام تا لود شدن کامل خالی بودند. برای پک‌هایی
+  که از قبل داشتید، این تصویرها در پس‌زمینه ساخته می‌شوند و از بالای پک یکی‌یکی پر
+  می‌شوند.
+- **انیمیشن روان‌تر**: استیکرهای Lottie فقط وقتی نزدیک دید هستند پخش می‌شوند، بیرون از
+  دید متوقف می‌شوند، و انیمیشن‌هایی که با هر بار رسم دوباره کنار گذاشته می‌شدند دیگر
+  پنهانی ادامه نمی‌دهند. قبلاً همهٔ استیکرهای یک پک هم‌زمان در حال پخش بودند و همین روی
+  گوشی کندی و لرزش می‌آورد. پنل دیگر بعد از هر ارسال استیکر همهٔ تصویرها را از نو بار
+  نمی‌کند، و تصویرها کمی زودتر از رسیدن به دید آماده می‌شوند.
+- **کیفیت بالاتر**: تصویر کوچک استیکرها ۲۵۶ پیکسل شد (قبلاً ۱۶۰) تا روی صفحهٔ آیفون تار
+  نباشد.
+- **همیشه در حال پخش**: خیلی از گیف‌ها و استیکرهای متحرک داخل خودشان نوشته‌اند چند بار
+  پخش شوند، مثلاً دو یا سه بار، و بعد روی فریم آخر می‌ایستادند. حالا همهٔ آن‌ها، چه در پنل
+  و قفسهٔ گیف، چه در گفتگو، برای همیشه پخش می‌شوند. فقط همان عدد تکرار عوض می‌شود و بقیهٔ
+  فایل دست نمی‌خورد. استیکر ویدیویی‌ای که سیستم وسط کار متوقفش کند خودکار دوباره پخش
+  می‌شود.
+- **دیدن بزرگ**: با زدن روی استیکر یا گیف داخل گفتگو، استیکر بزرگ و متحرک روی پس‌زمینهٔ
+  محو بالا می‌آید. ری‌اکشن‌ها (برای پیامی که دیگری فرستاده) و همهٔ کارهای منوی پیام
+  همان‌جاست: پاسخ، افزودن به استیکرها یا گیف‌های من، کپی، سنجاق، هدایت و حذف. منوی پیام
+  دست نخورده است؛ این دکمه‌ها همان دکمه‌های منو را می‌زنند. برای بستن، بیرون را بزنید،
+  استیکر را پایین بکشید یا Esc را بزنید.
+- **تصویر شاخص پک**: پک‌هایی که اولین استیکرشان ویدیو یا Lottie بود، مثل پک‌های تلگرام،
+  در نوار پک‌ها و «مدیریت پک‌ها» به‌جای تصویر یک علامت سؤال داشتند. حالا تصویر دارند.
+  شاخص هر پک را می‌توانید عوض کنید: در «مدیریت پک‌ها» روی تصویر پک بزنید و استیکر دلخواه
+  را انتخاب کنید، یا در پنل استیکر یک استیکر را انتخاب کنید و «شاخص پک» را بزنید.
+- **Big packs without the patchwork**: every sticker now has a small still: a
+  video's first frame, a frame of a Lottie animation, or an animated picture's
+  first frame. The panel draws the still at once, and the moving sticker fades in
+  over it once it is on screen and ready. Before, the video and Lottie stickers of
+  a Telegram pack were empty cells until they had loaded. For packs you already
+  have, the stills are made in the background and fill in from the top.
+- **Smoother animation**: Lottie stickers play only near the view, pause outside
+  it, and the animations a redraw threw away no longer go on running unseen.
+  Before, every sticker of a pack played at once, which is what made a phone slow
+  and jittery. The panel no longer reloads every picture after each sticker sent,
+  and pictures are ready a little before they scroll into view.
+- **Sharper**: sticker thumbnails are 256 pixels now (160 before), so they are not
+  soft on an iPhone's screen.
+- **Always moving**: many GIFs and animated stickers say inside themselves how
+  many times to play, two or three, say, and then stopped on their last frame.
+  Now they all play forever, in the panel, on the GIF shelf, and in conversations.
+  Only that count is changed; the rest of the file is left as it is. A video
+  sticker the system pauses on its own is started again.
+- **Up close**: tap a sticker or a GIF in a conversation and it lifts out, large
+  and moving, over a blurred backdrop. Its reactions (on a message somebody else
+  sent) and every action of the message menu are there with it: reply, add to my
+  stickers or GIFs, copy, pin, forward, and delete. The message menu is untouched;
+  these buttons press its own buttons. Tap outside, pull the sticker down, or press
+  Esc to close it.
+- **Pack covers**: packs whose first sticker was a video or a Lottie animation,
+  like Telegram packs, showed a question mark instead of a picture in the pack bar
+  and in Manage packs. They show a picture now. Any pack's cover can be changed:
+  in Manage packs, tap the pack's picture and choose a sticker, or pick one sticker
+  in the sticker panel and press "Pack cover".
+
+---
+
+# P00RIJA Cryptography 2.98.58
+
+Version 2.98.58 · build chat-v151
 
 ---
 

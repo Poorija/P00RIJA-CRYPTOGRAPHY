@@ -222,6 +222,11 @@
       en: { t: 'Importing a sticker pack from a Telegram link', b: 'In the sticker panel, press Import, choose "From a Telegram link", and paste the pack\'s share link (like t.me/addstickers/pack_name). Telegram hands packs out only through its bot API, so your relay fetches it: the relay sees which pack is asked for, and Telegram sees the relay\'s address, not yours. The relay\'s operator has to have set a Telegram bot token for this; a relay that cannot reach Telegram can ask another relay that can.' },
     },
     {
+      id: 'sticker-view', tab: 'chat', cat: 'chat',
+      fa: { t: 'دیدن بزرگ استیکر و گیف، و تصویر شاخص پک', b: 'روی هر استیکر یا گیف داخل گفتگو بزنید تا بزرگ و متحرک نمایش داده شود. همان‌جا ری‌اکشن‌ها (برای پیامی که دیگری فرستاده) و همهٔ کارهای منوی پیام هست: پاسخ، افزودن به استیکرها یا گیف‌های من، کپی، سنجاق، هدایت و حذف. برای بستن، بیرون را بزنید، استیکر را پایین بکشید یا Esc را بزنید. تصویر شاخص هر پک را در «مدیریت پک‌ها» با زدن روی تصویر آن پک عوض کنید؛ یا در پنل استیکر یک استیکر را انتخاب کنید و «شاخص پک» را بزنید. استیکرها و گیف‌های متحرک همیشه در حال پخش می‌مانند.' },
+      en: { t: 'Stickers and GIFs up close, and a pack\'s cover', b: 'Tap any sticker or GIF in a conversation to see it large and moving. Its reactions (on a message somebody else sent) and every action of the message menu are there with it: reply, add to my stickers or GIFs, copy, pin, forward, and delete. Tap outside, pull the sticker down, or press Esc to close it. Change a pack\'s cover in Manage packs by tapping the pack\'s picture, or pick one sticker in the sticker panel and press "Pack cover". Animated stickers and GIFs keep playing for as long as they are on screen.' },
+    },
+    {
       id: 'gifs-keyboard', tab: 'chat', cat: 'chat',
       fa: { t: 'گیف و استیکر از کیبورد گوشی', b: 'برنامه گیف و استیکر را از هر راهی که برسد می‌فرستد. محدودیت از خود سیستم است: روی اندروید، Chrome و WebView اندروید (که نسخهٔ نیتیو روی آن اجرا می‌شود) هنوز اجازه نمی‌دهند Gboard گیف یا استیکر را مستقیم در کادر متن یک صفحه بگذارد، و Gboard پیام «این برنامه از گیف پشتیبانی نمی‌کند» را نشان می‌دهد. روی آیفون و آیپد، استیکرها، Memoji و Genmoji از «کادر کیبورد» در پنل استیکر فرستاده می‌شوند.',
         steps: [

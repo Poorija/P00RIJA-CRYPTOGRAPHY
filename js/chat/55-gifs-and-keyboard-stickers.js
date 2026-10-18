@@ -686,7 +686,7 @@ async function saveGif(blob) {
     noteGifUsed(existing.id);
     library.stickers = [existing, ...library.stickers.filter((record) => record !== existing)];
   } else {
-    library.stickers.unshift({
+    const record = {
       id: makeStickerId(),
       name: 'animation.gif',
       mime: 'image/gif',
@@ -695,7 +695,12 @@ async function saveGif(blob) {
       hash,
       addedAt: new Date().toISOString(),
       blob: blob.type === 'image/gif' ? blob : new Blob([blob], { type: 'image/gif' }),
-    });
+    };
+    /* Its still, and its bytes told to loop forever (56-sticker-motion.js);
+       the hash stays the original's, so saving the same GIF again still
+       finds this one. */
+    if (typeof upkeepStickerRecord === 'function') await upkeepStickerRecord(record);
+    library.stickers.unshift(record);
   }
   /* Oldest out first, past either ceiling. */
   let bytes = library.stickers.reduce((sum, record) => sum + (record.blob?.size || 0), 0);
@@ -884,6 +889,9 @@ function gifShelfOrder(records) {
 function renderGifShelf() {
   const grid = document.getElementById('chatStickerGrid');
   if (!grid) return;
+  /* The sticker shelf keeps its last cells to skip a redraw that changes
+     nothing (renderStickerPanel); this shelf writes over them. */
+  grid.__html = '';
   const keepScroll = grid.classList.contains('is-gif-shelf') ? grid.scrollTop : 0;
   const managing = Boolean(chatState.stickerManageMode);
   grid.classList.toggle('is-managing', managing);
@@ -907,15 +915,19 @@ function renderGifShelf() {
     return;
   }
   grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell ${gifSelection.has(record.id) ? 'is-picked' : ''}" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
-      ${stickerMediaHtml(stickerObjectUrl(record), 'gif', 'chat-gif-thumb', { lazy: true })}
+      ${record.thumb instanceof Blob ? `<img class="chat-gif-still" src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async">` : ''}
+      ${stickerMediaHtml(stickerObjectUrl(record), 'gif', record.thumb instanceof Blob ? 'chat-gif-thumb is-motion' : 'chat-gif-thumb', { lazy: true })}
       ${picking ? '<span class="chat-sticker-tick chat-gif-tick"><i class="fas fa-check"></i></span>' : ''}
       ${managing ? `<span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"
         title="${app().escapeHTML(t('حذف از گیف‌ها', 'Remove from GIFs'))}"><i class="fas fa-xmark"></i></span>` : ''}
     </button>`).join('');
   grid.scrollTop = keepScroll;
   /* A hundred GIFs all moving at once is a hundred decoders running: only
-     the ones on screen are given their picture (observeLazyMedia). */
+     the ones on screen are given their picture (observeLazyMedia), over a
+     still of each that is there at once. The stills, and every GIF told to
+     loop forever, are made in the background (ensurePackThumbs). */
   observeLazyMedia(grid);
+  if (chatState.gifLibrary) ensurePackThumbs(chatState.gifLibrary).catch(() => {});
 }
 
 /* The guide, from the same entry the Help tab shows (js/help-content.js), so

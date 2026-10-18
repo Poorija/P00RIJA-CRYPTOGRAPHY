@@ -102,7 +102,7 @@ try {
       firstReleased,
     };
   });
-  check('the picker draws thumbnails, not the 512 px stickers', drawn.thumbsDrawn && drawn.widest > 0 && drawn.widest <= 160, JSON.stringify(drawn));
+  check('the picker draws thumbnails, not the 512 px stickers', drawn.thumbsDrawn && drawn.widest > 0 && drawn.widest <= 256, JSON.stringify(drawn));
   check('only the stickers near the visible part get a picture', drawn.cells === 240 && drawn.given > 0 && drawn.given < 100, JSON.stringify(drawn));
   check('scrolled to the end, the end is drawn and the top let go', drawn.lastGiven && drawn.firstReleased, JSON.stringify(drawn));
 

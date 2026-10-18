@@ -208,8 +208,10 @@ const STICKER_TARGET_EDGE = 512;
 const STICKER_RECOMPRESS_OVER = 220 * 1024;
 /* The picker draws thumbnails, not the stickers: a pack holds up to 240, each
    512 px, and decoding every one at once is a quarter of a gigabyte — on a
-   phone, a frozen app. 160 px covers a cell on a 2x screen. */
-const STICKER_THUMB_EDGE = 160;
+   phone, a frozen app. 256 px keeps a cell sharp on a 3x screen (about 70
+   points, 210 pixels) and is still a quarter of the pixels; 160 px, the size
+   before, was soft on an iPhone. */
+const STICKER_THUMB_EDGE = 256;
 const STICKER_IMAGE_EXT = /\.(webp|png|gif|jpe?g|avif|svg)$/i;
 const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
@@ -484,37 +486,95 @@ async function makeStickerThumb(blob) {
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
-    const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
-    return thumb && thumb.size < blob.size ? stickerBlobInMemory(thumb) : null;
+    const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.86));
+    /* Safari cannot write WebP and hands back a PNG, which can be more bytes
+       than the WebP it came from. Kept anyway when it is at most half as
+       wide: what a thumbnail saves is pixels to decode, not bytes. */
+    return thumb && (thumb.size < blob.size || scale <= 0.5) ? stickerBlobInMemory(thumb) : null;
   } catch (_error) {
     return null;
   }
 }
 
-/* Thumbnails for a pack imported before there were thumbnails, made in the
-   background a few at a time so the picker stays usable while it happens,
-   and stored once at the end. thumbChecked keeps a sticker that has none to
-   give — one that moves — from being asked again. */
+/* A pack brought up to date in the background: a still for every sticker
+   (a video's first frame, a Lottie frame, an animated picture's first frame,
+   a static one's thumbnail), and every animated picture told to loop forever
+   (upkeepStickerRecord, 56-sticker-motion.js). One sticker at a time with a
+   breath between, top of the pack first, each still put into its cell as it
+   is made; the pack is stored once, at the end. thumbChecked keeps a sticker
+   that has no still to give from being asked again. */
 const packThumbJobs = new Set();
+function stickerRecordPending(record) {
+  if (typeof stickerNeedsUpkeep === 'function') return stickerNeedsUpkeep(record);
+  return record.kind === 'image' && !(record.thumb instanceof Blob) && !record.thumbChecked;
+}
+/* Kept by the pack object, not its id: loading the packs again from storage
+   makes new objects, and a job still working on the old one must not stop
+   the new one from being brought up to date (it would finish, find its pack
+   no longer in the list, and store nothing). */
 async function ensurePackThumbs(pack) {
-  if (!pack?.stickers?.length || packThumbJobs.has(pack.id)) return;
-  const pending = pack.stickers.filter((record) => record.kind === 'image' && !(record.thumb instanceof Blob) && !record.thumbChecked);
+  if (!pack?.stickers?.length || packThumbJobs.has(pack)) return;
+  const pending = pack.stickers.filter(stickerRecordPending);
   if (!pending.length) return;
-  packThumbJobs.add(pack.id);
+  packThumbJobs.add(pack);
   try {
-    let made = 0;
     for (const record of pending) {
-      const thumb = await makeStickerThumb(record.blob);
-      if (thumb) { record.thumb = thumb; made += 1; } else { record.thumbChecked = true; }
+      if (typeof upkeepStickerRecord === 'function') {
+        await upkeepStickerRecord(record);
+        if (typeof paintStillIntoCell === 'function') paintStillIntoCell(record);
+      } else {
+        const thumb = await makeStickerThumb(record.blob);
+        if (thumb) record.thumb = thumb; else record.thumbChecked = true;
+      }
       await yieldToPage();
     }
-    if (chatState.stickerPacks.includes(pack)) {
+    if (chatState.stickerPacks.includes(pack) || pack === chatState.gifLibrary) {
       await stickerDbPutPack(pack);
-      if (made && !document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
+      if (!document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
     }
   } finally {
-    packThumbJobs.delete(pack.id);
+    packThumbJobs.delete(pack);
   }
+}
+
+/* The picture a pack is known by: the sticker chosen for it, or its first.
+   Its still is made at once, in memory, when it has none yet — a tab with
+   nothing on it is the "?" a Telegram pack showed — and stored with the pack
+   the next time the pack is. */
+function packCoverRecord(pack) {
+  const list = pack?.stickers || [];
+  return list.find((record) => record.id === pack.coverId) || list[0] || null;
+}
+function packCoverUrl(pack) {
+  const record = packCoverRecord(pack);
+  if (!record) return '';
+  if (record.thumb instanceof Blob) return stickerThumbUrl(record);
+  return record.kind === 'image' ? stickerObjectUrl(record) : '';
+}
+const packCoverJobs = new Set();
+function ensurePackCovers(packs) {
+  if (typeof upkeepStickerRecord !== 'function') return;
+  packs.forEach((pack) => {
+    const record = packCoverRecord(pack);
+    if (!record || record.thumb instanceof Blob || record.thumbChecked || packCoverJobs.has(record.id)) return;
+    packCoverJobs.add(record.id);
+    upkeepStickerRecord(record).then(() => {
+      packCoverJobs.delete(record.id);
+      if (!(record.thumb instanceof Blob)) return;
+      const tab = document.querySelector(`#chatStickerTabs [data-chat-sticker-pack="${CSS.escape(pack.id)}"]`);
+      if (tab) tab.innerHTML = `<img src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false">`;
+      if (packManagerElement) renderPackManagerList();
+    }).catch(() => packCoverJobs.delete(record.id));
+  });
+}
+async function setPackCover(packId, recordId) {
+  const pack = chatState.stickerPacks.find((item) => item.id === packId);
+  if (!pack || !pack.stickers.some((record) => record.id === recordId)) return false;
+  pack.coverId = recordId;
+  await stickerDbPutPack(pack);
+  renderStickerPanel();
+  if (packManagerElement) renderPackManagerList();
+  return true;
 }
 
 /* A breath for the page between two pieces of heavy work, so a tap or a frame
@@ -527,35 +587,68 @@ function yieldToPage() {
    off it: a grid of hundreds of stickers, or of GIFs that all move at once,
    decoded the lot. Each <img>/<video> written with data-lazy-src gets its
    source as it nears the visible part of its scroller. */
+/* Two distances. Stills and static thumbnails are small, so they are given
+   their picture well before they scroll into view — a fast flick through a
+   big pack should meet pictures, not empty cells. A moving sticker costs a
+   decoder for as long as it runs, so it starts only close to the view, over
+   its still, and fades in once it has a frame (is-ready), so a cell never
+   goes blank on its way from one to the other. */
 const lazyMediaObservers = new WeakMap();
+function markMediaReady(node) {
+  node.classList.add('is-ready');
+  if (node.classList.contains('is-motion')) node.closest('.chat-sticker-cell, .chat-gif-cell')?.classList.add('motion-ready');
+}
+function giveLazyMedia(node) {
+  const wanted = node.getAttribute('data-lazy-src');
+  if (node instanceof HTMLVideoElement) {
+    node.__onScreen = true;
+    if (typeof keepVideoLooping === 'function') keepVideoLooping(node);
+  }
+  if (node.getAttribute('src') !== wanted) {
+    node.classList.remove('is-ready');
+    const ready = () => markMediaReady(node);
+    node.addEventListener(node instanceof HTMLVideoElement ? 'loadeddata' : 'load', ready, { once: true });
+    node.setAttribute('src', wanted);
+    if (node instanceof HTMLImageElement && node.complete && node.naturalWidth) ready();
+  }
+  if (node instanceof HTMLVideoElement) node.play?.().catch(() => {});
+}
+function releaseLazyMedia(node) {
+  if (!node.hasAttribute('src')) return;
+  if (node instanceof HTMLVideoElement) {
+    node.__onScreen = false;
+    node.pause?.();
+  }
+  node.removeAttribute('src');
+  node.classList.remove('is-ready');
+  if (node.classList.contains('is-motion')) node.closest('.chat-sticker-cell, .chat-gif-cell')?.classList.remove('motion-ready');
+  if (node instanceof HTMLVideoElement) node.load?.();
+}
 function observeLazyMedia(container) {
   if (!container) return;
   const nodes = container.querySelectorAll('[data-lazy-src]');
   if (!nodes.length) return;
   if (typeof IntersectionObserver !== 'function') {
-    nodes.forEach((node) => { node.src = node.getAttribute('data-lazy-src'); });
+    nodes.forEach(giveLazyMedia);
     return;
   }
-  let observer = lazyMediaObservers.get(container);
-  if (!observer) {
-    observer = new IntersectionObserver((entries) => {
+  let observers = lazyMediaObservers.get(container);
+  if (!observers) {
+    const watch = (entries) => {
       for (const entry of entries) {
-        const node = entry.target;
-        const wanted = node.getAttribute('data-lazy-src');
-        if (entry.isIntersecting) {
-          if (node.getAttribute('src') !== wanted) node.setAttribute('src', wanted);
-          if (node instanceof HTMLVideoElement) node.play?.().catch(() => {});
-        } else if (node.hasAttribute('src')) {
-          if (node instanceof HTMLVideoElement) node.pause?.();
-          node.removeAttribute('src');
-          if (node instanceof HTMLVideoElement) node.load?.();
-        }
+        if (entry.isIntersecting) giveLazyMedia(entry.target);
+        else releaseLazyMedia(entry.target);
       }
-    }, { root: container, rootMargin: '240px 0px' });
-    lazyMediaObservers.set(container, observer);
+    };
+    observers = {
+      near: new IntersectionObserver(watch, { root: container, rootMargin: '360px 0px' }),
+      close: new IntersectionObserver(watch, { root: container, rootMargin: '120px 0px' }),
+    };
+    lazyMediaObservers.set(container, observers);
   }
-  observer.disconnect();
-  nodes.forEach((node) => observer.observe(node));
+  observers.near.disconnect();
+  observers.close.disconnect();
+  nodes.forEach((node) => (node.classList.contains('is-motion') ? observers.close : observers.near).observe(node));
 }
 
 /* Re-decides which pack is open, from storage.
@@ -688,10 +781,11 @@ async function normalizeStickerImage(blob, name) {
 async function buildStickerRecord(name, blob, emoji = '') {
   const cleanName = String(name || 'sticker').split('/').pop();
   const kind = stickerKindForName(cleanName, blob.type);
+  let record;
   if (kind === 'lottie') {
     const json = await readTgsAnimation(blob);
     if (!json) return null;
-    return {
+    record = {
       id: makeStickerId(),
       name: cleanName,
       mime: 'application/json',
@@ -699,19 +793,26 @@ async function buildStickerRecord(name, blob, emoji = '') {
       emoji,
       blob: stickerBlobInMemory(new Blob([json], { type: 'application/json' })),
     };
+  } else {
+    const usable = kind === 'image' ? await normalizeStickerImage(blob, cleanName) : blob;
+    if (usable.size > STICKER_MAX_BYTES) return null;
+    record = {
+      id: makeStickerId(),
+      name: cleanName,
+      mime: usable.type || blob.type || (kind === 'video' ? 'video/webm' : 'image/webp'),
+      kind,
+      emoji,
+      blob: usable,
+    };
   }
-  const usable = kind === 'image' ? await normalizeStickerImage(blob, cleanName) : blob;
-  if (usable.size > STICKER_MAX_BYTES) return null;
-  const thumb = kind === 'image' ? await makeStickerThumb(usable) : null;
-  return {
-    id: makeStickerId(),
-    name: cleanName,
-    mime: usable.type || blob.type || (kind === 'video' ? 'video/webm' : 'image/webp'),
-    kind,
-    emoji,
-    blob: usable,
-    ...(thumb ? { thumb } : { thumbChecked: kind === 'image' }),
-  };
+  /* Its still, whether it moves, and — for an animated picture — its bytes
+     told to loop forever (56-sticker-motion.js), before it is ever stored. */
+  if (typeof upkeepStickerRecord === 'function') await upkeepStickerRecord(record);
+  else {
+    const thumb = kind === 'image' ? await makeStickerThumb(record.blob) : null;
+    if (thumb) record.thumb = thumb; else record.thumbChecked = kind === 'image';
+  }
+  return record;
 }
 
 const STICKER_MANIFEST_NAME = /^(contents|pack|manifest|meta|info)\.json$/i;
@@ -1034,12 +1135,16 @@ function renderPackManagerList() {
     syncPackManagerFooter();
     return;
   }
+  ensurePackCovers(packs);
   list.innerHTML = packs.map((pack, index) => {
-    const first = pack.stickers?.[0];
-    const url = first ? stickerThumbUrl(first) : '';
-    const thumb = url
-      ? `<img class="packman-thumb" src="${app().escapeHTML(url)}" alt="">`
-      : '<span class="packman-thumb"></span>';
+    /* The pack's cover, and the way to change it: a tap opens its stickers
+       to choose from. A video or Lottie sticker used to sit here as an <img>
+       of its own bytes, which is the broken "?" a Telegram pack showed. */
+    const url = packCoverUrl(pack);
+    const thumb = `<button type="button" class="packman-cover" data-pack-cover="${app().escapeHTML(pack.id)}" title="${app().escapeHTML(t('تغییر تصویر شاخص پک', 'Change the pack cover'))}" aria-label="${app().escapeHTML(t('تغییر تصویر شاخص پک', 'Change the pack cover'))}">
+      ${url ? `<img class="packman-thumb" src="${app().escapeHTML(url)}" alt="">` : '<span class="packman-thumb"><i class="fas fa-layer-group" aria-hidden="true"></i></span>'}
+      <span class="packman-cover-edit" aria-hidden="true"><i class="fas fa-pen"></i></span>
+    </button>`;
     return `<div class="packman-row">
       <input type="checkbox" data-pack-id="${app().escapeHTML(pack.id)}" aria-label="${app().escapeHTML(pack.title || '')}">
       ${thumb}
@@ -1053,6 +1158,34 @@ function renderPackManagerList() {
     </div>`;
   }).join('');
   syncPackManagerFooter();
+}
+
+/* Every sticker of a pack, to choose its cover from: stills where there are
+   stills, the moving sticker only for one that has none yet. */
+function openPackCoverPicker(packId) {
+  const pack = chatState.stickerPacks.find((item) => item.id === packId);
+  const card = packManagerElement?.querySelector('.packman-card');
+  if (!pack || !card) return;
+  card.querySelector('.packman-coverpick')?.remove();
+  const current = packCoverRecord(pack)?.id || '';
+  const sheet = document.createElement('div');
+  sheet.className = 'packman-coverpick';
+  sheet.setAttribute('data-cover-pack', pack.id);
+  sheet.innerHTML = `
+    <div class="packman-head">
+      <button type="button" class="packman-back" data-cover-cancel aria-label="${app().escapeHTML(t('بازگشت', 'Back'))}"><i class="fas ${document.documentElement.dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'}" aria-hidden="true"></i></button>
+      <h3>${app().escapeHTML(t(`تصویر شاخص «${pack.title}»`, `Cover of "${pack.title}"`))}</h3>
+    </div>
+    <div class="packman-coverpick-grid">
+      ${pack.stickers.map((record) => `<button type="button" class="packman-coverpick-cell ${record.id === current ? 'is-current' : ''}" data-cover-pick="${app().escapeHTML(record.id)}" aria-label="${app().escapeHTML(record.emoji || record.name || '')}">
+        ${record.thumb instanceof Blob
+          ? `<img src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async" loading="lazy">`
+          : stickerMediaHtml(stickerObjectUrl(record), record.kind, 'packman-coverpick-media')}
+      </button>`).join('')}
+    </div>`;
+  card.appendChild(sheet);
+  hydrateLottieNodes(sheet);
+  sheet.querySelectorAll('video').forEach((video) => { video.__onScreen = true; if (typeof keepVideoLooping === 'function') keepVideoLooping(video); });
 }
 
 function closePackManager() {
@@ -1073,7 +1206,7 @@ function openPackManager() {
         <h3>${app().escapeHTML(t('مدیریت پک‌های استیکر', 'Manage sticker packs'))}</h3>
       </div>
       <div class="packman-body">
-        <p class="packman-note">${app().escapeHTML(t('نام هر پک را همین‌جا می‌توانید عوض کنید، و با فلش‌ها ترتیبشان را. ترتیب همان است که در پنل استیکر می‌بینید. با دکمهٔ ارسال هر پک را جداگانه، یا چندتا را تیک‌زده با هم برای گفتگوی باز بفرستید.', 'Rename a pack in place, and use the arrows to order them. That order is the one the sticker panel shows. The share button sends one pack; tick several and send them together into the open chat.'))}</p>
+        <p class="packman-note">${app().escapeHTML(t('نام هر پک را همین‌جا می‌توانید عوض کنید، و با فلش‌ها ترتیبشان را. ترتیب همان است که در پنل استیکر می‌بینید. برای عوض کردن تصویر شاخص یک پک، روی تصویرش بزنید. با دکمهٔ ارسال هر پک را جداگانه، یا چندتا را تیک‌زده با هم برای گفتگوی باز بفرستید.', 'Rename a pack in place, and use the arrows to order them. That order is the one the sticker panel shows. Tap a pack\'s picture to choose its cover. The share button sends one pack; tick several and send them together into the open chat.'))}</p>
         <div class="packman-list" data-pack-list></div>
       </div>
       <div class="packman-foot">
@@ -1087,6 +1220,16 @@ function openPackManager() {
   document.documentElement.classList.add('packman-open');
 
   host.addEventListener('click', async (event) => {
+    if (event.target.closest('[data-cover-cancel]')) { host.querySelector('.packman-coverpick')?.remove(); return; }
+    const picked = event.target.closest('[data-cover-pick]');
+    if (picked) {
+      const sheet = picked.closest('.packman-coverpick');
+      await setPackCover(sheet?.getAttribute('data-cover-pack'), picked.getAttribute('data-cover-pick'));
+      sheet?.remove();
+      return;
+    }
+    const cover = event.target.closest('[data-pack-cover]');
+    if (cover) { openPackCoverPicker(cover.getAttribute('data-pack-cover')); return; }
     if (event.target.closest('[data-pack-close]')) { closePackManager(); return; }
     const move = event.target.closest('[data-move]');
     if (move) {
@@ -1241,37 +1384,91 @@ function ensureLottie() {
   return lottieScriptPromise;
 }
 
-/* Mounts every .chat-lottie placeholder that is not mounted yet. Called after
-   renderMessages and after the picker redraws; the data-lottie-mounted flag
-   keeps a re-render from stacking a second animation on the same node. */
+/* Lottie stickers, played only while they are on screen.
+   Every placeholder used to be mounted the moment it was drawn: a pack of a
+   hundred .tgs stickers was a hundred SVG scenes animating at once, most of
+   them scrolled out of sight, and on a phone that was both the long wait for
+   the panel and the stutter in the ones you could see. Now each is mounted as
+   it nears the view, paused when it leaves, and destroyed once its node is
+   gone from the page (a redraw replaces the nodes; lottie would otherwise go
+   on animating the old ones, invisibly, for as long as the app is open).
+   The JSON is fetched once per sticker and parsed for each mount, because
+   lottie writes into the data it is given. */
+const lottieTexts = new Map();
+function lottieTextFor(url) {
+  if (!lottieTexts.has(url)) {
+    lottieTexts.set(url, fetch(url).then((response) => response.text()).catch((error) => {
+      lottieTexts.delete(url);
+      throw error;
+    }));
+  }
+  return lottieTexts.get(url);
+}
+const mountedLottieNodes = new Set();
+let lottieObserver = null;
+function lottieWatcher() {
+  if (lottieObserver || typeof IntersectionObserver !== 'function') return lottieObserver;
+  lottieObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const node = entry.target;
+      node.__onScreen = entry.isIntersecting;
+      if (entry.isIntersecting) mountLottieNode(node);
+      else node.__lottie?.pause();
+    }
+  }, { rootMargin: '120px 0px' });
+  return lottieObserver;
+}
+function lottieFallback(node) {
+  node.textContent = '🎞';
+  node.classList.add('is-fallback', 'is-ready');
+}
+async function mountLottieNode(node) {
+  if (node.__lottie) {
+    if (node.__onScreen && node.isConnected) node.__lottie.play();
+    return;
+  }
+  if (node.__lottieLoading) return;
+  node.__lottieLoading = true;
+  try {
+    const lottie = await ensureLottie();
+    const text = await lottieTextFor(node.dataset.lottieSrc);
+    if (!node.isConnected || node.__lottie) return;
+    const animation = lottie.loadAnimation({
+      container: node,
+      renderer: 'svg',
+      loop: true,
+      autoplay: node.__onScreen !== false,
+      animationData: JSON.parse(text),
+      rendererSettings: { preserveAspectRatio: 'xMidYMid meet', progressiveLoad: true, hideOnTransparent: true },
+    });
+    node.__lottie = animation;
+    mountedLottieNodes.add(node);
+    const ready = () => markMediaReady(node);
+    if (animation.isLoaded) ready(); else animation.addEventListener('DOMLoaded', ready);
+  } catch (_error) {
+    lottieFallback(node);
+  } finally {
+    node.__lottieLoading = false;
+  }
+}
+function sweepLottieNodes() {
+  mountedLottieNodes.forEach((node) => {
+    if (node.isConnected) return;
+    try { node.__lottie?.destroy(); } catch (_error) { /* already stopped */ }
+    node.__lottie = null;
+    mountedLottieNodes.delete(node);
+    lottieObserver?.unobserve(node);
+  });
+}
 function hydrateLottieNodes(root = document) {
-  const nodes = Array.from(root.querySelectorAll('[data-lottie-src]:not([data-lottie-mounted])'));
+  sweepLottieNodes();
+  const nodes = Array.from(root.querySelectorAll('[data-lottie-src]:not([data-lottie-watched])'));
   if (!nodes.length) return;
-  ensureLottie().then((lottie) => {
-    nodes.forEach(async (node) => {
-      if (node.dataset.lottieMounted) return;
-      node.dataset.lottieMounted = '1';
-      try {
-        const response = await fetch(node.dataset.lottieSrc);
-        const animationData = await response.json();
-        lottie.loadAnimation({
-          container: node,
-          renderer: 'svg',
-          loop: true,
-          autoplay: true,
-          animationData,
-        });
-      } catch (error) {
-        node.textContent = '🎞';
-        node.classList.add('is-fallback');
-      }
-    });
-  }).catch(() => {
-    nodes.forEach((node) => {
-      node.dataset.lottieMounted = '1';
-      node.textContent = '🎞';
-      node.classList.add('is-fallback');
-    });
+  const watcher = lottieWatcher();
+  nodes.forEach((node) => {
+    node.dataset.lottieWatched = '1';
+    if (watcher) watcher.observe(node);
+    else { node.__onScreen = true; mountLottieNode(node); }
   });
 }
 
@@ -1674,8 +1871,18 @@ async function copySelectedStickersTo(target, { move = false } = {}) {
 const STICKER_VIRTUAL_RECENT = '__recent__';
 const STICKER_VIRTUAL_FAVOURITE = '__favourite__';
 
+/* What a cell draws. A sticker that stays still: its thumbnail. One that
+   moves: its still, at once, and the moving sticker over it once it is on
+   screen and has a frame (observeLazyMedia, hydrateLottieNodes). */
+function stickerCellMediaHtml(record) {
+  const animated = typeof stickerIsAnimated === 'function' && stickerIsAnimated(record);
+  if (!animated) return stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-thumb', { lazy: true });
+  const still = record.thumb instanceof Blob
+    ? `<img class="chat-sticker-still" src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async">`
+    : '';
+  return still + stickerMediaHtml(stickerObjectUrl(record), record.kind, 'chat-sticker-thumb is-motion', { lazy: true });
+}
 function stickerCellHtml(pack, record, { selectable }) {
-  const url = stickerThumbUrl(record);
   const ref = stickerRef(pack.id, record.id);
   const chosen = stickerSelection.has(ref);
   const starred = stickerIsFavourite(pack.id, record.id);
@@ -1684,7 +1891,7 @@ function stickerCellHtml(pack, record, { selectable }) {
     data-chat-sticker-send="${record.id}"
     data-chat-sticker-pack-id="${pack.id}"
     title="${app().escapeHTML(record.emoji || record.name)}">
-    ${stickerMediaHtml(url, record.kind, 'chat-sticker-thumb', { lazy: true })}
+    ${stickerCellMediaHtml(record)}
     <span class="chat-sticker-star ${starred ? 'is-on' : ''}"
       data-chat-sticker-fav="${record.id}"
       data-chat-sticker-fav-pack="${pack.id}"
@@ -1708,7 +1915,7 @@ function stickerStripHtml(pack) {
   const stickers = pack?.stickers || [];
   if (!stickers.length) return '';
   const shown = stickers.slice(0, STICKER_STRIP_MAX)
-    .map((record) => stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-manage-thumb'))
+    .map((record) => stickerMediaHtml(stickerThumbUrl(record), record.thumb instanceof Blob ? 'image' : record.kind, 'chat-sticker-manage-thumb'))
     .filter(Boolean)
     .join('');
   if (!shown) return '';
@@ -1739,6 +1946,8 @@ function renderStickerPanel() {
 
   if (!packs.length) {
     tabs.innerHTML = '';
+    tabs.__html = '';
+    grid.__html = '';
     grid.innerHTML = `<div class="chat-sticker-empty">
       <i class="fas fa-face-smile-wink"></i>
       <div class="chat-sticker-empty-title">${app().escapeHTML(t('هنوز پک استیکری اضافه نشده', 'No sticker packs yet'))}</div>
@@ -1780,17 +1989,21 @@ function renderStickerPanel() {
       t('دلخواه‌ها', 'Favourites'), true) : '',
   ].filter(Boolean).join('');
 
-  tabs.innerHTML = virtualTabs + packs.map((pack) => {
-    const cover = pack.stickers[0];
-    const coverUrl = cover ? stickerThumbUrl(cover) : '';
-    const coverHtml = cover && cover.kind === 'image'
-      ? `<img src="${coverUrl}" alt="" draggable="false">`
+  const tabsHtml = virtualTabs + packs.map((pack) => {
+    const coverUrl = packCoverUrl(pack);
+    const coverHtml = coverUrl
+      ? `<img src="${app().escapeHTML(coverUrl)}" alt="" draggable="false">`
       : '<i class="fas fa-layer-group"></i>';
     return tabButton(pack.id, coverHtml, pack.title);
   }).join('')
     + `<button type="button" class="chat-sticker-tab chat-sticker-tab-add" data-chat-sticker-import title="${app().escapeHTML(t('وارد کردن استیکر', 'Import stickers'))}"><i class="fas fa-plus"></i></button>`;
+  /* Written only when it changed: a redraw for something else (a sticker
+     sent, a star) must not make every picture load again. */
+  if (tabs.__html !== tabsHtml) { tabs.innerHTML = tabsHtml; tabs.__html = tabsHtml; }
+  ensurePackCovers(packs);
 
   if (chatState.stickerManageMode) {
+    grid.__html = '';
     grid.innerHTML = `<div class="chat-sticker-manage">
       ${packs.map((pack, index) => `
         <div class="chat-sticker-manage-row ${stickerManageSelection.has(pack.id) ? 'is-picked' : ''}">
@@ -1838,11 +2051,18 @@ function renderStickerPanel() {
       <button type="button" data-chat-sticker-copy-selected class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-copy"></i> ${app().escapeHTML(t('کپی به…', 'Copy to…'))}</button>
       <button type="button" data-chat-sticker-move-selected class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-arrow-right-arrow-left"></i> ${app().escapeHTML(t('انتقال به…', 'Move to…'))}</button>
       <button type="button" data-chat-sticker-make-pack class="chat-sticker-selbtn" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-layer-group"></i> ${app().escapeHTML(t('ساخت پک', 'Make a pack'))}</button>
+      <button type="button" data-chat-sticker-cover-selected class="chat-sticker-selbtn" ${stickerSelection.size === 1 ? '' : 'disabled'} title="${app().escapeHTML(t('این استیکر تصویر شاخص پکش شود', 'Make this sticker its pack\'s cover'))}"><i class="fas fa-image"></i> ${app().escapeHTML(t('شاخص پک', 'Pack cover'))}</button>
       <button type="button" data-chat-sticker-delete-selected class="chat-sticker-selbtn is-danger" ${stickerSelection.size ? '' : 'disabled'}><i class="fas fa-trash"></i> ${app().escapeHTML(t('حذف', 'Delete'))}</button>
       <button type="button" data-chat-sticker-clear-selection class="chat-sticker-selbtn"><i class="fas fa-xmark"></i> ${app().escapeHTML(t('لغو', 'Done'))}</button>` : '';
   }
 
-  grid.innerHTML = cells;
+  /* The same cells as last time are left alone: rebuilding them threw every
+     picture away and loaded it again, which on a phone was the pack filling
+     in piece by piece after each sticker sent. */
+  if (grid.__html !== cells || !grid.firstElementChild) {
+    grid.innerHTML = cells;
+    grid.__html = cells;
+  }
   hydrateLottieNodes(grid);
   observeLazyMedia(grid);
   if (activePack && !virtual) {
@@ -1875,6 +2095,8 @@ window.__stickerProbe = {
   clearSelection: () => clearStickerSelection(),
   makePack: (title) => buildPackFromSelection(title),
   telegramName: (text) => telegramPackName(text),
+  setCover: (packId, stickerId) => setPackCover(packId, stickerId),
+  coverUrl: (packId) => packCoverUrl(chatState.stickerPacks.find((pack) => pack.id === packId)),
   importTelegram: (text) => importTelegramStickerPack(text),
   deleteSelected: () => deleteSelectedStickers(),
   copySelected: (packId, move = false) => copySelectedStickersTo(packId === '__gifs__' ? '__gifs__' : chatState.stickerPacks.find((pack) => pack.id === packId), { move }),

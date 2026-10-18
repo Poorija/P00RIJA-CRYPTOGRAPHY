@@ -1561,6 +1561,18 @@ notify(move
 done ? 'success' : 'warning');
 return;
 }
+/* The one sticker picked becomes the picture its pack is known by. */
+if (event.target.closest('[data-chat-sticker-cover-selected]')) {
+const chosen = selectedStickerRecords();
+if (chosen.length !== 1) return;
+const [{ pack, record }] = chosen;
+if (await setPackCover(pack.id, record.id)) {
+clearStickerSelection();
+renderStickerPanel();
+notify(t(`تصویر شاخص «${pack.title}» عوض شد.`, `"${pack.title}" has a new cover.`), 'success');
+}
+return;
+}
 if (event.target.closest('[data-chat-sticker-make-pack]')) {
 const title = await PoorijaDialogs.prompt(
 t('نام پک تازه؟', 'A name for the new pack?'), { value: t('پک من', 'My pack') });
