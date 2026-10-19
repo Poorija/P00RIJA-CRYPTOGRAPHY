@@ -16,6 +16,17 @@
    Streaming file transfer
 */
 
+/* This install's own peer id on an account whose address a sibling device
+   holds: the account's id, "-", and the end of this install's device id. Both
+   parts are cut down to what PeerJS accepts in an id — letters and digits in
+   runs joined by single "-", "_" or " " — so the result is always one it
+   takes, and the same one on every reconnect. */
+function devicePeerId(accountPeerId) {
+  const device = String(getDeviceId()).replace(/[^A-Za-z0-9]/g, '').slice(-6) || 'device';
+  const account = String(accountPeerId || '').replace(/[^A-Za-z0-9_ -]/g, '-')
+    .replace(/[ _-]{2,}/g, '-').replace(/^[ _-]+|[ _-]+$/g, '');
+  return `${account || 'poorija-peer'}-${device}`;
+}
 function rebuildPeerTransport() {
 clearPeerHealTimers();
 chatState.peerHealInFlight = false;
@@ -1219,10 +1230,15 @@ notify(t('کتابخانه PeerJS لود نشده است', 'PeerJS client failed
 return;
 }
 	/* The account's address, or this install's own when a sibling device
-	   already holds the account's — see the unavailable-id handler above. */
-	const stablePeerId = (chatState.profile.stablePeerId || generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-'))
-	+ (chatState.profile.peerIdSuffix ? `~${String(getDeviceId()).slice(-6)}` : '');
-	chatState.profile.stablePeerId = chatState.profile.stablePeerId || stablePeerId;
+	   already holds the account's — see the unavailable-id handler below.
+	   The device part is joined with "-" and is letters and digits only:
+	   PeerJS accepts nothing else in an id, and the "~" it was joined with
+	   made every suffixed id invalid. The peer then never opened, the flag
+	   that asked for the suffix is kept in the profile, and the device stayed
+	   off P2P on every try and every restart until it was wiped. */
+	const accountPeerId = chatState.profile.stablePeerId || generateId('poorija-peer').replace(/[^a-zA-Z0-9_-]/g, '-');
+	const stablePeerId = chatState.profile.peerIdSuffix ? devicePeerId(accountPeerId) : accountPeerId;
+	chatState.profile.stablePeerId = chatState.profile.stablePeerId || accountPeerId;
 	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 // Add a small delay to ensure identity and other async states are fully hydrated
 if (chatState.reconnectAttempt === 0) {
@@ -1292,6 +1308,20 @@ markPeerUnavailable(missingPeer || activePeer()?.peerId || '', t('Peer انتخ�
 setConnectionState(Boolean(chatState.ws?.readyState === WebSocket.OPEN), ['متصل به رله؛ Peer مقصد در دسترس نیست', 'Relay connected; target peer is unreachable']);
 return;
 }
+	/* An id PeerJS will not take. It can only be the suffixed one (the
+	   account's own has always been valid); rather than retry the same id
+	   forever, go back to the account's id once — if a sibling holds it, the
+	   unavailable-id path below brings the suffix back, built valid. */
+	if (errorText.includes('invalid-id')) {
+	console.warn('[Transport] PeerJS refused the peer id as invalid:', errorText);
+	if (chatState.profile.peerIdSuffix && !chatState.invalidPeerIdRetried) {
+	chatState.invalidPeerIdRetried = true;
+	chatState.profile.peerIdSuffix = false;
+	saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
+	setTimeout(() => rebuildPeerTransport(), 500);
+	return;
+	}
+	}
 	if (errorText.includes('unavailable-id')) {
 	/* Who is holding the id decides what happens next. The portable profile
 	   carries the account's stablePeerId, so a LINKED sibling online on this

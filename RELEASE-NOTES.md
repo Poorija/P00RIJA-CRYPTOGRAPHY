@@ -1,10 +1,56 @@
-# P00RIJA Cryptography 2.98.61
+# P00RIJA Cryptography 2.98.62
 
-Version 2.98.61 · build chat-v154
+Version 2.98.62 · build chat-v155
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## اتصالی که گیر می‌کرد و فقط با پاک‌سازی درست می‌شد · A connection that stuck until a wipe
+
+- **مشکل**: گاهی برنامه به سرور چت وصل نمی‌شد. «اتصال دوباره» کمکی نمی‌کرد و خطای PeerJS
+  نشان داده می‌شد. فقط پاک‌سازی امن و راه‌اندازی دوباره درستش می‌کرد.
+- **علت**: وقتی رله می‌گوید شناسهٔ اتصال حساب در حال استفاده است، دستگاه شناسهٔ خودش را
+  می‌گیرد: شناسهٔ حساب به‌علاوهٔ بخشی از شناسهٔ دستگاه. این حالت دو جا پیش می‌آید: وقتی
+  دستگاه لینک‌شدهٔ دیگری از همان حساب آنلاین است، یا وقتی اتصال قبلی خود دستگاه بعد از یک
+  بسته شدن ناگهانی، مثلاً PWA در پس‌زمینهٔ آیفون، هنوز روی رله مانده است. این دو بخش با
+  «~» به هم وصل می‌شدند، که PeerJS در شناسه نمی‌پذیرد. پس اتصال هرگز باز نمی‌شد. این تصمیم
+  در پروفایل ذخیره می‌شد، و برای همین هر تلاش و هر بار باز کردن برنامه همان‌طور شکست
+  می‌خورد.
+- **حالا**: دو بخش با «-» و فقط با حرف و عدد وصل می‌شوند، و شناسهٔ دستگاه همیشه معتبر و در
+  هر اتصال یکسان است. دستگاهی که الان در این حالت گیر کرده، با همین نسخه خودش وصل می‌شود و
+  پاک‌سازی لازم نیست. اگر PeerJS به هر دلیلی شناسه‌ای را نپذیرد، برنامه دیگر همان را
+  بی‌پایان امتحان نمی‌کند و به شناسهٔ حساب برمی‌گردد.
+- **چند دستگاهی دست نخورده**: شناسهٔ حساب همچنان مال دستگاهی است که آن را دارد، و
+  دستگاه‌های لینک‌شده و همگام‌سازی‌شان مثل قبل کار می‌کنند. فقط حالا آن دستگاه دوم واقعاً
+  به P2P وصل می‌شود.
+- **The problem**: sometimes the app would not connect to the chat server.
+  Reconnecting did not help and a PeerJS error was shown. Only a secure wipe and a
+  fresh start cleared it.
+- **The cause**: when the relay says the account's connection id is in use, the
+  device takes an id of its own: the account's id plus part of the device id. That
+  happens in two cases: when another linked device of the same account is online,
+  or when the device's own earlier connection is still registered on the relay
+  after an abrupt close, such as a PWA in the background on an iPhone. The two parts
+  were joined with "~", which PeerJS does not accept in an id, so the connection
+  never opened. The choice was kept in the profile, which is why every try and
+  every restart failed the same way.
+- **Now**: the two parts are joined with "-", in letters and digits only, and the
+  device's id is always valid and the same on every connect. A device stuck in this
+  state today connects on its own with this release, with no wipe. If PeerJS refuses
+  an id for any reason, the app no longer retries it forever; it goes back to the
+  account's id.
+- **Multiple devices untouched**: the account's id stays with the device that holds
+  it, and linked devices and their sync work as before. The difference is that the
+  second device now really gets onto P2P.
+
+---
+
+# P00RIJA Cryptography 2.98.61
+
+Version 2.98.61 · build chat-v154
 
 ---
 
