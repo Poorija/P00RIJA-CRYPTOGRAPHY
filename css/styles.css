@@ -28283,6 +28283,30 @@ html body .sticker-cover .sticker-cover-motion.is-ready { opacity: 1; }
 html body .sticker-cover.motion-ready .sticker-cover-still { opacity: 0; }
 html body .sticker-cover .chat-lottie { display: block; }
 html body .sticker-cover .chat-lottie svg { width: 100% !important; height: 100% !important; }
-html body .packman-cover .sticker-cover.packman-thumb { display: grid; }
+/* The cover's own size wins over the generic "fill your box" of .sticker-cover
+   above, which comes later in this file: without it a moving cover in the
+   pack manager grew to the width of the row. */
+html body .packman-cover .sticker-cover.packman-thumb { display: grid; width: 2.1rem; height: 2.1rem; flex: 0 0 auto; }
 html body #mainApp #content-chat .chat-sticker-tab > .sticker-cover,
 html body #mainApp #content-chat .chat-sticker-tab > span { width: 100%; height: 100%; display: grid; place-items: center; }
+
+/* The desktop: a taller sticker panel (a phone has to share its screen with
+   the keyboard, a desktop window does not), and a sticker under the pointer
+   grows a little and comes forward, the way a desktop messenger answers a
+   hover. */
+@media (min-width: 1024px) and (min-height: 760px) {
+  html body #mainApp #content-chat .chat-sticker-grid {
+    max-height: min(26rem, 44vh);
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  html body #mainApp #content-chat .chat-sticker-cell > .chat-sticker-thumb,
+  html body #mainApp #content-chat .chat-sticker-cell > .chat-sticker-still {
+    transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.3, 1.4, 0.5, 1);
+  }
+  html body #mainApp #content-chat .chat-sticker-cell:hover > .chat-sticker-thumb,
+  html body #mainApp #content-chat .chat-sticker-cell:hover > .chat-sticker-still {
+    transform: scale(1.12);
+  }
+  html body #mainApp #content-chat .chat-sticker-bubble .chat-sticker-body { cursor: zoom-in; }
+}

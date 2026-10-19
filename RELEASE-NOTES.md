@@ -1,10 +1,52 @@
-# P00RIJA Cryptography 2.98.60
+# P00RIJA Cryptography 2.98.61
 
-Version 2.98.60 · build chat-v153
+Version 2.98.61 · build chat-v154
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## اندازهٔ درست شاخص متحرک، و دسکتاپ روان‌تر · Moving covers at the right size, and a smoother desktop
+
+- **اندازهٔ شاخص متحرک**: در «مدیریت پک‌ها»، شاخصِ متحرک به‌جای اندازهٔ یک تصویر کوچک
+  به پهنای کل ردیف بزرگ می‌شد. یک قاعدهٔ عمومی «کادرت را پر کن» که بعد از قاعدهٔ اندازهٔ
+  شاخص در فایل استایل آمده بود، اندازه را لغو می‌کرد. حالا شاخص متحرک دقیقاً هم‌اندازهٔ
+  شاخص ثابت است و در نوار پک‌ها هم در کادر خودش می‌ماند. یک تست هم این اندازه را
+  می‌سنجد.
+- **دسکتاپ (برنامهٔ نیتیو و PWA)**: همهٔ امکانات تازهٔ استیکر و گیف، یعنی تصویر ثابت،
+  پخش دائم، دیدن بزرگ، شاخص متحرک و راه‌اندازی دوبارهٔ ویدیو، روی دسکتاپ هم بررسی شد
+  و درست کار می‌کند. روی macOS، برنامهٔ نیتیو همان موتور WebKit آیفون را دارد و اصلاح
+  توقف استیکر ویدیویی شامل آن هم می‌شود. علاوه بر این:
+  - پنل استیکر در پنجرهٔ بزرگ بلندتر است؛ روی گوشی باید جا را با کیبورد تقسیم کند،
+    روی دسکتاپ نه.
+  - استیکری که نشانگر موس رویش است کمی بزرگ و جلو می‌آید، و روی استیکر داخل گفتگو
+    نشانگر ذره‌بین نشان می‌دهد که با کلیک بزرگ می‌شود.
+  - روی دسکتاپ تصویرهای پنل از فاصلهٔ دورتری آماده می‌شوند، و روی دستگاه‌های با
+    هستهٔ بیشتر، تصویرهای ثابت تا شش‌تا‌شش‌تا ساخته می‌شوند.
+- **Moving covers at the right size**: in Manage packs, a moving cover grew to the
+  width of the whole row instead of the size of a small picture. A general "fill
+  your box" rule that came after the cover's size in the stylesheet overrode the
+  size. A moving cover is now exactly the size of a still one, and in the pack bar
+  it stays in its box too. A test measures it.
+- **The desktop (native app and PWA)**: every new sticker and GIF feature (stills,
+  playing forever, the up-close view, moving covers, and restarting a stuck video)
+  was checked on the desktop and works there. On macOS the native app runs the
+  same WebKit as an iPhone, so the fix for a video sticker stopping on its last
+  frame covers it as well. On top of that:
+  - The sticker panel is taller in a large window; a phone has to share its screen
+    with the keyboard, a desktop does not.
+  - A sticker under the pointer grows a little and comes forward, and a sticker in
+    a conversation shows a zoom pointer, since a click lifts it.
+  - On a desktop the panel's pictures are made ready from further ahead, and a
+    machine with more cores makes stills up to six at a time.
+
+---
+
+# P00RIJA Cryptography 2.98.60
+
+Version 2.98.60 · build chat-v153
 
 ---
 

@@ -265,6 +265,22 @@ try {
   });
   check('a moving sticker made the cover moves on the pack\'s tab', movingCover.motion && movingCover.svg && movingCover.ready, JSON.stringify(movingCover));
 
+  /* A moving cover once grew to the width of its row in the pack manager. */
+  const coverSizes = await ARIF.evaluate(async () => {
+    openPackManager();
+    await new Promise((r) => setTimeout(r, 1200));
+    const box = (node) => { const r = node?.getBoundingClientRect(); return r ? [Math.round(r.width), Math.round(r.height)] : null; };
+    const moving = box(document.querySelector('.packman-cover .sticker-cover'));
+    const still = box(document.querySelector('.packman-cover img.packman-thumb, .packman-cover span.packman-thumb:not(.sticker-cover)'));
+    const tab = box(document.querySelector('#chatStickerTabs .sticker-cover'));
+    const tabButton = box(document.querySelector('#chatStickerTabs .sticker-cover')?.closest('.chat-sticker-tab'));
+    closePackManager();
+    return { moving, still, tab, tabButton };
+  });
+  check('a moving cover is the size of a still one in the pack manager, and fits its tab', coverSizes.moving && coverSizes.moving[0] <= 48 && coverSizes.moving[1] <= 48
+    && (!coverSizes.still || (coverSizes.moving[0] === coverSizes.still[0] && coverSizes.moving[1] === coverSizes.still[1]))
+    && coverSizes.tab && coverSizes.tab[0] <= coverSizes.tabButton[0], JSON.stringify(coverSizes));
+
   const eager = await ARIF.evaluate(async () => {
     const make = async (i) => { const c = document.createElement('canvas'); c.width = 400; c.height = 400; const g = c.getContext('2d'); g.fillStyle = `hsl(${i * 13} 70% 50%)`; g.fillRect(0, 0, 400, 400); return new Promise((r) => c.toBlob(r, 'image/webp', 0.9)); };
     const stickers = [];

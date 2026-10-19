@@ -522,7 +522,9 @@ async function ensurePackThumbs(pack) {
   packThumbJobs.add(pack);
   try {
     /* Three at a time: a video's still waits on the decoder far more than it
-       works the page, so three overlap where one left the phone idle. */
+       works the page, so three overlap where one left the phone idle. A
+       machine with more cores runs more. */
+    const workers = Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
     let next = 0;
     const worker = async () => {
       while (next < pending.length) {
@@ -538,7 +540,7 @@ async function ensurePackThumbs(pack) {
         await yieldToPage();
       }
     };
-    await Promise.all([worker(), worker(), worker()]);
+    await Promise.all(Array.from({ length: workers }, worker));
     if (chatState.stickerPacks.includes(pack) || pack === chatState.gifLibrary) {
       await stickerDbPutPack(pack);
       if (!document.getElementById('chatStickerPanel')?.classList.contains('hidden')) renderStickerPanel();
@@ -699,8 +701,10 @@ function observeLazyMedia(container) {
         else giveLazyMedia(node);
       }
     };
+    /* A desktop has the memory and the decoders to reach further ahead. */
+    const roomy = window.matchMedia?.('(min-width: 900px) and (pointer: fine)').matches;
     observers = {
-      near: new IntersectionObserver(watch, { root: container, rootMargin: '360px 0px' }),
+      near: new IntersectionObserver(watch, { root: container, rootMargin: roomy ? '720px 0px' : '360px 0px' }),
       close: new IntersectionObserver(watch, { root: container, rootMargin: '120px 0px' }),
     };
     lazyMediaObservers.set(container, observers);
