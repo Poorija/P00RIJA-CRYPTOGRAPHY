@@ -1601,10 +1601,14 @@ const lottieTextsReady = new Map();
    expression taken out. lottie-web can evaluate After Effects expressions —
    JavaScript, run with eval — and the worker's canvas build carries that
    code. A sticker comes from whoever sent it or made the pack, so nothing in
-   one is ever run: an expression is a string under the key "x" (the easing
-   handles also called x are numbers or arrays, and stay). Telegram's own
-   stickers never carry one, and the page's policy already refuses eval; this
-   holds whatever a player or a policy does. */
+   one is ever run. An expression lives under the key "x", and the player
+   pastes whatever it finds there into the code it evaluates — a string, or an
+   array of strings joined by its toString. So an "x" is kept only when it
+   cannot be code: a number or an array of numbers (the easing handles), or an
+   object (a split position's own x property, whose insides are checked the
+   same way, and which as text is only "[object Object]"). Telegram's own
+   stickers never carry an expression, and the page's policy already refuses
+   eval; this holds whatever a player or a policy does. */
 function lottieDataFrom(text) {
   const data = JSON.parse(text);
   const pending = [data];
@@ -1614,8 +1618,12 @@ function lottieDataFrom(text) {
     if (Array.isArray(value)) { for (const item of value) if (item && typeof item === 'object') pending.push(item); continue; }
     for (const key of Object.keys(value)) {
       const item = value[key];
-      if (key === 'x' && typeof item === 'string') delete value[key];
-      else if (item && typeof item === 'object') pending.push(item);
+      if (key === 'x') {
+        const numeric = typeof item === 'number' || (Array.isArray(item) && item.every((n) => typeof n === 'number'));
+        const property = Boolean(item) && typeof item === 'object' && !Array.isArray(item);
+        if (!numeric && !property) { delete value[key]; continue; }
+      }
+      if (item && typeof item === 'object') pending.push(item);
     }
   }
   return data;

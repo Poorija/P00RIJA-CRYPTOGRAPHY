@@ -1,10 +1,31 @@
-# P00RIJA Cryptography 2.98.64
+# P00RIJA Cryptography 2.98.65
 
-Version 2.98.64 · build chat-v157
+Version 2.98.65 · build chat-v158
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## حذف کامل‌تر کد از استیکر · Expressions taken out of a sticker more thoroughly
+
+- در 2.98.64 فقط expressionی برداشته می‌شد که به‌صورت متن بود. پخش‌کننده هر چیزی را که
+  زیر آن کلید ببیند در کدش می‌گذارد، و فهرستی از متن‌ها هم با به هم چسبیدن به کد تبدیل
+  می‌شد. حالا آن کلید فقط وقتی می‌ماند که نتواند کد باشد: عدد یا فهرستی از عددها (دسته‌های
+  نرمی حرکت)، یا شیء (مثل جزء x یک موقعیت جداشده، که درونش هم همین‌طور بررسی می‌شود).
+  یک تست هر سه حالت را می‌سنجد.
+- In 2.98.64 only an expression written as text was taken out. The player puts
+  whatever it finds under that key into its code, and a list of strings became code
+  too once joined. Now the key stays only when it cannot be code: a number or a list
+  of numbers (the easing handles), or an object (such as a split position's x part,
+  whose insides are checked the same way). A test covers all three cases.
+
+---
+
+# P00RIJA Cryptography 2.98.64
+
+Version 2.98.64 · build chat-v157
 
 ---
 

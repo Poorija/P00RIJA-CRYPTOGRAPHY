@@ -150,12 +150,21 @@ try {
     const animation = { v: '5.7.4', fr: 30, ip: 0, op: 30, w: 100, h: 100, layers: [{ ty: 4, ks: {
       r: { a: 1, k: [{ t: 0, s: [0], i: { x: [0.5], y: [0.5] }, o: { x: [0.5], y: [0.5] } }, { t: 30, s: [90] }], x: 'window.__ranExpression = true; time * 10' },
       o: { a: 0, k: 100, x: 'value' },
+      s: { a: 0, k: [100, 100], x: ['window.__ranExpression = true'] },
+      p: { s: true, x: { a: 0, k: 50, x: true }, y: { a: 0, k: 50 } },
     }, shapes: [] }] };
     const data = window.__stickerProbe.lottieData(JSON.stringify(animation));
+    const ks = data.layers[0].ks;
     const text = JSON.stringify(data);
-    return { strings: (text.match(/"x":"/g) || []).length, easings: (text.match(/"x":\[/g) || []).length, ran: Boolean(window.__ranExpression) };
+    return {
+      strings: (text.match(/"x":"/g) || []).length,
+      stringArrays: 'x' in ks.s,
+      easings: ks.r.k[0].i.x.length === 1 && ks.r.k[0].o.x.length === 1,
+      splitPosition: ks.p.x?.k === 50 && !('x' in ks.p.x),
+      ran: Boolean(window.__ranExpression),
+    };
   });
-  check('no expression in a sticker reaches a player, and the easing handles stay', expressions.strings === 0 && expressions.easings === 2 && !expressions.ran, JSON.stringify(expressions));
+  check('no expression in a sticker reaches a player — as a string or an array of strings — while easing handles and a split position stay', expressions.strings === 0 && !expressions.stringArrays && expressions.easings && expressions.splitPosition && !expressions.ran, JSON.stringify(expressions));
 
   const imported = await ARIF.evaluate(async () => {
     window.__stickerProbe.reset();
