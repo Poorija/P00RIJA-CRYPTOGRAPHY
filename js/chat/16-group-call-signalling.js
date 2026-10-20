@@ -220,6 +220,10 @@ const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
 const STICKER_ARCHIVE_EXT = /\.(zip|wastickers)$/i;
 const LOTTIE_SCRIPT_URL = 'vendor/lottie/lottie_light.min.js';
+/* lottie-web's canvas player that draws in a worker (MIT, the same project
+   as the SVG player above, 5.13.0): see ensureLottieWorker. */
+const LOTTIE_WORKER_SCRIPT_URL = 'vendor/lottie/lottie_canvas_worker.min.js';
+const LOTTIE_CANVAS_SCRIPT_URL = 'vendor/lottie/lottie_light_canvas.min.js';
 /* The saved-GIF library (55-gifs-and-keyboard-stickers.js) is one record in
    the packs store under this id, so a vault backup carries it with the packs
    and the database keeps its version: js/backup.js restores into version 1,
@@ -461,11 +465,19 @@ function stickerThumbUrl(record) {
   chatState.stickerUrls.set(key, url);
   return url;
 }
+/* Let go a little later, not at once: the picture or video drawn from it may
+   still be on the page until the redraw that follows replaces it. Revoked
+   under them, WebKit failed every one ("cannot load blob"), a playing video
+   sticker could no longer loop, and each failure in the panel set off a
+   reload of every pack from storage. */
+function revokeStickerUrlLater(url) {
+  window.setTimeout(() => URL.revokeObjectURL(url), 15000);
+}
 function forgetStickerRecordUrls(record) {
   for (const key of [record.id, stickerThumbKey(record)]) {
     const url = chatState.stickerUrls.get(key);
     if (!url) continue;
-    URL.revokeObjectURL(url);
+    revokeStickerUrlLater(url);
     chatState.stickerUrls.delete(key);
   }
 }
@@ -642,15 +654,48 @@ function queueMotion(node, run) {
   if (!motionQueue.some((item) => item.node === node)) motionQueue.push({ node, run });
   if (!motionPump) motionPump = requestAnimationFrame(pumpMotion);
 }
+/* Started against a few milliseconds of each frame, not a count: one heavy
+   Lottie sticker takes longer to build than three light ones, and three of
+   the heavy kind in one frame were the stall as a pack opened on a desktop. */
+/* A video costs the engine more than it costs the script — the player behind
+   it is built after the script has moved on — so at most two start in a frame,
+   however cheap they looked. */
+/* While a grid is being scrolled the heavy starts wait — building a Lottie
+   sticker's player, starting a video — and the stills carry the cells: a
+   sticker that scrolls past in a fraction of a second is not worth a frame,
+   and building them as they flew by held a scroll through a big pack to half
+   its frame rate. They start the moment the scrolling stops. */
+const MOTION_START_BUDGET_MS = 5;
+const MOTION_VIDEOS_PER_FRAME = 2;
+let motionScrollingUntil = 0;
+document.addEventListener('scroll', () => { motionScrollingUntil = performance.now() + 140; }, { capture: true, passive: true });
 function pumpMotion() {
   motionPump = 0;
-  for (let started = 0; started < 3 && motionQueue.length;) {
-    const { node, run } = motionQueue.shift();
+  const began = performance.now();
+  const scrolling = began < motionScrollingUntil;
+  let started = 0;
+  let videos = 0;
+  const deferred = [];
+  while (motionQueue.length && (started === 0 || performance.now() - began < MOTION_START_BUDGET_MS)) {
+    const item = motionQueue.shift();
+    const { node, run } = item;
     if (!node.isConnected || node.__wanted === false) continue;
+    const heavy = node instanceof HTMLVideoElement || run === mountLottieNode;
+    if (heavy && scrolling) { deferred.push(item); continue; }
+    if (node instanceof HTMLVideoElement) {
+      if (videos >= MOTION_VIDEOS_PER_FRAME) { deferred.push(item); continue; }
+      videos += 1;
+    }
     run(node);
     started += 1;
   }
-  if (motionQueue.length) motionPump = requestAnimationFrame(pumpMotion);
+  if (deferred.length) motionQueue.unshift(...deferred);
+  if (!motionQueue.length) return;
+  if (scrolling && deferred.length === motionQueue.length) {
+    window.setTimeout(() => { if (!motionPump) motionPump = requestAnimationFrame(pumpMotion); }, Math.max(16, motionScrollingUntil - performance.now() + 4));
+  } else {
+    motionPump = requestAnimationFrame(pumpMotion);
+  }
 }
 function markMediaReady(node) {
   node.classList.add('is-ready');
@@ -1469,6 +1514,77 @@ function ensureLottie() {
   return lottieScriptPromise;
 }
 
+/* Lottie stickers drawn off the page's thread.
+ *
+ * The SVG player redraws a sticker by changing an SVG scene, and the engine
+ * then restyles and repaints it on the page's own thread — on a Mac, forty of
+ * them in a desktop-sized panel left the page drawing at half speed whatever
+ * the script did. lottie-web's canvas player can run in a worker instead: each
+ * sticker's canvas is handed to it (OffscreenCanvas) and drawn there, on
+ * another core, and the page only composites the result. Used wherever the
+ * engine has OffscreenCanvas and workers (Safari 16.4 and later, every current
+ * Chromium and Firefox); anywhere else, or if the worker does not answer, the
+ * SVG player on the shared clock below takes over. The SVG player stays the
+ * global `lottie`, and still makes every sticker's still. */
+let lottieWorkerPromise = null;
+let lottieWorkerHealthy = null;
+function lottieWorkerSupported() {
+  try {
+    return typeof Worker === 'function' && typeof OffscreenCanvas === 'function'
+      && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function'
+      && Boolean(new OffscreenCanvas(1, 1).getContext('2d'));
+  } catch (_error) {
+    return false;
+  }
+}
+/* A second lottie build loaded beside the SVG one: each defines the global
+   `lottie`, so the new one is taken from it and the SVG player put back. One
+   at a time, so two loads cannot take each other's player. */
+let lottiePlayerLoads = Promise.resolve();
+function loadLottiePlayer(url) {
+  const load = lottiePlayerLoads.then(() => ensureLottie()).then((svgPlayer) => new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.async = true;
+    script.onload = () => {
+      const player = window.lottie && window.lottie !== svgPlayer && typeof window.lottie.loadAnimation === 'function' ? window.lottie : null;
+      window.lottie = svgPlayer;
+      resolve(player);
+    };
+    script.onerror = () => {
+      window.lottie = svgPlayer;
+      resolve(null);
+    };
+    document.head.appendChild(script);
+  })).catch(() => null);
+  lottiePlayerLoads = load.then(() => undefined);
+  return load;
+}
+function ensureLottieWorker() {
+  if (!lottieWorkerPromise) lottieWorkerPromise = lottieWorkerSupported() ? loadLottiePlayer(LOTTIE_WORKER_SCRIPT_URL) : Promise.resolve(null);
+  return lottieWorkerPromise;
+}
+let lottieCanvasPromise = null;
+function ensureLottieCanvas() {
+  if (!lottieCanvasPromise) lottieCanvasPromise = loadLottiePlayer(LOTTIE_CANVAS_SCRIPT_URL);
+  return lottieCanvasPromise;
+}
+/* Which player draws a Lottie sticker on screen.
+   - The worker's canvas player in Chromium and Firefox: drawn off the page's
+     thread, the page only composites.
+   - In WebKit — Safari, every browser on an iPhone, and the native app's
+     window on macOS — the canvas player on the page, on the shared clock.
+     WebKit hands every frame of a worker's canvas back through the page's own
+     thread, and measured there, a pack switch with worker canvases on screen
+     stalled the page for over a second; the page's canvas player draws in the
+     script itself, so the clock's budget holds exactly what it measures.
+   - The SVG player when neither can be had. */
+function lottieDrawMode() {
+  const webkit = /Apple/i.test(navigator.vendor || '');
+  if (!webkit && lottieWorkerHealthy !== false && lottieWorkerSupported()) return 'worker';
+  return 'canvas';
+}
+
 /* Lottie stickers, played only while they are on screen.
    Every placeholder used to be mounted the moment it was drawn: a pack of a
    hundred .tgs stickers was a hundred SVG scenes animating at once, most of
@@ -1480,9 +1596,13 @@ function ensureLottie() {
    The JSON is fetched once per sticker and parsed for each mount, because
    lottie writes into the data it is given. */
 const lottieTexts = new Map();
+const lottieTextsReady = new Map();
 function lottieTextFor(url) {
   if (!lottieTexts.has(url)) {
-    lottieTexts.set(url, fetch(url).then((response) => response.text()).catch((error) => {
+    lottieTexts.set(url, fetch(url).then((response) => response.text()).then((text) => {
+      lottieTextsReady.set(url, text);
+      return text;
+    }).catch((error) => {
       lottieTexts.delete(url);
       throw error;
     }));
@@ -1498,8 +1618,8 @@ function lottieWatcher() {
       const node = entry.target;
       node.__onScreen = entry.isIntersecting;
       node.__wanted = entry.isIntersecting;
-      if (!entry.isIntersecting) node.__lottie?.pause();
-      else if (node.__lottie) mountLottieNode(node);
+      if (!entry.isIntersecting) unmountLottieNode(node);
+      else if (node.__lottie) startLottieClock();
       else queueMotion(node, mountLottieNode);
     }
   }, { rootMargin: '120px 0px' });
@@ -1509,40 +1629,240 @@ function lottieFallback(node) {
   node.textContent = '🎞';
   node.classList.add('is-fallback', 'is-ready');
 }
-async function mountLottieNode(node) {
+/* Every Lottie sticker on screen is drawn by one clock, against a budget.
+ *
+ * Each animation used to run its own 60 frames a second, all of them, every
+ * frame. A desktop window shows forty or fifty stickers where a phone shows
+ * fifteen, and forty vector scenes redrawn sixty times a second is more than
+ * a frame has: on a Mac the page fell to half its frame rate and stuttered.
+ *
+ * Now one requestAnimationFrame loop draws them, each at the frame its own
+ * clock says it is on — so a sticker always moves at its true speed — but
+ * only as many as fit in a few milliseconds of the frame, in turn, so none is
+ * left behind. When the stickers on screen need more than that, they are drawn
+ * less often (60, then 30, 20, 15 times a second) rather than the page drawing
+ * fewer frames; when there is room again, they go back up. The sticker held up
+ * in the large view is drawn every frame, whatever the rest are doing. */
+const LOTTIE_RATES = [60, 30, 20, 15];
+const lottieClock = { frame: 0, level: 0, cursor: 0, slow: 0, easy: 0, last: 0, pace: 16.7, cap: Infinity };
+function lottieBudgetMs() {
+  return window.matchMedia?.('(min-width: 900px) and (pointer: fine)').matches ? 8 : 6;
+}
+function startLottieClock() {
+  if (!lottieClock.frame) lottieClock.frame = requestAnimationFrame(lottieTick);
+}
+/* The script's own time is only half of what a redraw costs: the engine then
+   restyles and repaints every scene that changed, outside this loop. So the
+   page's real pace — how far apart its frames actually are — decides too:
+   frames coming slower than about 40 a second step the stickers down, and
+   only a steady 55 or so lets them back up. At the slowest rate, if the page
+   still cannot keep up, fewer stickers move at once (the rest hold their
+   current frame) until it can. */
+function lottiePaceAdjust(spent, budget, behind) {
+  const pace = lottieClock.pace;
+  const struggling = behind || spent > budget || pace > 25;
+  const easy = !behind && spent < budget * 0.6 && pace < 18;
+  if (struggling) { lottieClock.slow += 1; lottieClock.easy = 0; } else if (easy) { lottieClock.easy += 1; lottieClock.slow = 0; }
+  if (lottieClock.slow > 8) {
+    lottieClock.slow = 0;
+    if (lottieClock.level < LOTTIE_RATES.length - 1) lottieClock.level += 1;
+    else lottieClock.cap = Math.max(8, Math.min(lottieClock.cap, mountedLottieNodes.size) - 4);
+  }
+  if (lottieClock.easy > 60) {
+    lottieClock.easy = 0;
+    if (lottieClock.cap !== Infinity) lottieClock.cap = lottieClock.cap + 4 >= mountedLottieNodes.size ? Infinity : lottieClock.cap + 4;
+    else if (lottieClock.level > 0) lottieClock.level -= 1;
+  }
+}
+function lottieTick(now) {
+  lottieClock.frame = 0;
+  if (document.hidden) { lottieClock.last = 0; return; }
+  if (lottieClock.last) lottieClock.pace = lottieClock.pace * 0.9 + Math.min(200, now - lottieClock.last) * 0.1;
+  lottieClock.last = now;
+  const live = [];
+  mountedLottieNodes.forEach((node) => {
+    if (node.isConnected && node.__lottie && node.__lottieReady && !node.__workerLottie && node.__onScreen !== false) live.push(node);
+  });
+  if (!live.length) { lottieClock.last = 0; return; }
+  const rate = LOTTIE_RATES[lottieClock.level];
+  const moving = lottieClock.cap === Infinity ? live : live.filter((node, index) => node.__priority || index < lottieClock.cap);
+  const due = moving.filter((node) => node.__priority || now - (node.__drawnAt || 0) >= 1000 / rate - 4);
+  const budget = lottieBudgetMs();
+  const began = performance.now();
+  let drawn = 0;
+  for (let i = 0; i < due.length; i += 1) {
+    const node = due[(lottieClock.cursor + i) % due.length];
+    if (drawn && !node.__priority && performance.now() - began > budget) continue;
+    const animation = node.__lottie;
+    const total = Math.max(1, animation.totalFrames || 1);
+    const fps = animation.frameRate || 60;
+    if (node.__startedAt === undefined) node.__startedAt = now;
+    try { animation.goToAndStop((((now - node.__startedAt) / 1000) * fps) % total, true); } catch (_error) { /* destroyed under us */ }
+    node.__drawnAt = now;
+    drawn += 1;
+  }
+  lottieClock.cursor = due.length ? (lottieClock.cursor + drawn) % due.length : 0;
+  lottiePaceAdjust(performance.now() - began, budget, drawn < due.length);
+  lottieClock.frame = requestAnimationFrame(lottieTick);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) startLottieClock(); });
+/* Building a sticker's player is the expensive step, and it is done here, in
+   the frame budget of pumpMotion — synchronously, once its player script and
+   its JSON are in hand. When they are not yet, they are fetched first and the
+   sticker goes back in the queue. (Built after an await instead, every queued
+   sticker started inside one frame's budget and forty were then built back to
+   back: the one-second stall as a pack of moving stickers opened on a Mac.) */
+const lottiePlayersReady = { svg: null, canvas: null, worker: null };
+function lottiePlayersFor(mode) {
+  if (!lottiePlayersReady.svg) return null;
+  if (mode === 'worker') return lottiePlayersReady.worker === null ? null : lottiePlayersReady;
+  return lottiePlayersReady.canvas === null ? null : lottiePlayersReady;
+}
+async function prepareLottieNode(node, mode) {
+  lottiePlayersReady.svg = lottiePlayersReady.svg || await ensureLottie();
+  if (mode === 'worker') lottiePlayersReady.worker = (await ensureLottieWorker()) || false;
+  else lottiePlayersReady.canvas = (await ensureLottieCanvas()) || false;
+  await lottieTextFor(node.dataset.lottieSrc);
+}
+function mountLottieNode(node) {
   if (node.__lottie) {
-    if (node.__onScreen && node.isConnected) node.__lottie.play();
+    startLottieClock();
     return;
   }
   if (node.__lottieLoading) return;
-  node.__lottieLoading = true;
+  const mode = lottieDrawMode();
+  const players = lottiePlayersFor(mode);
+  const text = lottieTextsReady.get(node.dataset.lottieSrc);
+  if (!players || text === undefined) {
+    node.__lottieLoading = true;
+    prepareLottieNode(node, mode)
+      .then(() => {
+        node.__lottieLoading = false;
+        if (node.isConnected && node.__wanted !== false) queueMotion(node, mountLottieNode);
+      })
+      .catch(() => {
+        node.__lottieLoading = false;
+        lottieFallback(node);
+      });
+    return;
+  }
+  if (!node.isConnected || node.__wanted === false) return;
   try {
-    const lottie = await ensureLottie();
-    const text = await lottieTextFor(node.dataset.lottieSrc);
-    if (!node.isConnected || node.__lottie) return;
-    const animation = lottie.loadAnimation({
+    const sized = node.offsetWidth > 0 && node.offsetHeight > 0;
+    if (mode === 'worker' && players.worker && sized) {
+      mountWorkerLottie(node, players.worker, JSON.parse(text));
+      return;
+    }
+    const onCanvas = Boolean(players.canvas && sized);
+    const animation = (onCanvas ? players.canvas : players.svg).loadAnimation({
       container: node,
-      renderer: 'svg',
+      renderer: onCanvas ? 'canvas' : 'svg',
       loop: true,
-      autoplay: node.__onScreen !== false,
+      autoplay: false,
       animationData: JSON.parse(text),
-      rendererSettings: { preserveAspectRatio: 'xMidYMid meet', progressiveLoad: true, hideOnTransparent: true },
+      rendererSettings: onCanvas
+        ? { preserveAspectRatio: 'xMidYMid meet', clearCanvas: true }
+        : { preserveAspectRatio: 'xMidYMid meet', progressiveLoad: true, hideOnTransparent: true },
     });
     node.__lottie = animation;
+    node.__priority = node.classList.contains('sticker-focus-media');
     mountedLottieNodes.add(node);
-    const ready = () => markMediaReady(node);
+    const ready = () => {
+      node.__lottieReady = true;
+      markMediaReady(node);
+      startLottieClock();
+    };
     if (animation.isLoaded) ready(); else animation.addEventListener('DOMLoaded', ready);
   } catch (_error) {
     lottieFallback(node);
-  } finally {
-    node.__lottieLoading = false;
   }
+}
+/* A sticker on the worker's canvas player: it plays itself there, at its own
+   rate, so it never joins the clock. Each one gets a holder of its own inside
+   the sticker's node, because the player clears its container when it is
+   destroyed, and one let go before it has loaded can only be destroyed once it
+   has — by then the node may hold its successor. The worker is trusted once
+   the first sticker it was given has loaded; if that has not happened in a few
+   seconds, it is given up on and the stickers go to the SVG player instead. */
+function mountWorkerLottie(node, workerPlayer, animationData) {
+  const holder = document.createElement('div');
+  holder.className = 'lottie-worker-holder';
+  node.appendChild(holder);
+  const animation = workerPlayer.loadAnimation({
+    container: holder,
+    renderer: 'canvas',
+    loop: true,
+    autoplay: true,
+    animationData,
+    rendererSettings: { preserveAspectRatio: 'xMidYMid meet', clearCanvas: true },
+  });
+  const entry = { animation, holder, loaded: false, dropWhenLoaded: false };
+  node.__lottie = animation;
+  node.__workerEntry = entry;
+  node.__workerLottie = true;
+  mountedLottieNodes.add(node);
+  animation.addEventListener('DOMLoaded', () => {
+    lottieWorkerHealthy = true;
+    entry.loaded = true;
+    if (entry.dropWhenLoaded) {
+      try { animation.destroy(); } catch (_error) { /* already gone */ }
+      holder.remove();
+      return;
+    }
+    node.__lottieReady = true;
+    markMediaReady(node);
+  });
+  if (lottieWorkerHealthy === null) {
+    window.setTimeout(() => {
+      if (lottieWorkerHealthy !== null || entry.loaded) return;
+      lottieWorkerHealthy = false;
+      lottiePlayersReady.worker = false;
+      console.warn('[Stickers] the Lottie worker did not answer; drawing Lottie stickers on the page instead');
+      [...mountedLottieNodes].filter((each) => each.__workerLottie).forEach((each) => {
+        unmountLottieNode(each);
+        if (each.isConnected && each.__wanted !== false) queueMotion(each, mountLottieNode);
+      });
+    }, 4000);
+  }
+}
+
+/* Off screen, a Lottie sticker gives its scene back: a hundred mounted and
+   paused were a hundred SVG trees kept for nothing. Its still shows until it
+   comes back, and coming back is quick — the JSON is kept (lottieTextFor). */
+function releaseLottieAnimation(node) {
+  const animation = node.__lottie;
+  if (!animation) return;
+  const entry = node.__workerEntry;
+  node.__workerEntry = null;
+  if (node.__workerLottie && entry) {
+    if (!entry.loaded && lottieWorkerHealthy !== false) {
+      entry.dropWhenLoaded = true;
+      entry.holder.style.display = 'none';
+      return;
+    }
+    try { animation.destroy(); } catch (_error) { /* already stopped */ }
+    entry.holder.remove();
+    return;
+  }
+  try { animation.destroy(); } catch (_error) { /* already stopped */ }
+}
+function unmountLottieNode(node) {
+  if (!node.__lottie) return;
+  releaseLottieAnimation(node);
+  node.__workerLottie = false;
+  node.__lottie = null;
+  node.__lottieReady = false;
+  mountedLottieNodes.delete(node);
+  node.classList.remove('is-ready');
+  node.closest(MOTION_HOLDERS)?.classList.remove('motion-ready');
 }
 function sweepLottieNodes() {
   mountedLottieNodes.forEach((node) => {
     if (node.isConnected) return;
-    try { node.__lottie?.destroy(); } catch (_error) { /* already stopped */ }
+    releaseLottieAnimation(node);
+    node.__workerLottie = false;
     node.__lottie = null;
+    node.__lottieReady = false;
     mountedLottieNodes.delete(node);
     lottieObserver?.unobserve(node);
   });
@@ -1969,8 +2289,11 @@ const STICKER_VIRTUAL_FAVOURITE = '__favourite__';
 function stickerCellMediaHtml(record, { eager = false } = {}) {
   const animated = typeof stickerIsAnimated === 'function' && stickerIsAnimated(record);
   if (!animated) return stickerMediaHtml(stickerThumbUrl(record), record.kind, 'chat-sticker-thumb', { lazy: true, eager });
+  /* Stills of the first screenfuls are drawn with the grid; the rest as they
+     near the view, like any thumbnail. Ninety of them decoded at once was a
+     one-second stall on a Mac each time a big pack of moving stickers opened. */
   const still = record.thumb instanceof Blob
-    ? `<img class="chat-sticker-still" src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async">`
+    ? stickerMediaHtml(stickerThumbUrl(record), 'image', 'chat-sticker-still', { lazy: true, eager })
     : '';
   return still + stickerMediaHtml(stickerObjectUrl(record), record.kind, 'chat-sticker-thumb is-motion', { lazy: true });
 }
@@ -2186,6 +2509,7 @@ window.__stickerProbe = {
   makePack: (title) => buildPackFromSelection(title),
   telegramName: (text) => telegramPackName(text),
   setCover: (packId, stickerId) => setPackCover(packId, stickerId),
+  lottieClock: () => ({ rate: LOTTIE_RATES[lottieClock.level], cap: lottieClock.cap, pace: Math.round(lottieClock.pace * 10) / 10, mounted: mountedLottieNodes.size, worker: [...mountedLottieNodes].filter((node) => node.__workerLottie).length, canvas: document.querySelectorAll('.chat-lottie > canvas').length, workerHealthy: lottieWorkerHealthy, mode: lottieDrawMode() }),
   coverUrl: (packId) => packCoverUrl(chatState.stickerPacks.find((pack) => pack.id === packId)),
   importTelegram: (text) => importTelegramStickerPack(text),
   deleteSelected: () => deleteSelectedStickers(),

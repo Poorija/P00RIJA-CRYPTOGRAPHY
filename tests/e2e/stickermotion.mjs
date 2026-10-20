@@ -199,6 +199,10 @@ try {
     const video = document.querySelector('#chatStickerGrid video.is-motion');
     if (!video) return null;
     for (let i = 0; i < 30 && !(video.duration > 0); i += 1) await new Promise((r) => setTimeout(r, 100));
+    /* Whether this engine plays the clip at all: Playwright's WebKit has no
+       WebM decoder, so its clock never leaves zero there. */
+    let playsAtAll = false;
+    for (let i = 0; i < 30 && !playsAtAll; i += 1) { playsAtAll = video.currentTime > 0.05; await new Promise((r) => setTimeout(r, 100)); }
     const proto = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
     const frozenAt = Math.max(0, video.duration - 0.05);
     let sentBackAfter = null;
@@ -210,18 +214,33 @@ try {
     });
     await new Promise((r) => setTimeout(r, 1200));
     delete video.currentTime;
-    /* And a plain end, with the browser's own loop off: started again at once. */
+    /* And with the browser's own loop off, over three plays of the clip: it
+       comes back to the start each time, and never sits on its last frame for
+       more than a moment. (Chromium fires "ended"; WebKit stops the clock on
+       the last frame without it — either way the sticker must go round.) */
     video.loop = false;
-    let endedAt = 0;
-    let gap = null;
-    video.addEventListener('ended', () => { endedAt = performance.now(); }, { once: true });
-    const onTime = () => { if (endedAt && video.currentTime < 0.3 && !video.paused) { gap = Math.round(performance.now() - endedAt); video.removeEventListener('timeupdate', onTime); } };
-    video.addEventListener('timeupdate', onTime);
-    await new Promise((r) => setTimeout(r, (video.duration || 1) * 1000 + 1200));
+    let wraps = 0;
+    let longestHold = 0;
+    let previous = video.currentTime;
+    let heldSince = performance.now();
+    const stop = performance.now() + Math.max(2000, (video.duration || 1) * 3000 + 600);
+    await new Promise((resolve) => {
+      const sample = (now) => {
+        const time = video.currentTime;
+        if (time !== previous) {
+          if (previous > video.duration * 0.6 && time < video.duration * 0.3) wraps += 1;
+          longestHold = Math.max(longestHold, now - heldSince);
+          heldSince = now;
+          previous = time;
+        }
+        if (now < stop) requestAnimationFrame(sample); else resolve();
+      };
+      requestAnimationFrame(sample);
+    });
     video.loop = true;
-    return { sentBackAfter, gap };
+    return { sentBackAfter, wraps, longestHold: Math.round(longestHold), playsAtAll, duration: video.duration };
   });
-  if (replay) check('a video sticker stuck on its last frame goes back to the start within a few frames, and one that ends starts again at once', replay.sentBackAfter !== null && replay.sentBackAfter < 400 && replay.gap !== null && replay.gap < 400, JSON.stringify(replay));
+  if (replay) check('a video sticker stuck on its last frame goes back to the start within a few frames, and one that ends goes round again at once', replay.sentBackAfter !== null && replay.sentBackAfter < 400 && (!replay.playsAtAll || (replay.wraps >= 2 && replay.longestHold < 400)), JSON.stringify(replay));
 
   const covers = await ARIF.evaluate(async () => {
     const pack = chatState.stickerPacks[0];
@@ -261,7 +280,7 @@ try {
     renderStickerPanel();
     await new Promise((r) => setTimeout(r, 1500));
     const cover = document.querySelector(`#chatStickerTabs [data-chat-sticker-pack="${pack.id}"] .sticker-cover`);
-    return { motion: Boolean(cover?.querySelector('.sticker-cover-motion')), svg: Boolean(cover?.querySelector('svg')), ready: Boolean(cover?.classList.contains('motion-ready')) };
+    return { motion: Boolean(cover?.querySelector('.sticker-cover-motion')), svg: Boolean(cover?.querySelector('svg, canvas')), ready: Boolean(cover?.classList.contains('motion-ready')) };
   });
   check('a moving sticker made the cover moves on the pack\'s tab', movingCover.motion && movingCover.svg && movingCover.ready, JSON.stringify(movingCover));
 
@@ -303,8 +322,9 @@ try {
     setStickerPanelVisible(true, { shelf: 'stickers' });
     renderStickerPanel();
     await new Promise((r) => setTimeout(r, 2500));
-    const mounted = document.querySelectorAll('#chatStickerGrid .chat-lottie svg').length;
-    const registered = () => (typeof lottie.getRegisteredAnimations === 'function' ? lottie.getRegisteredAnimations().length : -1);
+    const mounted = document.querySelectorAll('#chatStickerGrid .chat-lottie svg, #chatStickerGrid .chat-lottie canvas').length;
+    /* Whichever player draws them, what is mounted is what is kept running. */
+    const registered = () => window.__stickerProbe.lottieClock().mounted;
     const whileShown = registered();
     chatState.stickerActivePackId = chatState.stickerPacks[0].id;
     renderStickerPanel();
@@ -361,7 +381,7 @@ try {
     const opened = {
       open: Boolean(host),
       media: Boolean(host?.querySelector('.sticker-focus-media')),
-      svg: Boolean(host?.querySelector('.sticker-focus-media svg')),
+      svg: Boolean(host?.querySelector('.sticker-focus-media svg, .sticker-focus-media canvas')),
       reactions: host?.querySelectorAll('.sticker-focus-reactions [data-focus-react]').length || 0,
       actions: host?.querySelectorAll('[data-focus-act]').length || 0,
       labelled: [...(host?.querySelectorAll('[data-focus-act] span') || [])].every((s) => s.textContent.trim()),

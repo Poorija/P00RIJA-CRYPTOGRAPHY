@@ -189,12 +189,13 @@ const tgs = await A.evaluate(() => ({
   cells: document.querySelectorAll('[data-chat-sticker-send]').length,
   lottieNodes: document.querySelectorAll('.chat-lottie').length,
   mounted: document.querySelectorAll('.chat-lottie[data-lottie-mounted]').length,
-  svg: document.querySelectorAll('.chat-lottie svg').length,
+  /* Drawn as SVG on the page, or on a canvas by the worker's player. */
+  svg: document.querySelectorAll('.chat-lottie svg, .chat-lottie canvas').length,
   fallback: document.querySelectorAll('.chat-lottie.is-fallback').length,
   lottieLoaded: typeof window.lottie !== 'undefined',
 }));
 check('.tgs gunzips into a lottie sticker', tgs.lottieNodes >= 1, JSON.stringify(tgs));
-check('lottie-web lazy-loads and renders an SVG', tgs.lottieLoaded && tgs.svg >= 1 && tgs.fallback === 0, JSON.stringify(tgs));
+check('lottie-web lazy-loads and draws the animation', tgs.lottieLoaded && tgs.svg >= 1 && tgs.fallback === 0, JSON.stringify(tgs));
 
 console.log('\n===== 6. sending an animated sticker =====');
 await A.evaluate(() => [...document.querySelectorAll('[data-chat-sticker-send]')].at(-1)?.click());
@@ -203,7 +204,7 @@ await B.waitForTimeout(5000);
 const bTgs = await B.evaluate(() => ({
   bubbles: document.querySelectorAll('.chat-sticker-bubble').length,
   lottie: document.querySelectorAll('.chat-sticker-bubble .chat-lottie').length,
-  svg: document.querySelectorAll('.chat-sticker-bubble .chat-lottie svg').length,
+  svg: document.querySelectorAll('.chat-sticker-bubble .chat-lottie svg, .chat-sticker-bubble .chat-lottie canvas').length,
 }));
 check('animated sticker arrives and animates on the far side', bTgs.lottie >= 1 && bTgs.svg >= 1, JSON.stringify(bTgs));
 

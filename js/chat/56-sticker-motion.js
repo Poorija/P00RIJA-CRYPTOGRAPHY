@@ -165,19 +165,43 @@ function watchLoopingVideos() {
     loopWatchFrame = 0;
     loopingVideos.forEach((video) => {
       if (!video.isConnected) { loopingVideos.delete(video); return; }
-      if (!videoShouldMove(video)) { video.__movedAt = now; return; }
-      if (video.paused || video.ended) { resumeStickerVideo(video); video.__movedAt = now; return; }
+      if (!videoShouldMove(video)) { video.__movedAt = now; video.__restartedAt = 0; return; }
       const time = video.currentTime;
       if (time !== video.__lastTime) {
         video.__lastTime = time;
         video.__movedAt = now;
+        video.__restartedAt = 0;
         return;
       }
-      const nearEnd = video.duration > 0 && video.duration - time < 0.35;
-      if (video.readyState >= 2 && now - (video.__movedAt || now) > (nearEnd ? 80 : 700)) {
+      /* Sent back to the start and still not moving: WebKit cannot seek in a
+         WebM that carries no index (many sticker files are written that way),
+         so the seek lands nowhere and the sticker stays frozen. Loading the
+         file again starts it from the top, which always works; not more than
+         once in a few seconds, so a file that will not play cannot spin. */
+      if (video.__restartedAt && now - video.__restartedAt > 600 && now - (video.__reloadedAt || 0) > 2500) {
+        video.__reloadedAt = now;
+        video.__restartedAt = 0;
+        video.__movedAt = now;
+        try { video.load(); } catch (_error) { /* gone */ }
+        video.play?.().catch(() => {});
+        return;
+      }
+      if (video.paused || video.ended) {
+        resumeStickerVideo(video);
+        video.__movedAt = now;
+        if (!video.__restartedAt) video.__restartedAt = now;
+        return;
+      }
+      /* Its clock is a few frames from the end and has not moved for a quarter
+         of a second: stopped there. Not sooner — WebKit moves the clock in
+         steps of up to a tenth of a second, and a sticker taken back early
+         loses the end of its animation. */
+      const nearEnd = video.duration > 0 && video.duration - time < 0.15;
+      if (video.readyState >= 2 && now - (video.__movedAt || now) > (nearEnd ? 250 : 1000)) {
         video.__movedAt = now;
         if (nearEnd) video.currentTime = 0;
         video.play?.().catch(() => {});
+        if (!video.__restartedAt) video.__restartedAt = now;
       }
     });
     if (loopingVideos.size) loopWatchFrame = requestAnimationFrame(tick);

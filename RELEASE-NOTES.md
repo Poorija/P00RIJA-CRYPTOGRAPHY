@@ -1,10 +1,92 @@
-# P00RIJA Cryptography 2.98.62
+# P00RIJA Cryptography 2.98.63
 
-Version 2.98.62 · build chat-v155
+Version 2.98.63 · build chat-v156
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## استیکرهای متحرک روان روی دسکتاپ · Smooth animated stickers on the desktop
+
+- **مشکل**: روی مک، در نسخهٔ نیتیو و PWA، با چند پک متحرک یا پک‌های سنگین، باز شدن پنل
+  کند بود و برنامه مدام گیر می‌کرد. اندازه‌گیری روی همان موتور WebKit مک نشان داد: با یک
+  پک Lottie که ۴۰ استیکرش هم‌زمان روی صفحه بود، صفحه فقط ۲۸ فریم در ثانیه رسم می‌کرد و
+  اسکرول پنل ۲۲ فریم بود. علت: پنجرهٔ دسکتاپ سه چهار برابر گوشی استیکر نشان می‌دهد، و
+  هر استیکر Lottie یک صحنهٔ SVG بود که شصت بار در ثانیه و همه با هم دوباره رسم می‌شد.
+- **حالا**:
+  - **رسم روی canvas**: استیکرهای Lottie روی canvas رسم می‌شوند، نه SVG. در Chrome و
+    Firefox این کار روی یک worker و در یک هستهٔ دیگر پردازنده انجام می‌شود و صفحه فقط
+    نتیجه را نشان می‌دهد. در WebKit، یعنی Safari، آیفون و پنجرهٔ نسخهٔ نیتیو مک، روی خود
+    صفحه انجام می‌شود، چون WebKit هر فریم canvasِ worker را از مسیر صفحه برمی‌گرداند و
+    اندازه‌گیری نشان داد کندتر است.
+  - **یک ساعت مشترک با سقف زمانی**: همهٔ استیکرها با یک ساعت مشترک و در سقف چند
+    میلی‌ثانیه از هر فریم رسم می‌شوند. هر استیکر همیشه با سرعت واقعی خودش جلو می‌رود؛
+    اگر کار زیاد شود، استیکرها کمتر بار در ثانیه رسم می‌شوند (۶۰، بعد ۳۰، ۲۰ و ۱۵) به‌جای
+    آن‌که خود صفحه فریم از دست بدهد. وقتی جا باز شد، دوباره بالا می‌روند.
+  - **ساخت در سقف زمانی هر فریم**: ساختن هر استیکر Lottie، که سنگین‌ترین مرحله است، در
+    همان سقف زمانی هر فریم انجام می‌شود. پیش از این همه با هم ساخته می‌شدند و همین یک
+    ثانیه گیر می‌ساخت. ویدیوها هم حداکثر دوتا در هر فریم شروع می‌شوند.
+  - **وقفه در هنگام اسکرول**: وقتی پنل اسکرول می‌شود، شروع استیکرهای سنگین صبر می‌کند و
+    تصویر ثابتشان خانه را پر می‌کند. به محض ایستادن اسکرول، شروع می‌شوند.
+  - **آزاد کردن بیرون از دید**: استیکری که از دید خارج شود، صحنه‌اش را آزاد می‌کند.
+  - **تصویرهای ثابت تنبل**: تصویرهای ثابت استیکرهای متحرک، به‌جز چند ردیف اول، وقتی
+    نزدیک دید شوند بار می‌شوند، نه همه با هم.
+  - **آزاد شدن دیرتر نشانی‌ها**: نشانی تصویرها کمی دیرتر آزاد می‌شود، تا تصویر یا
+    ویدیویی که هنوز روی صفحه است خطا ندهد و پنل همهٔ پک‌ها را از نو بار نکند.
+  - **نتیجه روی همان موتور WebKit**: با ۴۱ استیکر Lottie متحرک، ۶۰ فریم در ثانیه (قبلاً
+    ۲۸)؛ اسکرول ۵۵ فریم (قبلاً ۲۲)؛ هیچ مکث بالای ربع ثانیه در باز شدن پنل، اسکرول یا
+    جابه‌جایی بین پک‌ها.
+- **ویدیوی استیکر روی WebKit**: WebKit در فایل WebM که فهرست ندارد نمی‌تواند به عقب
+  برگردد. اگر استیکری بعد از برگشت به اول هم حرکت نکند، فایل دوباره بار می‌شود. توقف در
+  فریم آخر هم دیگر زودتر از موعد تشخیص داده نمی‌شود، چون ساعت ویدیو در WebKit پله‌پله جلو
+  می‌رود و تشخیص زودهنگام انتهای انیمیشن را می‌برید.
+- **کتابخانه**: دو نسخهٔ canvas از همان lottie-web (۵.۱۳.۰، با مجوز MIT) کنار نسخهٔ SVG
+  اضافه شد. هر دو فقط وقتی لازم شوند بار می‌شوند و برای کار آفلاین هم در کش برنامه‌اند.
+- **The problem**: on a Mac, in the native app and the PWA, with several moving packs
+  or heavy ones, the panel was slow to open and the app kept hanging. Measured in
+  the same WebKit engine: with a Lottie pack showing 40 stickers at once, the page drew
+  only 28 frames a second, and scrolling the panel 22. The cause: a desktop window
+  shows three or four times the stickers a phone does, and each Lottie sticker was
+  an SVG scene redrawn sixty times a second, all of them at once.
+- **Now**:
+  - **Drawn on a canvas**: Lottie stickers are drawn on a canvas, not as SVG. In
+    Chrome and Firefox that happens in a worker, on another core, and the page only
+    shows the result. In WebKit (Safari, the iPhone, and the native app's window on
+    macOS) it happens on the page itself, because WebKit hands each frame of a
+    worker's canvas back through the page, and measured, that was slower.
+  - **One clock, with a budget**: every sticker is drawn by one shared clock, within a
+    few milliseconds of each frame. Each sticker always moves at its own true speed;
+    when the work is too much, the stickers are drawn fewer times a second (60, then
+    30, 20, and 15) rather than the page losing frames. When there is room again,
+    they go back up.
+  - **Built within the frame budget**: building each Lottie sticker, the heaviest
+    step, happens within the same per-frame budget. Before, they were all built at
+    once, which made a one-second hang. Videos start at most two to a frame.
+  - **Waiting while scrolling**: while the panel is scrolled, heavy stickers wait to
+    start and their stills fill the cells. They start the moment the scrolling stops.
+  - **Let go off screen**: a sticker that leaves the view gives up its scene.
+  - **Lazy stills**: the stills of moving stickers, apart from the first rows, load
+    as they near the view, not all at once.
+  - **Picture addresses let go a little later**: so a picture or video still on the
+    page does not fail, and the panel does not reload every pack.
+  - **Results, in the same WebKit engine**: with 41 moving Lottie stickers, 60 frames
+    a second (28 before); scrolling at 55 (22 before); and no pause of a quarter of a
+    second while the panel opens, scrolls, or switches between packs.
+- **Video stickers in WebKit**: WebKit cannot seek back in a WebM file that carries no
+  index. A sticker that does not move after being sent back to the start is loaded
+  again. A stop on the last frame is no longer called too early either: WebKit moves
+  a video's clock in steps, and calling it early cut off the end of the animation.
+- **Library**: two canvas builds of the same lottie-web (5.13.0, MIT licence) are
+  added beside the SVG one. Both load only when needed, and both are in the app's
+  cache for offline use.
+
+---
+
+# P00RIJA Cryptography 2.98.62
+
+Version 2.98.62 · build chat-v155
 
 ---
 

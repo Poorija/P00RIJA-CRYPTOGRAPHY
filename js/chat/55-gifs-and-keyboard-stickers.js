@@ -914,8 +914,8 @@ function renderGifShelf() {
     </div>`;
     return;
   }
-  grid.innerHTML = records.map((record) => `<button type="button" class="chat-gif-cell ${gifSelection.has(record.id) ? 'is-picked' : ''}" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
-      ${record.thumb instanceof Blob ? `<img class="chat-gif-still" src="${app().escapeHTML(stickerThumbUrl(record))}" alt="" draggable="false" decoding="async">` : ''}
+  grid.innerHTML = records.map((record, index) => `<button type="button" class="chat-gif-cell ${gifSelection.has(record.id) ? 'is-picked' : ''}" data-chat-gif-send="${app().escapeHTML(record.id)}" title="GIF">
+      ${record.thumb instanceof Blob ? stickerMediaHtml(stickerThumbUrl(record), 'image', 'chat-gif-still', { lazy: true, eager: index < 24 }) : ''}
       ${stickerMediaHtml(stickerObjectUrl(record), 'gif', record.thumb instanceof Blob ? 'chat-gif-thumb is-motion' : 'chat-gif-thumb', { lazy: true })}
       ${picking ? '<span class="chat-sticker-tick chat-gif-tick"><i class="fas fa-check"></i></span>' : ''}
       ${managing ? `<span class="chat-gif-remove" data-chat-gif-remove="${app().escapeHTML(record.id)}" role="button" tabindex="0"

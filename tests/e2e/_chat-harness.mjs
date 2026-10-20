@@ -21,7 +21,7 @@
  *
  * Underscore-prefixed: tests/e2e/run-all.mjs does not run it. */
 
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -52,9 +52,33 @@ export const MB = 1024 * 1024;
    The suites that test what happens when permission is REFUSED
    (mediaerrors.mjs, lockdefence.mjs, pushrenew.mjs, swnotify.mjs) launch their
    own browser and are unaffected. */
-export const browser = await chromium.launch({
-  args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
-});
+/* E2E_ENGINE=webkit runs a suite in WebKit instead: the engine of Safari, of
+   every browser on an iPhone, and of the native app's window on macOS, where
+   Chromium's behaviour (and its speed) proves nothing. */
+export const ENGINE = process.env.E2E_ENGINE === 'webkit' ? 'webkit' : 'chromium';
+export const browser = ENGINE === 'webkit'
+  ? await webkit.launch()
+  : await chromium.launch({
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+  });
+/* WebKit's ordinary contexts are private sessions, and a private session's
+   IndexedDB refuses to store a Blob — every sticker. So under WebKit each app
+   gets a context with a profile on disk, closed with the browser. */
+const webkitContexts = [];
+if (ENGINE === 'webkit') {
+  const closeBrowser = browser.close.bind(browser);
+  browser.close = async () => {
+    for (const ctx of webkitContexts.splice(0)) await ctx.close().catch(() => {});
+    await closeBrowser();
+  };
+}
+async function newAppContext(options) {
+  if (ENGINE !== 'webkit') return browser.newContext(options);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorija-webkit-'));
+  const ctx = await webkit.launchPersistentContext(dir, options);
+  webkitContexts.push(ctx);
+  return ctx;
+}
 
 export const waitFor = async (page, fn, { timeoutMs = 90000, arg = null } = {}) => {
   const deadline = Date.now() + timeoutMs;
@@ -127,7 +151,7 @@ export function makeSparseFile(name, bytes) {
    the native shell's window.__TAURI__, typically — with `initArg` as its
    argument. */
 export async function openApp(tag, { duplicateChunk = false, origin = BASE, relay = RELAY, context = {}, init = null, initArg = null } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, permissions: ['microphone', 'camera'], ...context });
+  const ctx = await newAppContext({ viewport: { width: 1360, height: 900 }, ignoreHTTPSErrors: true, ...(ENGINE === 'webkit' ? {} : { permissions: ['microphone', 'camera'] }), ...context });
   if (init) await ctx.addInitScript(init, initArg);
   /* The chat module wires its console probes only when a page asks for them
      before load — shipping them unconditionally would be a bypass rather than

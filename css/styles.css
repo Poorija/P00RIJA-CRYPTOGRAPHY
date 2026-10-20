@@ -28310,3 +28310,9 @@ html body #mainApp #content-chat .chat-sticker-tab > span { width: 100%; height:
   }
   html body #mainApp #content-chat .chat-sticker-bubble .chat-sticker-body { cursor: zoom-in; }
 }
+
+/* A Lottie sticker drawn by the worker's canvas player (js/chat/16-…): its
+   holder fills the sticker's box, and so does the canvas the player puts in it. */
+.lottie-worker-holder { width: 100%; height: 100%; }
+.chat-lottie canvas,
+.lottie-worker-holder canvas { display: block; width: 100% !important; height: 100% !important; }
