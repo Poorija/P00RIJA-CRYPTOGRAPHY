@@ -219,9 +219,12 @@ const STICKER_IMAGE_EXT = /\.(webp|png|gif|jpe?g|avif|svg)$/i;
 const STICKER_VIDEO_EXT = /\.(webm|mp4)$/i;
 const STICKER_LOTTIE_EXT = /\.(tgs|json)$/i;
 const STICKER_ARCHIVE_EXT = /\.(zip|wastickers)$/i;
+/* Three builds of lottie-web 5.13.0 (MIT), the latest release, kept at one
+   version: the SVG player (stills, and Lottie anywhere a canvas cannot be
+   had), the canvas player on the page, and the canvas player in a worker —
+   see lottieDrawMode. Only the worker build carries the expression engine;
+   lottieDataFrom takes every expression out before any player sees one. */
 const LOTTIE_SCRIPT_URL = 'vendor/lottie/lottie_light.min.js';
-/* lottie-web's canvas player that draws in a worker (MIT, the same project
-   as the SVG player above, 5.13.0): see ensureLottieWorker. */
 const LOTTIE_WORKER_SCRIPT_URL = 'vendor/lottie/lottie_canvas_worker.min.js';
 const LOTTIE_CANVAS_SCRIPT_URL = 'vendor/lottie/lottie_light_canvas.min.js';
 /* The saved-GIF library (55-gifs-and-keyboard-stickers.js) is one record in

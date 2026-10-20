@@ -1,10 +1,34 @@
-# P00RIJA Cryptography 2.98.65
+# P00RIJA Cryptography 2.98.66
 
-Version 2.98.65 · build chat-v158
+Version 2.98.66 · build chat-v159
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## lottie-web به آخرین نسخه · lottie-web at its latest release
+
+- آخرین نسخهٔ منتشرشدهٔ lottie-web، یعنی ۵.۱۳.۰، با رجیستری npm بررسی شد. دو نسخهٔ
+  canvas از قبل ۵.۱۳.۰ بودند، ولی پخش‌کنندهٔ SVG هنوز ۵.۱۲.۲ بود. حالا هر سه یک نسخه‌اند.
+  این پخش‌کننده تصویرهای ثابت را می‌سازد و هر جا canvas نباشد استیکرهای Lottie را پخش
+  می‌کند. نسخهٔ ۵.۱۳.۰ ماتریس تبدیل‌های ثابت را دوباره حساب نمی‌کند (بهبود محسوس
+  سرعت)، کش گرادیان‌ها را درست باطل می‌کند و در worker هم از resetSegments پشتیبانی
+  دارد. فایل‌ها همان بستهٔ رسمی npm هستند و امضای آن با رجیستری یکی است.
+- The latest lottie-web release, 5.13.0, was checked against the npm registry. The
+  two canvas builds were already 5.13.0, but the SVG player was still 5.12.2. All
+  three are one version now. That player makes the stills and plays Lottie stickers
+  wherever a canvas cannot be had. 5.13.0 no longer recomputes static transform
+  matrices (a noticeable speed-up), invalidates gradient caches correctly, and
+  supports resetSegments in the worker. The files are the official npm package, and
+  its integrity hash matches the registry's.
+
+---
+
+# P00RIJA Cryptography 2.98.65
+
+Version 2.98.65 · build chat-v158
 
 ---
 
