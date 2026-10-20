@@ -17,12 +17,15 @@
  *   - a message ALI sends, and one SARA sends, are on both devices;
  *   - an edit, a reaction and a deleted message on ALI are on ALI2 too;
  *   - a 20 MB file ALI has is fetched by ALI2 on a click, device to device
- *     (nothing of it through the relay), whole, and kept on ALI2.
+ *     (nothing of it through the relay), whole, and kept on ALI2 — and what
+ *     crosses the channel is encrypted with a key only the account can open,
+ *     not the file as it is.
  *
  *   ALI2 away:
  *   - ALI sends, SARA sends, ALI edits; then ALI goes away as well;
  *   - the relay holds only what ALI2 needs to catch up (no file bytes, and
- *     nothing at all for a device that is online);
+ *     nothing at all for a device that is online), and never a message meant
+ *     to disappear — that goes to a sibling only while it is here;
  *   - ALI2 comes back with ALI still gone and catches up from the relay;
  *   - and once it has, the relay holds nothing more for it.
  *
@@ -150,6 +153,14 @@ try {
     const key = chatState.activeConversationId;
     const entry = { id: `big-${Date.now()}`, type: 'file', direction: 'out', name: 'big.bin', mime: 'application/octet-stream', size, createdAt: new Date().toISOString(), status: 'sent' };
     const blob = new Blob([bytes], { type: entry.mime });
+    window.__bigHead = Array.from(bytes.subarray(0, 32)).join(',');
+    /* What actually crosses the data channel, as ALI sends it. */
+    window.__channelPieces = [];
+    const realSend = RTCDataChannel.prototype.send;
+    RTCDataChannel.prototype.send = function send(data) {
+      if (data instanceof ArrayBuffer && window.__channelPieces.length < 3) window.__channelPieces.push({ size: data.byteLength, head: Array.from(new Uint8Array(data, 0, 32)).join(',') });
+      return realSend.call(this, data);
+    };
     await persistMessageMedia(key, entry, blob);
     entry.downloadUrl = URL.createObjectURL(blob);
     appendHistory(key, entry);
@@ -177,11 +188,31 @@ try {
   }, made.id);
   check('ALI2 fetches the 20 MB file on a click, whole, and keeps it', fetched && landed?.size === made.size && landed.digest === made.digest && landed.url, JSON.stringify({ ...landed, seconds: Math.round((Date.now() - started) / 1000) }));
   check('and none of it came through the relay', landed && landed.relayFrames <= 2, JSON.stringify(landed));
+  const wire = await ALI.evaluate(() => ({ pieces: window.__channelPieces, head: window.__bigHead }));
+  check('what crossed the channel is encrypted, not the file itself', wire.pieces.length > 0 && wire.pieces.every((piece) => piece.head !== wire.head && piece.size === 65536 + 16), JSON.stringify({ pieces: wire.pieces.map((piece) => piece.size), sameAsFile: wire.pieces.some((piece) => piece.head === wire.head) }));
 
   section('ALI2 away');
   await ALI2.evaluate(() => disconnectChat());
   await sleep(2500);
   check('the relay holds nothing for a device while it is online', heldFiles(stacks.a.dir).every((file) => file.items === 0), JSON.stringify(heldFiles(stacks.a.dir)));
+  /* A self-destruct message, sent while ALI2 is away: only ever live. */
+  await ALI.evaluate(() => {
+    window.__heldTimed = 0;
+    window.__liveTimed = 0;
+    const real = window.sendDeviceBundles;
+    window.sendDeviceBundles = (bundles, options = {}) => {
+      for (const bundle of bundles || []) {
+        const timed = (bundle.entries || []).filter((entry) => Number(entry.timerSeconds || 0) > 0 || entry.expiresAt).length;
+        if (options.hold) window.__heldTimed += timed; else window.__liveTimed += timed;
+      }
+      return real(bundles, options);
+    };
+    chatState.timerSeconds = 3600;
+  });
+  await sendText(ALI, 'away-timed');
+  await sleep(1500);
+  const timed = await ALI.evaluate(() => { chatState.timerSeconds = 0; return { held: window.__heldTimed, live: window.__liveTimed }; });
+  check('a message meant to disappear is never held for an away device', timed.held === 0 && timed.live >= 1, JSON.stringify(timed));
   await sendText(ALI, 'away-out');
   await sendText(SARA, 'away-in');
   await hasText(ALI, fpSara, 'away-in');

@@ -236,8 +236,19 @@ const SIBLING_DIR = process.env.CHAT_SIBLING_DIR || path.join(path.dirname(OFFLI
 const SIBLING_ITEM_MAX_CHARS = 96 * 1024;
 const SIBLING_ACCOUNT_MAX_CHARS = 4 * 1024 * 1024;
 const SIBLING_ACCOUNT_MAX_ITEMS = 2000;
-const SIBLING_TTL_MS = BEACON_TTL_MS;
+const SIBLING_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const SIBLING_DELIVERY_BATCH = 40;
+/* Across every account on this relay: past it, nothing more is held (the
+   device then catches up from a sibling directly), and the cache keeps no
+   more than this much in memory however many accounts are busy. */
+const SIBLING_GLOBAL_MAX_CHARS = Number(process.env.CHAT_SIBLING_MAX_BYTES || 256 * 1024 * 1024);
+const SIBLING_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+/* Up here, not beside the functions that use them: the mailboxes load (and
+   count what is held) before the rest of this file has run. */
+const siblingHeldCache = new Map();
+const siblingHeldChars = new Map();
+let siblingCachedChars = 0;
+let siblingTotalChars = 0;
 const beaconCache = new Map();
 
 const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'server-policy.json');
@@ -7051,12 +7062,45 @@ function dropBeacons(fingerprint) {
  *     stored for it;
  *   - at most 4 MB and 2,000 items per account, oldest dropped first, and a
  *     device whose items were dropped is told so (it then asks a sibling for
- *     what it missed, device to device, as before);
- *   - thirty days at most, the beacon's own lifetime.
+ *     what it missed, device to device, as before); 256 MB across the whole
+ *     relay (CHAT_SIBLING_MAX_BYTES), past which nothing more is held; no more
+ *     than 32 MB of it in memory at once;
+ *   - fourteen days at most;
+ *   - and never a message meant to disappear (on a timer, or view-once): the
+ *     client keeps those to the live copy alone.
  * ------------------------------------------------------------------ */
-const siblingHeldCache = new Map();
 function siblingHeldPath(fingerprint) {
   return path.join(SIBLING_DIR, `${fingerprint}.json`);
+}
+function siblingStoreChars(store) {
+  return store.items.reduce((sum, item) => sum + (item.envelope?.length || 0), 0);
+}
+/* What every account holds, read once from the files at start. */
+function countSiblingHeld() {
+  siblingHeldChars.clear();
+  siblingTotalChars = 0;
+  try {
+    for (const name of fs.readdirSync(SIBLING_DIR)) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      const size = fs.statSync(path.join(SIBLING_DIR, name)).size;
+      siblingHeldChars.set(name.slice(0, -5), size);
+      siblingTotalChars += size;
+    }
+  } catch (_error) { /* nothing held yet */ }
+}
+function cacheSiblingHeld(fingerprint, store) {
+  const previous = siblingHeldCache.get(fingerprint);
+  if (previous) siblingCachedChars -= previous.__chars || 0;
+  siblingHeldCache.delete(fingerprint);
+  store.__chars = siblingStoreChars(store);
+  siblingHeldCache.set(fingerprint, store);
+  siblingCachedChars += store.__chars;
+  for (const [key, cached] of siblingHeldCache) {
+    if (siblingCachedChars <= SIBLING_CACHE_MAX_CHARS || siblingHeldCache.size <= 1) break;
+    if (key === fingerprint) continue;
+    siblingHeldCache.delete(key);
+    siblingCachedChars -= cached.__chars || 0;
+  }
 }
 function loadSiblingHeld(fingerprint) {
   if (siblingHeldCache.has(fingerprint)) return siblingHeldCache.get(fingerprint);
@@ -7071,24 +7115,33 @@ function loadSiblingHeld(fingerprint) {
     .filter((item) => item && typeof item.id === 'string' && typeof item.envelope === 'string' && Number(item.at) > cutoff)
     .map((item) => ({ ...item, pending: (Array.isArray(item.pending) ? item.pending : []).filter((deviceId) => devices.has(deviceId)) }))
     .filter((item) => item.pending.length);
-  siblingHeldCache.set(fingerprint, store);
-  if (siblingHeldCache.size > 2000) siblingHeldCache.delete(siblingHeldCache.keys().next().value);
+  cacheSiblingHeld(fingerprint, store);
   return store;
 }
 function saveSiblingHeld(fingerprint, store) {
-  siblingHeldCache.set(fingerprint, store);
+  cacheSiblingHeld(fingerprint, store);
+  const before = siblingHeldChars.get(fingerprint) || 0;
   try {
     if (!store.items.length && !Object.keys(store.overflow).length) {
+      siblingHeldChars.delete(fingerprint);
+      siblingTotalChars -= before;
       fs.unlinkSync(siblingHeldPath(fingerprint));
       return;
     }
-    writeJsonAtomic(siblingHeldPath(fingerprint), store);
+    const { __chars: _chars, ...onDisk } = store;
+    writeJsonAtomic(siblingHeldPath(fingerprint), onDisk);
+    siblingHeldChars.set(fingerprint, store.__chars);
+    siblingTotalChars += store.__chars - before;
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn('[Siblings] could not be written:', error.message);
   }
 }
 function dropSiblingHeld(fingerprint) {
+  const cached = siblingHeldCache.get(fingerprint);
+  if (cached) siblingCachedChars -= cached.__chars || 0;
   siblingHeldCache.delete(fingerprint);
+  siblingTotalChars -= siblingHeldChars.get(fingerprint) || 0;
+  siblingHeldChars.delete(fingerprint);
   try { fs.unlinkSync(siblingHeldPath(fingerprint)); } catch (_error) { /* none */ }
 }
 /* The account's devices that are connected and awake right now. One that is
@@ -7109,6 +7162,9 @@ function holdForAbsentSiblings(record, envelopeText) {
   const pending = Object.keys(loadBeacons(fingerprint))
     .filter((deviceId) => deviceId !== record.deviceId && !live.has(deviceId));
   if (!pending.length) return 0;
+  /* The relay as a whole is full: hold nothing more. The away device will
+     catch up from a sibling, device to device, as before. */
+  if (siblingTotalChars + envelopeText.length > SIBLING_GLOBAL_MAX_CHARS) return -1;
   const store = loadSiblingHeld(fingerprint);
   store.items.push({ id: crypto.randomUUID(), at: Date.now(), envelope: envelopeText, pending });
   let total = store.items.reduce((sum, item) => sum + item.envelope.length, 0);
@@ -7198,6 +7254,7 @@ function loadOfflineBoxes() {
   sweepStaleTempFiles(path.dirname(OFFLINE_STORE_PATH));
   sweepStaleTempFiles(BEACON_DIR);
   sweepStaleTempFiles(SIBLING_DIR);
+  countSiblingHeld();
   try {
     const imported = importLegacyOfflineStore();
     if (imported) return imported;

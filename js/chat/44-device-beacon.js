@@ -385,6 +385,7 @@ async function runSiblingJournal() {
   siblingJournal.running = true;
   try {
     const bundles = [];
+    const liveOnly = [];
     for (const [key, recent] of now.signatures) {
       const before = siblingJournal.signatures.get(key) || new Map();
       const beforeIds = siblingJournal.ids.get(key);
@@ -395,23 +396,30 @@ async function runSiblingJournal() {
       }
       const nowIds = now.ids.get(key) || new Set();
       const removed = beforeIds ? [...beforeIds].filter((id) => !nowIds.has(id)) : [];
-      let wire = [];
-      let chars = 0;
-      for (const entry of changed) {
-        const item = await deviceSyncEntryForWire(entry, false);
-        const size = JSON.stringify(item).length;
-        if (wire.length && chars + size > JOURNAL_BUNDLE_CHARS) {
-          bundles.push({ conversation: key, entries: wire, journal: 1 });
-          wire = [];
-          chars = 0;
+      /* A message meant to disappear — on a timer, or view-once — goes to the
+         siblings that are here and never into a copy the relay keeps: a
+         stored copy would outlive the point of it. */
+      const passing = (entry) => Boolean(entry.viewOnce || entry.expiresAt || Number(entry.timerSeconds || 0) > 0);
+      for (const [group, hold] of [[changed.filter((entry) => !passing(entry)), true], [changed.filter(passing), false]]) {
+        let wire = [];
+        let chars = 0;
+        for (const entry of group) {
+          const item = await deviceSyncEntryForWire(entry, false);
+          const size = JSON.stringify(item).length;
+          if (wire.length && chars + size > JOURNAL_BUNDLE_CHARS) {
+            (hold ? bundles : liveOnly).push({ conversation: key, entries: wire, journal: 1 });
+            wire = [];
+            chars = 0;
+          }
+          wire.push(item);
+          chars += size;
         }
-        wire.push(item);
-        chars += size;
+        if (wire.length) (hold ? bundles : liveOnly).push({ conversation: key, entries: wire, journal: 1 });
       }
-      if (wire.length) bundles.push({ conversation: key, entries: wire, journal: 1 });
       for (let i = 0; i < removed.length; i += 500) bundles.push({ conversation: key, removed: removed.slice(i, i + 500), journal: 1 });
     }
     if (bundles.length && !await sendDeviceBundles(bundles, { hold: true })) return;
+    if (liveOnly.length && !await sendDeviceBundles(liveOnly)) return;
     siblingJournal.signatures = now.signatures;
     siblingJournal.ids = now.ids;
   } finally {

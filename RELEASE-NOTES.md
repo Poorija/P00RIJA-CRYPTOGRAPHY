@@ -1,10 +1,53 @@
-# P00RIJA Cryptography 2.98.67
+# P00RIJA Cryptography 2.98.68
 
-Version 2.98.67 · build chat-v160
+Version 2.98.68 · build chat-v161
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## همگام‌سازی چند دستگاه، امن‌تر · Several devices, made safer
+
+بازبینی امنیتی همگام‌سازی چند دستگاهیِ 2.98.67 سه نکته پیدا کرد که همه برطرف شدند:
+
+- **رمزگذاری فایل در خود برنامه**: فایلی که از دستگاه دیگر آورده می‌شود دیگر فقط به
+  رمزگذاری کانال WebRTC تکیه نمی‌کند. رله‌ای که دو دستگاه را به هم معرفی می‌کند، در اصل
+  می‌توانست خودش را وسط آن‌ها بگذارد. حالا دستگاهی که فایل را می‌خواهد برای همین یک انتقال
+  یک کلید AES-GCM تازه می‌سازد. این کلید را با کلید عمومی حساب مهر می‌کند، تا فقط دستگاه
+  همین حساب بتواند بازش کند، و همراه چالش امضا می‌کند. همهٔ تکه‌های فایل، و نام و اندازهٔ
+  آن، با این کلید رمزگذاری‌شده منتقل می‌شوند. هر چه وسط راه باشد فقط متن رمزی می‌بیند و
+  نمی‌تواند کلید را عوض کند.
+- **سقف حافظه و دیسک سرور**: آنچه رله برای دستگاه آفلاین نگه می‌دارد حالا سقف کلی هم
+  دارد: ۲۵۶ مگابایت برای کل رله (قابل تنظیم با `CHAT_SIBLING_MAX_BYTES`) و حداکثر ۳۲
+  مگابایت در حافظه. اگر رله پر شود، دیگر چیزی نگه نمی‌دارد و دستگاه بقیه را مستقیم از
+  دستگاه دیگر می‌گیرد. مدت نگهداری هم از ۳۰ روز به ۱۴ روز کم شد.
+- **پیام‌های گذرا روی سرور نمی‌مانند**: پیام خودتخریب و یک‌بارمصرف هرگز در نسخه‌ای که
+  رله نگه می‌دارد قرار نمی‌گیرد. چنین پیامی فقط وقتی به دستگاه دیگر می‌رسد که آن دستگاه
+  آنلاین باشد؛ نسخهٔ ذخیره‌شده معنای «گذرا» بودنش را از بین می‌برد.
+
+- **The file is encrypted by the app as well**: a file fetched from another device no
+  longer relies on the WebRTC channel's encryption alone. The relay that introduces the
+  two devices could, in principle, have put itself between them. Now the device asking
+  for the file makes a fresh AES-GCM key for that one transfer. It seals the key to the
+  account's public key, so only a device of this account can open it, and signs it with
+  the challenge. Every piece of the file, and its name and size, travel encrypted with
+  that key. Whatever sits in between sees only ciphertext and cannot swap the key.
+- **A ceiling on the server's memory and disk**: what the relay keeps for an offline
+  device now has an overall cap as well: 256 MB for the whole relay (set with
+  `CHAT_SIBLING_MAX_BYTES`), and at most 32 MB in memory. When the relay is full it keeps
+  nothing more, and the device gets the rest directly from another device. The keeping
+  time is down from 30 days to 14.
+- **Disappearing messages never stay on a server**: a self-destruct or view-once
+  message is never put into a copy the relay keeps. It reaches another device only
+  while that device is online; a stored copy would defeat the point of it.
+
+---
+
+# P00RIJA Cryptography 2.98.67
+
+Version 2.98.67 · build chat-v160
 
 ---
 

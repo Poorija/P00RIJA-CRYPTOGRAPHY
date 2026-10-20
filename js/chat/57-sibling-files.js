@@ -25,6 +25,15 @@
    public key): nobody who merely knows a peer id gets a file, and nobody can
    pretend to be the sibling and hand over something else.
 
+   And the channel's own encryption is not relied on alone: the relay that
+   introduces the two devices could, in principle, put itself between them
+   and terminate that encryption on each side. So the asking device makes a
+   fresh AES-GCM key for this one transfer, seals it to the account's public
+   key (only a device of this account can open it) and signs it with the
+   challenge; every piece of the file, and what it is called and how big it
+   is, travels encrypted with that key. Whatever sits in the middle sees
+   ciphertext, and cannot swap the key without breaking the signature.
+
    The file comes in 64 KB pieces, as fast as the channel takes them and no
    faster (the sender waits while the channel's buffer is full, so a large
    file never sits in memory twice), and a channel that drops mid-way picks up
@@ -74,6 +83,36 @@ async function siblingProofValid(purpose, nonce, toPeerId, signature) {
 function siblingNonce() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+/* The transfer key, as the asking device makes and seals it. */
+async function siblingTransferKey() {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  const publicKey = await importIdentityPublicKey(chatState.identity.publicKeyData);
+  const sealed = app().arrayBufferToBase64(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, raw));
+  return { key, sealed };
+}
+async function siblingSealDigest(sealed) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(sealed || '')));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+/* A piece's IV is its index under a per-transfer prefix: the same piece is
+   always the same plaintext, so a resumed transfer re-encrypting it repeats
+   nothing that matters, and no two different pieces ever share one. */
+function siblingPieceIv(prefix, index) {
+  const iv = new Uint8Array(12);
+  iv.set(prefix.subarray(0, 4), 0);
+  new DataView(iv.buffer).setBigUint64(4, BigInt(index));
+  return iv;
+}
+async function siblingBox(key, object) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(object)));
+  return { iv: bytesToBase64(iv), c: app().arrayBufferToBase64(cipher) };
+}
+async function siblingUnbox(key, box) {
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(box.iv) }, key, app().base64ToArrayBuffer(box.c));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
 
 /* ---- the device that has the file ---------------------------------------- */
 
@@ -81,6 +120,7 @@ function siblingNonce() {
    it is for). Nothing is answered until it has proved it is this account. */
 function serveSiblingFileConnection(connection) {
   let proven = false;
+  let transferKey = null;
   const send = (object) => { try { connection.send(JSON.stringify(object)); } catch (_error) { /* closed */ } };
   const closeSoon = () => window.setTimeout(() => { try { connection.close(); } catch (_error) { /* gone */ } }, 200);
   const giveUp = window.setTimeout(() => { if (!proven) closeSoon(); }, SIBLING_FILE_CONNECT_MS);
@@ -89,18 +129,25 @@ function serveSiblingFileConnection(connection) {
     let message;
     try { message = JSON.parse(data); } catch (_error) { return; }
     if (message?.t === 'hello') {
-      if (!await siblingProofValid('pull', String(message.nonce || ''), chatState.peerId, message.sig)) {
+      const challenge = `${String(message.nonce || '')}|${await siblingSealDigest(message.key)}`;
+      if (!message.key || !await siblingProofValid('pull', challenge, chatState.peerId, message.sig)) {
         send({ t: 'error', reason: 'not-a-sibling' });
         closeSoon();
         return;
       }
+      try {
+        transferKey = await openOfflineSeal(message.key);
+      } catch (_error) {
+        transferKey = null;
+      }
+      if (!transferKey) { send({ t: 'error', reason: 'not-a-sibling' }); closeSoon(); return; }
       proven = true;
       window.clearTimeout(giveUp);
       send({ t: 'hello-ok', sig: await siblingProof('serve', String(message.nonce), String(connection.peer || '')) });
       return;
     }
     if (message?.t === 'get' && proven) {
-      await serveSiblingFile(connection, String(message.messageId || ''), Math.max(0, Number(message.offset) || 0)).catch((error) => {
+      await serveSiblingFile(connection, transferKey, String(message.messageId || ''), Math.max(0, Number(message.offset) || 0)).catch((error) => {
         console.warn('[Devices] a file for a sibling could not be sent:', error?.message || error);
         send({ t: 'error', reason: 'failed' });
       });
@@ -120,7 +167,7 @@ async function siblingChannelRoom(connection) {
   return connection.open;
 }
 
-async function serveSiblingFile(connection, messageId, offset) {
+async function serveSiblingFile(connection, key, messageId, offset) {
   const send = (object) => connection.send(JSON.stringify(object));
   if (!deviceSyncFilesEnabled()) { send({ t: 'error', reason: 'files-off' }); return; }
   const stored = messageId ? await readMessageMedia(messageId).catch(() => null) : null;
@@ -128,12 +175,14 @@ async function serveSiblingFile(connection, messageId, offset) {
   const blob = stored?.blob || (sessionUrl ? await (await fetch(sessionUrl)).blob().catch(() => null) : null);
   if (!blob) { send({ t: 'error', reason: 'not-here' }); return; }
   const record = stored?.record || {};
-  send({ t: 'meta', size: blob.size, name: record.name || '', mime: blob.type || record.mime || '', kind: record.kind || '', offset });
-  for (let start = Math.min(offset, blob.size); start < blob.size; start += SIBLING_FILE_CHUNK) {
+  const prefix = crypto.getRandomValues(new Uint8Array(4));
+  send({ t: 'meta', box: await siblingBox(key, { size: blob.size, name: record.name || '', mime: blob.type || record.mime || '', kind: record.kind || '', prefix: bytesToBase64(prefix) }) });
+  for (let start = Math.floor(Math.min(offset, blob.size) / SIBLING_FILE_CHUNK) * SIBLING_FILE_CHUNK; start < blob.size; start += SIBLING_FILE_CHUNK) {
     if (!await siblingChannelRoom(connection)) return;
-    connection.send(await blob.slice(start, start + SIBLING_FILE_CHUNK).arrayBuffer());
+    const plain = await blob.slice(start, start + SIBLING_FILE_CHUNK).arrayBuffer();
+    connection.send(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: siblingPieceIv(prefix, start / SIBLING_FILE_CHUNK) }, key, plain));
   }
-  if (await siblingChannelRoom(connection)) send({ t: 'end', size: blob.size });
+  if (await siblingChannelRoom(connection)) send({ t: 'end' });
 }
 
 /* ---- the device that wants it -------------------------------------------- */
@@ -183,21 +232,41 @@ function pullFromSibling(peerId, state) {
     }
     touch();
     const nonce = siblingNonce();
+    let transfer = null;
+    let prefix = null;
+    let nextIndex = 0;
+    /* Pieces decrypt in order: each waits for the one before it. */
+    let opened = Promise.resolve();
     connection.on('open', async () => {
       touch();
-      connection.send(JSON.stringify({ t: 'hello', nonce, sig: await siblingProof('pull', nonce, peerId) }));
+      transfer = await siblingTransferKey();
+      const challenge = `${nonce}|${await siblingSealDigest(transfer.sealed)}`;
+      connection.send(JSON.stringify({ t: 'hello', nonce, key: transfer.sealed, sig: await siblingProof('pull', challenge, peerId) }));
     });
     connection.on('error', () => finish(state.received ? 'dropped' : 'unreachable'));
     connection.on('close', () => finish(state.done ? 'done' : (state.received ? 'dropped' : 'unreachable')));
     connection.on('data', async (data) => {
       touch();
       if (typeof data !== 'string') {
-        if (!state.meta) return;
+        if (!state.meta || !prefix) return;
         const piece = data instanceof ArrayBuffer ? data : (data?.buffer instanceof ArrayBuffer ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : null);
         if (!piece) return;
-        state.chunks.push(piece);
-        state.received += piece.byteLength;
-        siblingPullProgress(state);
+        const index = nextIndex;
+        nextIndex += 1;
+        opened = opened.then(async () => {
+          if (settled) return;
+          try {
+            const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: siblingPieceIv(prefix, index) }, transfer.key, piece);
+            state.chunks.push(plain);
+            state.received += plain.byteLength;
+            siblingPullProgress(state);
+          } catch (_error) {
+            /* Not what this transfer's key made: something in between. */
+            state.chunks = [];
+            state.received = 0;
+            finish('unreachable');
+          }
+        });
         return;
       }
       let message;
@@ -209,14 +278,23 @@ function pullFromSibling(peerId, state) {
         return;
       }
       if (message.t === 'meta') {
-        const size = Number(message.size) || 0;
+        let meta;
+        try { meta = await siblingUnbox(transfer.key, message.box); } catch (_error) { finish('unreachable'); return; }
+        const size = Number(meta.size) || 0;
         if (state.meta && state.size !== size) { state.chunks = []; state.received = 0; }
-        state.meta = { name: String(message.name || ''), mime: String(message.mime || ''), kind: String(message.kind || '') };
+        /* Resumed: the sender starts again at the piece boundary below what
+           arrived, so what is already here is trimmed to that boundary. */
+        const resumeAt = Math.floor(state.received / SIBLING_FILE_CHUNK) * SIBLING_FILE_CHUNK;
+        while (state.received > resumeAt && state.chunks.length) state.received -= state.chunks.pop().byteLength;
+        nextIndex = resumeAt / SIBLING_FILE_CHUNK;
+        prefix = base64ToBytes(String(meta.prefix || ''));
+        state.meta = { name: String(meta.name || ''), mime: String(meta.mime || ''), kind: String(meta.kind || '') };
         state.size = size;
         siblingPullProgress(state);
         return;
       }
       if (message.t === 'end') {
+        await opened;
         state.done = state.received === state.size;
         finish(state.done ? 'done' : 'dropped');
         return;
