@@ -228,6 +228,16 @@ const BEACON_DIR = process.env.CHAT_BEACON_DIR || path.join(path.dirname(OFFLINE
 const BEACON_MAX_CHARS = 11000;          /* 8 KB of ciphertext, base64 */
 const BEACON_MAX_DEVICES = 8;
 const BEACON_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/* What one device of an account leaves for its siblings that are away
+   (holdForAbsentSiblings below): sync envelopes only — messages and what
+   became of them, never a file — kept for the devices that were not here,
+   and gone the moment each has collected its copy. Bounded per account. */
+const SIBLING_DIR = process.env.CHAT_SIBLING_DIR || path.join(path.dirname(OFFLINE_STORE_PATH), 'siblings');
+const SIBLING_ITEM_MAX_CHARS = 96 * 1024;
+const SIBLING_ACCOUNT_MAX_CHARS = 4 * 1024 * 1024;
+const SIBLING_ACCOUNT_MAX_ITEMS = 2000;
+const SIBLING_TTL_MS = BEACON_TTL_MS;
+const SIBLING_DELIVERY_BATCH = 40;
 const beaconCache = new Map();
 
 const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'server-policy.json');
@@ -7017,6 +7027,129 @@ function storeBeacon(fingerprint, deviceId, blob) {
 function dropBeacons(fingerprint) {
   beaconCache.delete(fingerprint);
   try { fs.unlinkSync(beaconPath(fingerprint)); } catch (_error) { /* none */ }
+  dropSiblingHeld(fingerprint);
+}
+
+/* ------------------------------------------------------------------
+ * Held for an absent sibling.
+ *
+ * Devices of one account sync with each other directly while both are online.
+ * A device that is away used to catch up only when it and a sibling were
+ * online together — so if the sibling had gone by the time it came back, it
+ * had nothing. Now a device sending its siblings a sync envelope also hands
+ * the relay a copy for each sibling that is NOT here at that moment: the
+ * relay keeps it — sealed to the account's own key, unreadable here — for
+ * exactly those devices, delivers it when each connects, and forgets it the
+ * moment each has acknowledged it.
+ *
+ * What it will keep, and for how long, is the whole design:
+ *   - only device-sync envelopes from the account's own proven owner, each at
+ *     most 96 KB — history and what changed in it, never a file (the client
+ *     never puts file bytes in one, and the cap would refuse them anyway);
+ *   - only for devices the account has (its beacons) that are not connected
+ *     and awake — a device that is here gets the live copy and nothing is
+ *     stored for it;
+ *   - at most 4 MB and 2,000 items per account, oldest dropped first, and a
+ *     device whose items were dropped is told so (it then asks a sibling for
+ *     what it missed, device to device, as before);
+ *   - thirty days at most, the beacon's own lifetime.
+ * ------------------------------------------------------------------ */
+const siblingHeldCache = new Map();
+function siblingHeldPath(fingerprint) {
+  return path.join(SIBLING_DIR, `${fingerprint}.json`);
+}
+function loadSiblingHeld(fingerprint) {
+  if (siblingHeldCache.has(fingerprint)) return siblingHeldCache.get(fingerprint);
+  let store = { items: [], overflow: {} };
+  try {
+    const raw = JSON.parse(fs.readFileSync(siblingHeldPath(fingerprint), 'utf8'));
+    if (raw && Array.isArray(raw.items)) store = { items: raw.items, overflow: raw.overflow && typeof raw.overflow === 'object' ? raw.overflow : {} };
+  } catch (_error) { /* none yet */ }
+  const devices = new Set(Object.keys(loadBeacons(fingerprint)));
+  const cutoff = Date.now() - SIBLING_TTL_MS;
+  store.items = store.items
+    .filter((item) => item && typeof item.id === 'string' && typeof item.envelope === 'string' && Number(item.at) > cutoff)
+    .map((item) => ({ ...item, pending: (Array.isArray(item.pending) ? item.pending : []).filter((deviceId) => devices.has(deviceId)) }))
+    .filter((item) => item.pending.length);
+  siblingHeldCache.set(fingerprint, store);
+  if (siblingHeldCache.size > 2000) siblingHeldCache.delete(siblingHeldCache.keys().next().value);
+  return store;
+}
+function saveSiblingHeld(fingerprint, store) {
+  siblingHeldCache.set(fingerprint, store);
+  try {
+    if (!store.items.length && !Object.keys(store.overflow).length) {
+      fs.unlinkSync(siblingHeldPath(fingerprint));
+      return;
+    }
+    writeJsonAtomic(siblingHeldPath(fingerprint), store);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('[Siblings] could not be written:', error.message);
+  }
+}
+function dropSiblingHeld(fingerprint) {
+  siblingHeldCache.delete(fingerprint);
+  try { fs.unlinkSync(siblingHeldPath(fingerprint)); } catch (_error) { /* none */ }
+}
+/* The account's devices that are connected and awake right now. One that is
+   registered but frozen (an iPhone's app in the background) reads nothing
+   off its socket, so it counts as away and a copy is kept for it too. */
+function liveSiblingDeviceIds(fingerprint) {
+  const live = new Set();
+  for (const candidate of verifiedByFingerprint.get(fingerprint) || []) {
+    if (candidate.ws?.readyState !== WebSocket.OPEN || !candidate.deviceId) continue;
+    if (!isAppAwake(candidate)) continue;
+    live.add(candidate.deviceId);
+  }
+  return live;
+}
+function holdForAbsentSiblings(record, envelopeText) {
+  const fingerprint = record.fingerprint;
+  const live = liveSiblingDeviceIds(fingerprint);
+  const pending = Object.keys(loadBeacons(fingerprint))
+    .filter((deviceId) => deviceId !== record.deviceId && !live.has(deviceId));
+  if (!pending.length) return 0;
+  const store = loadSiblingHeld(fingerprint);
+  store.items.push({ id: crypto.randomUUID(), at: Date.now(), envelope: envelopeText, pending });
+  let total = store.items.reduce((sum, item) => sum + item.envelope.length, 0);
+  while (store.items.length > SIBLING_ACCOUNT_MAX_ITEMS || total > SIBLING_ACCOUNT_MAX_CHARS) {
+    const dropped = store.items.shift();
+    total -= dropped.envelope.length;
+    for (const deviceId of dropped.pending) store.overflow[deviceId] = true;
+  }
+  saveSiblingHeld(fingerprint, store);
+  return pending.length;
+}
+/* What is waiting for this device, a batch at a time: the next batch goes
+   when this one is acknowledged. */
+function pumpSiblingHeld(record, ws) {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !record.deviceId || !isFingerprintKey(record.fingerprint)) return;
+  const store = loadSiblingHeld(record.fingerprint);
+  const mine = store.items.filter((item) => item.pending.includes(record.deviceId));
+  const overflow = Boolean(store.overflow[record.deviceId]);
+  if (!mine.length && !overflow) return;
+  const batch = mine.slice(0, SIBLING_DELIVERY_BATCH);
+  safeSend(ws, {
+    type: 'sibling-held',
+    items: batch.map((item) => ({ id: item.id, envelope: item.envelope })),
+    more: mine.length > batch.length,
+    overflow,
+  });
+}
+function ackSiblingHeld(record, ids) {
+  const store = loadSiblingHeld(record.fingerprint);
+  const acked = new Set(ids);
+  let changed = false;
+  store.items = store.items.map((item) => {
+    if (!acked.has(item.id) || !item.pending.includes(record.deviceId)) return item;
+    changed = true;
+    return { ...item, pending: item.pending.filter((deviceId) => deviceId !== record.deviceId) };
+  }).filter((item) => item.pending.length);
+  if (store.overflow[record.deviceId]) {
+    delete store.overflow[record.deviceId];
+    changed = true;
+  }
+  if (changed) saveSiblingHeld(record.fingerprint, store);
 }
 
 /* A write interrupted between the temp file and the rename leaves a
@@ -7064,6 +7197,7 @@ function loadOfflineBoxes() {
   sweepStaleTempFiles(OFFLINE_STORE_DIR);
   sweepStaleTempFiles(path.dirname(OFFLINE_STORE_PATH));
   sweepStaleTempFiles(BEACON_DIR);
+  sweepStaleTempFiles(SIBLING_DIR);
   try {
     const imported = importLegacyOfflineStore();
     if (imported) return imported;
@@ -8465,6 +8599,9 @@ function deliverHeldMail(record, ws) {
     pumpHeldMail(record, ws);
   }
 
+  /* What a sibling left for this device while it was away. */
+  pumpSiblingHeld(record, ws);
+
   /* Somebody wrote to them and it did not survive the wait. Saying so is
      the difference between a message that was lost and a message the
      recipient never knew existed. */
@@ -8849,6 +8986,37 @@ wsServer.on('connection', (ws, req) => {
         if (record.sentMail) for (const id of acked) record.sentMail.delete(id);
         pumpHeldMail(record, ws);
       }
+      return;
+    }
+
+    /* Held for an absent sibling (holdForAbsentSiblings): a copy of a
+       device-sync envelope for the account's devices that are away, what is
+       waiting for this device, and its acknowledgement. The account's proven
+       owner only, and only its own sealed device-sync envelopes. */
+    if (message.type === 'sibling-hold' || message.type === 'sibling-fetch' || message.type === 'sibling-ack') {
+      if (!record.identityVerified || !isFingerprintKey(record.fingerprint) || !record.deviceId) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      if (message.type === 'sibling-fetch') {
+        pumpSiblingHeld(record, ws);
+        return;
+      }
+      if (message.type === 'sibling-ack') {
+        const ids = (Array.isArray(message.ids) ? message.ids : []).slice(0, 500).map((id) => String(id || '').slice(0, 64));
+        ackSiblingHeld(record, ids);
+        pumpSiblingHeld(record, ws);
+        return;
+      }
+      const envelope = message.envelope;
+      const text = envelope && typeof envelope === 'object' ? JSON.stringify(envelope) : '';
+      if (!text || text.length > SIBLING_ITEM_MAX_CHARS || envelope.type !== 'device-sync'
+        || envelope.fromFingerprint !== record.fingerprint) {
+        safeSend(ws, { type: 'error', reason: 'sibling-hold-refused' });
+        return;
+      }
+      const held = holdForAbsentSiblings(record, text);
+      safeSend(ws, { type: 'sibling-hold-ok', held });
       return;
     }
 

@@ -33,14 +33,23 @@
    name, no file. A device that comes back reads its siblings' beacons, sees
    which conversations are ahead elsewhere, says so, and asks for exactly
    those the moment the sibling is online. Files never travel unless asked
-   for, and then only between two devices that are both online.
+   for, and then only between two devices that are both online — directly,
+   device to device (57-sibling-files.js), never through the relay.
+
+   And a device that is away does not depend on its siblings still being
+   there when it comes back. Every change one device makes to the history —
+   a message sent or received, an edit, a reaction, a status, a message
+   deleted — goes to its siblings as it happens (the journal below): live to
+   the ones that are online, and, for the ones that are not, as a copy the
+   relay keeps for exactly those devices until each has collected it
+   (holdForAbsentSiblings, scripts/server.js). Sealed to the account's own
+   key, unreadable to the relay, bounded, and never a file.
    ============================================================================ */
 
 const BEACON_WRITE_DELAY_MS = 15000;
 const BEACON_MAX_CONVERSATIONS = 160;
 const BEACON_PAYLOAD_BUDGET = 7600;     /* bytes of ciphertext; the relay caps the blob at 11000 base64 chars */
 const SIBLING_SYNC_MIN_INTERVAL_MS = 20000;
-const MIRROR_BATCH_DELAY_MS = 400;
 
 let beaconWriteTimer = null;
 let beaconLastWrittenSignature = '';
@@ -311,35 +320,161 @@ async function serveDeltaRequest(request) {
   await sendDeviceBundles(bundles);
 }
 
-/* ---- live mirror --------------------------------------------------------- */
+/* ---- the journal: every change, to every sibling -------------------------- */
 
-/* A message this device sends appears on the account's other online devices
-   at once, not at the next sync. Batched briefly so a burst is one envelope.
-   So does one that reached this device down a live channel (`incoming`): the
-   channel runs between two devices, not two accounts, so a contact's message
-   on it arrives here and nowhere else. One that came through the relay is not
-   handed on — the relay delivered it to every device already. */
-const mirrorQueue = new Map();
-let mirrorTimer = null;
-function mirrorToSiblings(conversationKey, entry, { incoming = false } = {}) {
-  if (!conversationKey || !entry?.id) return;
-  if (entry.direction !== 'out' && !(incoming && entry.direction === 'in')) return;
-  if ((chatState.linkedDevices || []).length < 2 && !chatState.remoteSiblings?.size) return;
-  const list = mirrorQueue.get(conversationKey) || [];
-  list.push(entry);
-  mirrorQueue.set(conversationKey, list);
-  if (mirrorTimer) return;
-  mirrorTimer = window.setTimeout(async () => {
-    mirrorTimer = null;
+/* What changed in the history since the siblings were last told, found by
+ * comparing each entry with what it looked like then — so every way the
+ * history changes is covered without each of them having to say so: a
+ * message sent or received, an edit, a reaction, a pin, a delivery status,
+ * a message deleted. Each run sends the entries that changed and the ids that
+ * went, in batches small enough to be kept for an absent sibling.
+ *
+ * Fields that belong to this device alone never count as a change and never
+ * travel: a blob URL, the bytes of a file, whether it is missing here. What a
+ * sibling sends is merged and then recorded as already known
+ * (noteSiblingMerged), so nothing bounces back. Changes made while this device
+ * is offline wait: the record is only moved on once they have been sent.
+ *
+ * The scan looks at the newest JOURNAL_WINDOW entries of each conversation —
+ * where edits, reactions and statuses happen — and at every id, for deletions.
+ * Older history reaches a sibling through the delta sync, as before. */
+const JOURNAL_DELAY_MS = 500;
+const JOURNAL_WINDOW = 400;
+const JOURNAL_BUNDLE_CHARS = 40 * 1024;
+const JOURNAL_LOCAL_FIELDS = new Set(['downloadUrl', 'mediaData', 'mediaMissing']);
+const siblingJournal = { signatures: new Map(), ids: new Map(), baseline: false, timer: 0, running: false };
+function entrySyncSignature(entry) {
+  const keys = Object.keys(entry).filter((key) => !JOURNAL_LOCAL_FIELDS.has(key) && !key.startsWith('_')).sort();
+  return JSON.stringify(keys.map((key) => [key, entry[key]]));
+}
+function accountHasSiblings() {
+  return (chatState.linkedDevices || []).length >= 2 || Boolean(chatState.hasLinkedDevices)
+    || siblingBeacons.size > 0 || Boolean(chatState.remoteSiblings?.size);
+}
+function journalSnapshot() {
+  const signatures = new Map();
+  const ids = new Map();
+  for (const [key, entries] of Object.entries(chatState.history || {})) {
+    if (!key || key === 'system' || !Array.isArray(entries)) continue;
+    const recent = new Map();
+    for (const entry of entries.slice(-JOURNAL_WINDOW)) if (entry?.id) recent.set(entry.id, entrySyncSignature(entry));
+    signatures.set(key, recent);
+    ids.set(key, new Set(entries.map((entry) => entry?.id).filter(Boolean)));
+  }
+  return { signatures, ids };
+}
+function scheduleSiblingJournal() {
+  if (siblingJournal.timer) return;
+  siblingJournal.timer = window.setTimeout(() => {
+    siblingJournal.timer = 0;
+    runSiblingJournal().catch((error) => console.warn('[Devices] the journal did not run:', error?.message || error));
+  }, JOURNAL_DELAY_MS);
+}
+async function runSiblingJournal() {
+  if (siblingJournal.running) { scheduleSiblingJournal(); return; }
+  if (!accountHasSiblings()) { siblingJournal.baseline = false; return; }
+  const now = journalSnapshot();
+  if (!siblingJournal.baseline) {
+    siblingJournal.signatures = now.signatures;
+    siblingJournal.ids = now.ids;
+    siblingJournal.baseline = true;
+    return;
+  }
+  /* Offline: nothing can be sent, so nothing is marked as sent. */
+  if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;
+  siblingJournal.running = true;
+  try {
     const bundles = [];
-    for (const [key, entries] of mirrorQueue) {
-      const wire = [];
-      for (const item of entries) wire.push(await deviceSyncEntryForWire(item, false));
-      bundles.push({ conversation: key, entries: wire, mirror: true });
+    for (const [key, recent] of now.signatures) {
+      const before = siblingJournal.signatures.get(key) || new Map();
+      const beforeIds = siblingJournal.ids.get(key);
+      const entries = chatState.history[key] || [];
+      const changed = [];
+      for (const entry of entries.slice(-JOURNAL_WINDOW)) {
+        if (entry?.id && before.get(entry.id) !== recent.get(entry.id)) changed.push(entry);
+      }
+      const nowIds = now.ids.get(key) || new Set();
+      const removed = beforeIds ? [...beforeIds].filter((id) => !nowIds.has(id)) : [];
+      let wire = [];
+      let chars = 0;
+      for (const entry of changed) {
+        const item = await deviceSyncEntryForWire(entry, false);
+        const size = JSON.stringify(item).length;
+        if (wire.length && chars + size > JOURNAL_BUNDLE_CHARS) {
+          bundles.push({ conversation: key, entries: wire, journal: 1 });
+          wire = [];
+          chars = 0;
+        }
+        wire.push(item);
+        chars += size;
+      }
+      if (wire.length) bundles.push({ conversation: key, entries: wire, journal: 1 });
+      for (let i = 0; i < removed.length; i += 500) bundles.push({ conversation: key, removed: removed.slice(i, i + 500), journal: 1 });
     }
-    mirrorQueue.clear();
-    sendDeviceBundles(bundles).catch(() => {});
-  }, MIRROR_BATCH_DELAY_MS);
+    if (bundles.length && !await sendDeviceBundles(bundles, { hold: true })) return;
+    siblingJournal.signatures = now.signatures;
+    siblingJournal.ids = now.ids;
+  } finally {
+    siblingJournal.running = false;
+  }
+}
+/* What a sibling just sent is now known here: recorded as it stands, so the
+   next run does not send it straight back. */
+function noteSiblingMerged(conversationKey, ids = null) {
+  if (!siblingJournal.baseline || !conversationKey) return;
+  const entries = chatState.history[conversationKey] || [];
+  const recent = siblingJournal.signatures.get(conversationKey) || new Map();
+  const known = siblingJournal.ids.get(conversationKey) || new Set();
+  const wanted = ids ? new Set(ids) : null;
+  for (const entry of entries.slice(-JOURNAL_WINDOW)) {
+    if (!entry?.id || (wanted && !wanted.has(entry.id))) continue;
+    recent.set(entry.id, entrySyncSignature(entry));
+  }
+  const present = new Set(entries.map((entry) => entry?.id).filter(Boolean));
+  for (const id of [...known]) if (!present.has(id)) known.delete(id);
+  for (const id of present) known.add(id);
+  siblingJournal.signatures.set(conversationKey, recent);
+  siblingJournal.ids.set(conversationKey, known);
+}
+
+/* The old name, kept for the places that call it: a message added here is a
+   change like any other, and the journal carries it. */
+function mirrorToSiblings() {
+  scheduleSiblingJournal();
+}
+
+/* ---- what the relay kept while this device was away ---------------------- */
+
+/* Each item is a sealed device-sync envelope, opened and merged exactly as a
+   live one is; then acknowledged, which is what lets the relay forget it. When
+   the relay had to drop some for lack of room, this device asks a sibling for
+   what it missed instead, device to device, the moment one is online. */
+async function handleSiblingHeld(message) {
+  const ids = [];
+  for (const item of Array.isArray(message.items) ? message.items : []) {
+    if (!item?.id) continue;
+    try {
+      const envelope = typeof item.envelope === 'string' ? JSON.parse(item.envelope) : item.envelope;
+      await handleDeviceSyncEnvelope({ payload: envelope });
+    } catch (error) {
+      console.warn('[Devices] a held sync envelope could not be read:', error?.message || error);
+    }
+    ids.push(item.id);
+  }
+  if (message.overflow) {
+    chatState.siblingHeldOverflow = true;
+    requestDeltaFromSiblings({ reason: 'held copies were dropped', force: true });
+  }
+  if (chatState.ws?.readyState === WebSocket.OPEN && (ids.length || message.overflow)) {
+    chatState.ws.send(JSON.stringify({ type: 'sibling-ack', ids }));
+  }
+  if (ids.length) {
+    scheduleBeaconWrite(2000);
+    window.setTimeout(requestBeacons, 2500);
+  }
+}
+function fetchSiblingHeld() {
+  if (chatState.ws?.readyState === WebSocket.OPEN) chatState.ws.send(JSON.stringify({ type: 'sibling-fetch' }));
 }
 
 /* ---- delivery to siblings, wherever they live ---------------------------- */
@@ -349,7 +484,9 @@ function mirrorToSiblings(conversationKey, entry, { incoming = false } = {}) {
    live to every device holding the key and stores none of it. A sibling that
    lives on ANOTHER relay is reached over transit, using the home relay its
    beacon names. */
-async function sendDeviceBundles(bundles) {
+/* `hold`: also give the relay a copy for any sibling that is away right now
+   (it keeps one only for those; nothing at all when every sibling is here). */
+async function sendDeviceBundles(bundles, { hold = false } = {}) {
   if (!Array.isArray(bundles) || !bundles.length) return false;
   if (!chatState.connected || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return false;
   const mine = chatState.identity?.fingerprint;
@@ -363,6 +500,7 @@ async function sendDeviceBundles(bundles) {
   for (const bundle of bundles) {
     const envelope = await sealDeviceSyncBundle(bundle);
     sendRelayEnvelope({ fingerprint: mine }, envelope);
+    if (hold && chatState.ws?.readyState === WebSocket.OPEN) chatState.ws.send(JSON.stringify({ type: 'sibling-hold', envelope }));
     for (const home of farRelays.values()) {
       sendViaTransit({ type: 'relay', toClientId: '', toFingerprint: mine, payload: envelope, persist: false }, home, null);
     }
@@ -400,6 +538,8 @@ let deviceBeaconTimer = null;
 function startDeviceBeacon() {
   requestBeacons();
   scheduleBeaconWrite(3000);
+  /* Whatever changed here while this device was offline goes out now. */
+  scheduleSiblingJournal();
   if (deviceBeaconTimer) return;
   deviceBeaconTimer = window.setInterval(() => {
     if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;
@@ -408,3 +548,7 @@ function startDeviceBeacon() {
 }
 
 window.requestDeltaFromSiblings = requestDeltaFromSiblings;
+window.__siblingJournalProbe = {
+  run: () => runSiblingJournal(),
+  state: () => ({ baseline: siblingJournal.baseline, conversations: siblingJournal.signatures.size }),
+};

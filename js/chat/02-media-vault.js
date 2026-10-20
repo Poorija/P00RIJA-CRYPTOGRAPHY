@@ -179,8 +179,14 @@ function base64ToBytes(text) {
   return out;
 }
 
-function missingMediaHtml(label) {
-  return `<div class="chat-media-missing"><i class="fas fa-cloud-arrow-down"></i><span>${app().escapeHTML(label)}</span></div>`;
+/* A file that is not on this device. When another device of this account is
+   online it is one tap away (57-sibling-files.js), whatever kind of file it
+   is — a voice note, a sticker, a GIF or a document. */
+function missingMediaHtml(label, entryId = '') {
+  const fetchable = Boolean(entryId) && (chatState.linkedDevices || []).length >= 2;
+  return `<div class="chat-media-missing"><i class="fas fa-cloud-arrow-down"></i><span>${app().escapeHTML(fetchable ? t('این فایل روی این دستگاه نیست.', 'This file is not on this device.') : label)}</span>${fetchable
+    ? `<button type="button" class="btn" data-chat-device-file="${app().escapeHTML(String(entryId))}" style="font-size:0.74rem;margin-top:0.4rem">${app().escapeHTML(t('دریافت از دستگاه دیگر', 'Fetch from my other device'))}</button>`
+    : ''}</div>`;
 }
 function isMediaEntry(entry) {
   return Boolean(entry) && MEDIA_TYPES.has(entry.type);

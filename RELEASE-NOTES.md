@@ -1,10 +1,114 @@
-# P00RIJA Cryptography 2.98.66
+# P00RIJA Cryptography 2.98.67
 
-Version 2.98.66 · build chat-v159
+Version 2.98.67 · build chat-v160
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## چند دستگاه با یک حساب، کامل همگام · Several devices on one account, fully in step
+
+### چه چیزی کار نمی‌کرد
+
+تستی که برای این نسخه نوشته شد، روی کد قبلی ۷ ایراد از ۱۵ بررسی را نشان داد:
+
+- **ویرایش، ری‌اکشن و حذف**: ویرایش پیام، ری‌اکشن و حذف یک پیام روی یک دستگاه به دستگاه
+  دیگر نمی‌رسید؛ فقط پیام تازه می‌رسید.
+- **دستگاه آفلاین**: دستگاهی که آفلاین بود، پیام‌ها را فقط وقتی می‌گرفت که خودش و دستگاه
+  دیگر هم‌زمان آنلاین باشند. اگر دستگاه دیگر تا آن موقع رفته بود، هیچ چیز نمی‌رسید.
+- **فایل بزرگ**: فایل بزرگ از دستگاه دیگر تکه‌تکه و از مسیر رله می‌آمد. سقف آن ۱۶ مگابایت
+  بود و فایل بزرگ‌تر، بی‌هیچ هشداری، **بریده و ناقص ذخیره می‌شد**. یک فایل ۲۰ مگابایتی با
+  ۲۶۰ بستهٔ رله، ۱۶ مگابایت ذخیره شد.
+
+### حالا
+
+- **هر تغییر، به همهٔ دستگاه‌ها**: هر تغییری در تاریخچهٔ یک دستگاه، یعنی پیام فرستاده یا
+  رسیده، ویرایش، ری‌اکشن، سنجاق، وضعیت تحویل و پیام حذف‌شده، همان لحظه به دستگاه‌های آنلاین
+  دیگر می‌رسد. برنامه تغییر را از مقایسهٔ هر پیام با آخرین حالتی که دستگاه‌های دیگر دیده‌اند
+  پیدا می‌کند، پس هر راهی که تاریخچه عوض شود پوشش داده می‌شود. چیزی هم که از دستگاه دیگر
+  می‌رسد دوباره برگردانده نمی‌شود.
+- **دستگاه آفلاین، بی‌نیاز از دستگاه دیگر**: برای دستگاهی که در آن لحظه آفلاین است، رله
+  یک نسخه از همین تغییرها را نگه می‌دارد. این نسخه فقط برای همان دستگاه است، با کلید خود
+  حساب رمزگذاری شده و رله نمی‌تواند بازش کند. دستگاه وقتی آنلاین شد آن را می‌گیرد، حتی اگر
+  دستگاه دیگر دیگر آنلاین نباشد، و رله همان لحظه پاکش می‌کند.
+  - برای دستگاهی که آنلاین است هیچ چیز نگه داشته نمی‌شود.
+  - هیچ فایلی هرگز در آن نیست؛ هر بسته حداکثر ۹۶ کیلوبایت است.
+  - برای هر حساب سقف ۴ مگابایت و ۲۰۰۰ بسته و حداکثر ۳۰ روز دارد. اگر سقف پر شود،
+    دستگاه با خبر می‌شود و بقیه را مستقیم از دستگاه دیگر می‌گیرد.
+- **فایل‌ها مستقیم از دستگاه به دستگاه**: با زدن «دریافت از دستگاه دیگر»، فایل از دستگاهی
+  که آن را دارد، از راه یک کانال WebRTC، مستقیم می‌آید و هیچ بایتی از آن از رله نمی‌گذرد.
+  - **احراز هویت دوطرفه**: پیش از انتقال، هر دو دستگاه با کلید خصوصی حساب ثابت می‌کنند
+    همان حساب‌اند.
+  - **بدون اشغال بی‌جای حافظه**: فایل در تکه‌های ۶۴ کیلوبایتی و با کنترل جریان می‌آید.
+  - **ادامه از همان‌جا**: اگر کانال وسط راه قطع شود، از همان‌جا ادامه پیدا می‌کند.
+  - **ذخیره و بررسی اندازه**: اندازهٔ کامل بررسی و فایل در فضای رمزگذاری‌شدهٔ برنامه ذخیره
+    می‌شود. فایلی که بزرگ‌تر از این فضاست، روی خود دستگاه ذخیره می‌شود.
+  - **همهٔ انواع فایل**: این دکمه حالا برای پیام صوتی، استیکر و گیف هم هست، نه فقط برای فایل.
+  - **تنظیم**: «جابه‌جایی فایل بین دستگاه‌ها» روی دستگاهی که فایل را دارد تعیین می‌کند آن
+    را بدهد یا نه.
+- **سازگاری و ایراد ناقص ذخیره شدن**: برای دستگاهی که هنوز نسخهٔ قدیمی دارد، فایل کوچک به
+  روش قدیم آورده می‌شود. ایراد ذخیره شدن ناقص هم رفع شد: فایل بزرگ‌تر از توان آن روش دیگر
+  فرستاده یا ذخیره نمی‌شود.
+- **سینک دستی**: «هم‌اکنون سینک کن» مثل قبل کار می‌کند و حالا چیزی را هم که رله برای این
+  دستگاه نگه داشته می‌گیرد.
+- یک بخش راهنما هم با عنوان «چند دستگاه با یک حساب» اضافه شد.
+
+### What did not work
+
+The test written for this release found 7 faults in 15 checks on the previous code:
+
+- **Edits, reactions, and deletions**: editing a message, a reaction, and deleting a
+  message on one device did not reach the other; only new messages did.
+- **An offline device**: a device that had been offline got its messages only when it
+  and another device were online at the same time. If the other had gone by then,
+  nothing came.
+- **A large file**: a large file from the other device came in pieces through the
+  relay. That path stopped at 16 MB, and a larger file was **saved cut short, with no
+  warning**. A 20 MB file took 260 relay frames and was saved as 16 MB.
+
+### Now
+
+- **Every change, to every device**: every change to one device's history (a message
+  sent or received, an edit, a reaction, a pin, a delivery status, a deleted message)
+  reaches the others that are online at once. Changes are found by comparing each
+  message with how the other devices last saw it, so every way the history can change
+  is covered. What arrives from another device is not sent back.
+- **An offline device needs no other device**: for a device that is offline at that
+  moment, the relay keeps a copy of those changes. The copy is for that device only,
+  sealed to the account's own key, and the relay cannot open it. The device collects
+  it when it comes online, even if the other device is no longer there, and the relay
+  deletes it at once.
+  - Nothing is kept for a device that is online.
+  - It never holds a file; each piece is at most 96 KB.
+  - Each account is capped at 4 MB, 2,000 pieces, and 30 days. If the cap is reached,
+    the device is told and gets the rest directly from another device.
+- **Files device to device**: "Fetch from my other device" brings a file straight from
+  the device that has it, over a WebRTC channel, and not one byte of it passes through
+  the relay.
+  - **Mutual proof**: before anything moves, both devices prove with the account's
+    private key that they are the same account.
+  - **No needless memory use**: the file comes in 64 KB pieces with flow control.
+  - **Picks up where it stopped**: a channel that drops part-way resumes from there.
+  - **Size checked, then kept**: the full size is checked and the file is kept in the
+    app's encrypted store. One larger than that store is saved to the device itself.
+  - **Every kind of file**: the button now shows for voice notes, stickers, and GIFs
+    too, not just files.
+  - **The setting**: "Move files between devices", on the device that has the file,
+    decides whether it hands it over.
+- **Compatibility, and the cut-short fault**: for a device still on an older build, a
+  small file comes the old way. The cut-short fault is fixed: a file larger than that
+  way can carry is no longer sent or saved.
+- **Manual sync**: "Sync now" works as before, and now also collects whatever the relay
+  kept for this device.
+- A help section, "Several devices on one account", is added.
+
+---
+
+# P00RIJA Cryptography 2.98.66
+
+Version 2.98.66 · build chat-v159
 
 ---
 

@@ -675,7 +675,12 @@ document.getElementById('chatMessages')?.addEventListener('click', (event) => {
    and this is the ask. The conversation the row sits in is the open one. */
 const deviceFileBtn = event.target.closest('[data-chat-device-file]');
 if (deviceFileBtn) {
-requestDeviceFile(chatState.activeConversationId || '', deviceFileBtn.dataset.chatDeviceFile || '');
+const conversationKey = chatState.activeConversationId || '';
+const messageId = deviceFileBtn.dataset.chatDeviceFile || '';
+/* Device to device first (57-sibling-files.js); the old way through the
+   relay only for a sibling that does not speak it yet. */
+if (typeof fetchFromSibling === 'function') fetchFromSibling(conversationKey, messageId).catch((error) => console.warn('[Devices] fetching from a sibling failed:', error?.message || error));
+else requestDeviceFile(conversationKey, messageId);
 return;
 }
 const replyBtn = event.target.closest('[data-chat-reply-message]');

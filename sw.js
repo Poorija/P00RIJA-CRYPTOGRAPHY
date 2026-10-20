@@ -8,7 +8,7 @@
  * version as a network service and its users are entitled to your source.
  */
 
-const CACHE_NAME = 'poorija-cryptography-v2.98.66-chat-v159';
+const CACHE_NAME = 'poorija-cryptography-v2.98.67-chat-v160';
 
 // Live endpoints proxied by nginx: never cached, always straight to the network.
 const NETWORK_ONLY_PREFIXES = [
@@ -118,6 +118,7 @@ const LAZY_ASSETS = [
   './js/chat/54-link-preview.js',
   './js/chat/55-gifs-and-keyboard-stickers.js',
   './js/chat/56-sticker-motion.js',
+  './js/chat/57-sibling-files.js',
   './js/dialogs.js',
   './js/desktop-bridge.js',
   './js/metadata.js',

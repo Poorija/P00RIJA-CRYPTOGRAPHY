@@ -463,6 +463,9 @@ peer.status = 'offline';
 	.map((peer) => ({
 	deviceId: String(peer.deviceId || ''),
 	clientId: String(peer.clientId || ''),
+	/* Where to reach it device to device: a file is fetched from a sibling
+	   straight from its peer (57-sibling-files.js). */
+	peerId: String(peer.peerId || ''),
 	name: String(peer.username || ''),
 	}))
 	: [];
@@ -535,6 +538,12 @@ if (typeof requestBeacons === 'function') window.setTimeout(requestBeacons, 1500
 return;
 }
 if (message.type === 'beacon-stored') return;
+/* What a sibling left with the relay for this device while it was away. */
+if (message.type === 'sibling-held') {
+if (typeof handleSiblingHeld === 'function') handleSiblingHeld(message).catch((error) => console.warn('[Devices] held sync unreadable:', error?.message || error));
+return;
+}
+if (message.type === 'sibling-hold-ok') return;
 if (message.type === 'queued') {
 /* The relay stored an envelope we asked it to keep. The tag is the outbound
    message id we sent it with; matching it back moves that message to
@@ -1266,6 +1275,13 @@ setConnectionState(true, ['متصل به سرور چت', 'Connected to chat serv
 broadcastHello();
 });
 	peer.on('connection', (connection) => {
+	/* A device of this account asking for a file (57-sibling-files.js) is
+	   not a conversation; it proves who it is there or is closed. */
+	if (connection.metadata?.purpose === 'sibling-file') {
+	if (typeof serveSiblingFileConnection === 'function') serveSiblingFileConnection(connection);
+	else connection.close();
+	return;
+	}
 	const remotePeer = {
 	clientId: connection.metadata?.clientId || connection.peer,
 	peerId: connection.peer,
@@ -2826,6 +2842,8 @@ deviceSyncInFlight = false;
 }
 }
 async function sendDeviceSyncFromUi() {
+/* And whatever a sibling left with the relay for this device. */
+if (typeof fetchSiblingHeld === 'function') fetchSiblingHeld();
 const sent = await sendDeviceSync();
 notify(sent
 ? t('تاریخچه برای دستگاه‌های متصل ارسال شد', 'History was sent to the linked devices')
@@ -2874,7 +2892,9 @@ const deletedAt = await graveTime([bundle.conversation]);
 const entries = deletedAt
 ? bundle.entries.filter((entry) => (Date.parse(entry?.createdAt || entry?.timestamp || 0) || 0) > deletedAt)
 : bundle.entries;
+const touched = [];
 for (const entry of entries) {
+if (entry?.id) touched.push(entry.id);
 /* Inline media arrives as bytes; land it in this device's vault the
    way received media lands, so it survives a reload like any other
    attachment. */
@@ -2890,10 +2910,27 @@ delete entry.mediaData;
 mergeSyncedEntry(bundle.conversation, entry);
 changed = true;
 }
+/* Known here now as the sibling has it: the journal does not send it back. */
+if (typeof noteSiblingMerged === 'function') noteSiblingMerged(bundle.conversation, touched);
 if (changed) {
 storeHistory();
 renderPeers();
 renderMessages();
+}
+}
+/* Messages a sibling deleted. Deleted here too, with their files. */
+if (bundle?.conversation && Array.isArray(bundle.removed) && Array.isArray(chatState.history[bundle.conversation])) {
+const gone = new Set(bundle.removed.slice(0, 2000).map((id) => String(id || '')));
+const list = chatState.history[bundle.conversation];
+const kept = list.filter((entry) => !gone.has(entry?.id));
+if (kept.length !== list.length) {
+list.filter((entry) => gone.has(entry?.id)).forEach((entry) => dropMessageMedia(entry.id));
+chatState.history[bundle.conversation] = kept;
+if (typeof noteSiblingMerged === 'function') noteSiblingMerged(bundle.conversation);
+storeHistory();
+renderPeers();
+renderMessages();
+changed = true;
 }
 }
 	if (Array.isArray(bundle?.calls)) {
@@ -3156,6 +3193,8 @@ const stored = await readMessageMedia(messageId).catch(() => null);
 if (!stored) return;
 const bytes = new Uint8Array(await stored.blob.arrayBuffer());
 const total = Math.max(1, Math.ceil(bytes.length / DEVICE_SYNC_FILE_PART_BYTES));
+/* What the requester could never assemble whole is not sent at all. */
+if (total > 256) return;
 for (let part = 0; part < total; part += 1) {
 const slice = bytes.subarray(part * DEVICE_SYNC_FILE_PART_BYTES, (part + 1) * DEVICE_SYNC_FILE_PART_BYTES);
 const envelope = await sealDeviceSyncBundle({
@@ -3184,6 +3223,14 @@ if (!pull || Date.now() - pull.at > DEVICE_FILE_PULL_TTL_MS) {
 deviceFilePulls.delete(messageId);
 return;
 }
+	/* More parts than this path ever carries: assembled, it would be a
+	   truncated file saved as if whole. Refused instead. */
+	if (Number(part.total) > 256) {
+	deviceFilePulls.delete(messageId);
+	if (pull.timeout) clearTimeout(pull.timeout);
+	notify(t('این فایل برای این روش بزرگ است؛ هر دو دستگاه را به‌روز کنید تا مستقیم منتقل شود.', 'This file is too large for this way of moving it; update both devices so it moves directly.'), 'warning');
+	return;
+	}
 	if (!pull.total) {
 	pull.total = Math.max(1, Math.min(256, Number(part.total) || 1));
 	pull.meta = { name: String(part.name || ''), mime: String(part.mime || ''), kind: String(part.kind || 'file') };

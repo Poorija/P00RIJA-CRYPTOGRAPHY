@@ -339,7 +339,7 @@ ${(voiceWaveCache.get(entry.id) || seededVoiceWave(entry.id)).map((level) => `<d
 </div>
 <button class="audio-speed-btn">1x</button>
 </div>
-` : missingMediaHtml(t('این پیام صوتی روی این دستگاه ذخیره نشده است.', 'This voice message is not stored on this device.'));
+` : missingMediaHtml(t('این پیام صوتی روی این دستگاه ذخیره نشده است.', 'This voice message is not stored on this device.'), entry.id);
 return `
 <div class="${bubbleClass(entry)}" data-id="${eid(entry.id)}">
 ${senderHtml}
@@ -521,7 +521,7 @@ ${replyPreview}
 ? stickerMediaHtml(safeMediaUrl(typeof loopedPictureUrl === 'function' ? loopedPictureUrl(entry.downloadUrl) : entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media', gif ? { width: entry.mediaWidth, height: entry.mediaHeight } : {})
 : missingMediaHtml(gif
 ? t('این گیف روی این دستگاه ذخیره نشده است.', 'This GIF is not stored on this device.')
-: t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'))}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
+: t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'), entry.id)}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
 ${reactionToolbar}
 ${meta}
 </div>
@@ -542,16 +542,9 @@ ${replyPreview}
 <div class="text-[11px] opacity-60">${app().formatBytes?.(entry.size) || entry.size + ' B'}</div>
 ${(() => {
 if (!entry.downloadUrl) {
-/* A sibling online means the bytes are one request away — see
-   requestDeviceFile. Without one, the row can only say what it is. */
-if ((chatState.linkedDevices || []).length >= 2) {
-return `<div class="chat-media-missing">
-<i class="fas fa-cloud-arrow-down"></i>
-<span>${app().escapeHTML(t('این فایل روی این دستگاه نیست.', 'This file is not on this device.'))}</span>
-<button type="button" class="btn" data-chat-device-file="${eid(entry.id)}" style="font-size:0.74rem;margin-top:0.4rem">${app().escapeHTML(t('دریافت از دستگاه دیگر', 'Fetch from my other device'))}</button>
-</div>`;
-}
-return missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'));
+/* A sibling online means the bytes are one tap away, device to device
+   (57-sibling-files.js). Without one, the row can only say what it is. */
+return missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'), entry.id);
 }
 // A self-destruct file is meant to disappear; handing over a Download link
 // would let the recipient keep it forever and make the timer meaningless.
@@ -572,7 +565,7 @@ ${(isImage && burnSrc)
 const downloadHref = safeMediaUrl(entry.downloadUrl);
 return downloadHref
 ? `<a href="${app().escapeHTML(downloadHref)}" download="${app().escapeHTML(entry.name || 'file.bin')}" data-chat-download-message="${eid(entry.id)}" class="inline-flex mt-2 px-3 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-bold hover:bg-brand-600 transition-colors">${t('دریافت فایل', 'Download')}</a>`
-: missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'));
+: missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'), entry.id);
 })()}
 </div>
 </div>

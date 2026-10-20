@@ -287,8 +287,10 @@ pruneExpiredHistory();
 // process without pagehide, and auto-lock can run before a deferred timer.
 flushHistoryStore();
 scheduleExpirySweep();
-/* The device beacon follows the history, a little behind it. */
+/* The device beacon follows the history, a little behind it; and what
+   changed goes to the account's other devices (44-device-beacon.js). */
 if (typeof scheduleBeaconWrite === 'function') scheduleBeaconWrite();
+if (typeof scheduleSiblingJournal === 'function') scheduleSiblingJournal();
 }
 /* Ages out stored session keys wherever they are read from disk, so a key
    nobody has touched for a week does not sit in the vault waiting to be
