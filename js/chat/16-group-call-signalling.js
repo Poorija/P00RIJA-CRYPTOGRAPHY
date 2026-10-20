@@ -1597,6 +1597,29 @@ function lottieDrawMode() {
    lottie writes into the data it is given. */
 const lottieTexts = new Map();
 const lottieTextsReady = new Map();
+/* A sticker's animation as it is handed to a player: parsed, and with every
+   expression taken out. lottie-web can evaluate After Effects expressions —
+   JavaScript, run with eval — and the worker's canvas build carries that
+   code. A sticker comes from whoever sent it or made the pack, so nothing in
+   one is ever run: an expression is a string under the key "x" (the easing
+   handles also called x are numbers or arrays, and stay). Telegram's own
+   stickers never carry one, and the page's policy already refuses eval; this
+   holds whatever a player or a policy does. */
+function lottieDataFrom(text) {
+  const data = JSON.parse(text);
+  const pending = [data];
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== 'object') continue;
+    if (Array.isArray(value)) { for (const item of value) if (item && typeof item === 'object') pending.push(item); continue; }
+    for (const key of Object.keys(value)) {
+      const item = value[key];
+      if (key === 'x' && typeof item === 'string') delete value[key];
+      else if (item && typeof item === 'object') pending.push(item);
+    }
+  }
+  return data;
+}
 function lottieTextFor(url) {
   if (!lottieTexts.has(url)) {
     lottieTexts.set(url, fetch(url).then((response) => response.text()).then((text) => {
@@ -1750,7 +1773,7 @@ function mountLottieNode(node) {
   try {
     const sized = node.offsetWidth > 0 && node.offsetHeight > 0;
     if (mode === 'worker' && players.worker && sized) {
-      mountWorkerLottie(node, players.worker, JSON.parse(text));
+      mountWorkerLottie(node, players.worker, lottieDataFrom(text));
       return;
     }
     const onCanvas = Boolean(players.canvas && sized);
@@ -1759,7 +1782,7 @@ function mountLottieNode(node) {
       renderer: onCanvas ? 'canvas' : 'svg',
       loop: true,
       autoplay: false,
-      animationData: JSON.parse(text),
+      animationData: lottieDataFrom(text),
       rendererSettings: onCanvas
         ? { preserveAspectRatio: 'xMidYMid meet', clearCanvas: true }
         : { preserveAspectRatio: 'xMidYMid meet', progressiveLoad: true, hideOnTransparent: true },
@@ -2509,6 +2532,7 @@ window.__stickerProbe = {
   makePack: (title) => buildPackFromSelection(title),
   telegramName: (text) => telegramPackName(text),
   setCover: (packId, stickerId) => setPackCover(packId, stickerId),
+  lottieData: (text) => lottieDataFrom(text),
   lottieClock: () => ({ rate: LOTTIE_RATES[lottieClock.level], cap: lottieClock.cap, pace: Math.round(lottieClock.pace * 10) / 10, mounted: mountedLottieNodes.size, worker: [...mountedLottieNodes].filter((node) => node.__workerLottie).length, canvas: document.querySelectorAll('.chat-lottie > canvas').length, workerHealthy: lottieWorkerHealthy, mode: lottieDrawMode() }),
   coverUrl: (packId) => packCoverUrl(chatState.stickerPacks.find((pack) => pack.id === packId)),
   importTelegram: (text) => importTelegramStickerPack(text),

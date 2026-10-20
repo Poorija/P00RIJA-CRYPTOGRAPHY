@@ -340,7 +340,7 @@ async function lottieStill(blob) {
   let animation = null;
   try {
     const lottie = await ensureLottie();
-    const data = JSON.parse(await blob.text());
+    const data = typeof lottieDataFrom === 'function' ? lottieDataFrom(await blob.text()) : JSON.parse(await blob.text());
     const edge = STICKER_THUMB_EDGE;
     host = document.createElement('div');
     host.style.cssText = `position:fixed;left:-10000px;top:0;width:${edge}px;height:${edge}px;pointer-events:none;opacity:0`;

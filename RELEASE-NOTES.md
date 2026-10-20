@@ -1,10 +1,33 @@
-# P00RIJA Cryptography 2.98.63
+# P00RIJA Cryptography 2.98.64
 
-Version 2.98.63 · build chat-v156
+Version 2.98.64 · build chat-v157
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هیچ کدی از داخل استیکر اجرا نمی‌شود · Nothing inside a sticker is ever run
+
+- انیمیشن Lottie می‌تواند «expression» داشته باشد: تکه‌کدهای جاوااسکریپت که lottie-web با
+  eval اجرا می‌کند. نسخهٔ canvas که در 2.98.63 برای روان شدن دسکتاپ اضافه شد این قابلیت را
+  دارد. استیکر از هر کسی که آن را فرستاده یا پک را ساخته می‌آید، پس حالا پیش از آن‌که
+  انیمیشن به هر پخش‌کننده‌ای داده شود، همهٔ expressionها از آن برداشته می‌شوند. استیکرهای
+  تلگرام هیچ‌وقت expression ندارند و سیاست امنیتی صفحه هم eval را از قبل رد می‌کرد؛ این
+  لایه مستقل از هر دو کار می‌کند. یک تست هم این را می‌سنجد.
+- A Lottie animation can carry "expressions": snippets of JavaScript that lottie-web
+  runs with eval. The canvas build added in 2.98.63 to make the desktop smooth has
+  that ability. A sticker comes from whoever sent it or made its pack, so every
+  expression is now taken out of an animation before it is handed to any player.
+  Telegram's stickers never carry one, and the page's security policy already
+  refused eval; this layer holds regardless of either. A test checks it.
+
+---
+
+# P00RIJA Cryptography 2.98.63
+
+Version 2.98.63 · build chat-v156
 
 ---
 

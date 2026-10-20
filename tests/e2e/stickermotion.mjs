@@ -143,6 +143,20 @@ try {
   check('an animated WebP\'s ANIM count is set to forever', JSON.stringify(loops.webpLoop) === '[0,0]', JSON.stringify(loops.webpLoop));
   check('an APNG\'s plays are set to forever, with the chunk\'s checksum made again', loops.apng.plays === 0 && loops.apng.crcOk && loops.apng.size && loops.apng.decodes, JSON.stringify(loops.apng));
 
+  /* A sticker's animation can carry After Effects expressions — JavaScript a
+     player would eval. None reaches a player: every expression is taken out,
+     the easing handles that share the name stay. */
+  const expressions = await ARIF.evaluate(() => {
+    const animation = { v: '5.7.4', fr: 30, ip: 0, op: 30, w: 100, h: 100, layers: [{ ty: 4, ks: {
+      r: { a: 1, k: [{ t: 0, s: [0], i: { x: [0.5], y: [0.5] }, o: { x: [0.5], y: [0.5] } }, { t: 30, s: [90] }], x: 'window.__ranExpression = true; time * 10' },
+      o: { a: 0, k: 100, x: 'value' },
+    }, shapes: [] }] };
+    const data = window.__stickerProbe.lottieData(JSON.stringify(animation));
+    const text = JSON.stringify(data);
+    return { strings: (text.match(/"x":"/g) || []).length, easings: (text.match(/"x":\[/g) || []).length, ran: Boolean(window.__ranExpression) };
+  });
+  check('no expression in a sticker reaches a player, and the easing handles stay', expressions.strings === 0 && expressions.easings === 2 && !expressions.ran, JSON.stringify(expressions));
+
   const imported = await ARIF.evaluate(async () => {
     window.__stickerProbe.reset();
     openSavedMessages();
