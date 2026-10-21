@@ -805,8 +805,8 @@ window.__allPeersProbe = () => (chatState.peers || []).map((p) => ({
 
 window.__resetIdentityProbe = async () => {
   /* What rotateIdentity() does, without its confirmation dialog. */
-  localStorage.removeItem(CHAT_IDENTITY_STORAGE_KEY);
-  localStorage.removeItem(CHAT_SESSION_KEYS_STORAGE_KEY);
+  forgetEncrypted(CHAT_IDENTITY_STORAGE_KEY);
+  forgetEncrypted(CHAT_SESSION_KEYS_STORAGE_KEY);
   chatState.identity = null;
   chatState.sessionKeys = {};
   chatState.sessions.clear();

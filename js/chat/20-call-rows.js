@@ -899,10 +899,13 @@ syncComposerViewportFocus(true);
 function renderLinkedDeviceCount() {
 const deviceCountEl = document.getElementById('chatLinkedDeviceCount');
 if (!deviceCountEl) return;
-const linkedCount = (chatState.linkedDevices || []).length;
-deviceCountEl.textContent = linkedCount > 0
-? String(linkedCount)
-: t('فقط این دستگاه', 'This device only');
+/* Every device of the account, the ones that are away included, and how many
+   are online right now (58-device-roster.js) — then the list itself. */
+deviceCountEl.textContent = typeof accountDeviceSummary === 'function'
+? accountDeviceSummary()
+: String((chatState.linkedDevices || []).length || t('فقط این دستگاه', 'This device only'));
+const list = document.getElementById('chatIdentityDevicesList');
+if (list && typeof accountDevicesHtml === 'function') list.innerHTML = accountDevicesHtml({ compact: true });
 }
 function renderStaticUi() {
 if (!document.getElementById('content-chat')) return;
@@ -948,6 +951,10 @@ if (pwaButton) pwaButton.disabled = !isUsableRelayOrigin(chatState.profile.serve
 document.getElementById('chatShowSuspensionCountdown').checked = chatState.profile.showSuspensionCountdown !== false;
 const receiptsToggle = document.getElementById('chatSendReceipts');
 if (receiptsToggle) receiptsToggle.checked = receiptsEnabled();
+/* Both "remove background noise" switches, in Settings and in the call. */
+document.querySelectorAll('[data-call-noise-toggle]').forEach((input) => {
+input.checked = typeof callNoiseSuppressionEnabled === 'function' ? callNoiseSuppressionEnabled() : true;
+});
 syncChatToggleStates();
 renderRelayIdentityRow();
 if (!isBeingEdited('chatTurnUrl')) document.getElementById('chatTurnUrl').value = chatState.profile.turnUrl || '';
@@ -995,8 +1002,7 @@ document.getElementById('chatPeerId').textContent = shortSecurityValue(localPeer
 document.getElementById('chatPeerId').title = localPeerId;
 document.getElementById('chatFingerprint').textContent = shortSecurityValue(localFingerprint);
 document.getElementById('chatFingerprint').title = localFingerprint;
-/* How many devices hold this identity right now — linkedDevices is filled by
-   the peers handler from the relay's live table, so the count is live too. */
+/* How many devices hold this identity, and which of them are online now. */
 renderLinkedDeviceCount();
 document.getElementById('chatServerMeta').textContent = t(
 `Signal: ${chatServerOrigin()} | WebSocket: ${wsUrl()}`,

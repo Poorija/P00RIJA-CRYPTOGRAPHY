@@ -179,6 +179,9 @@ publicKeyData: app().arrayBufferToBase64(exportedPublic),
 privateKeyData: app().arrayBufferToBase64(exportedPrivate),
 fingerprint: await sha256Hex(exportedPublic),
 createdAt: new Date().toISOString(),
+/* Made here: this device founds the account's roster as its primary
+   (58-device-roster.js). */
+origin: 'generated',
 };
 // RSA generation can overlap startup, Copy/QR, import, or a profile lock.
 // Never publish a second identity or write one into a different vault.

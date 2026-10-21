@@ -13360,14 +13360,15 @@ html.mobile-browser-context.chat-composer-focused {
    warning, in-call device settings, redial, scrollable controls.
    ============================================================ */
 
-/* Mirror the self-preview by default (FaceTime-style); .mirror-off disables */
+/* The self-preview is NOT mirrored unless .mirror-on says so: it shows what
+   the camera sees, the way the other side sees it. */
 .chat-local-stage video,
 #chatLocalVideo.mirror-target {
-transform: scaleX(-1);
-}
-.chat-local-stage.mirror-off video,
-#chatLocalVideo.mirror-off {
 transform: none;
+}
+.chat-local-stage.mirror-on video,
+#chatLocalVideo.mirror-on {
+transform: scaleX(-1);
 }
 
 /* Call duration next to the status line */
@@ -13502,6 +13503,8 @@ color: #cbd5e1;
 font-size: 0.78rem;
 min-width: 6.5rem;
 }
+.chat-call-settings-row.chat-call-settings-check { grid-template-columns: 1fr auto; }
+.chat-call-settings-row.chat-call-settings-check input { width: 1.1rem; height: 1.1rem; accent-color: #38bdf8; justify-self: end; }
 .chat-call-settings-row select {
 width: 100%;
 background: rgba(15, 23, 42, 0.9);
@@ -16747,19 +16750,144 @@ html body #mainApp #content-chat footer.chat-composer-bar:has(> #chatStickerPane
 /* ============================================================
    v95 — encrypted media vault, pack sharing, drop target
    ============================================================ */
+/* A file that is not on this device: one line saying so, and — when the
+   account has another device — a button that reads as a button, on the same
+   line. It wraps under the text only where the screen is too narrow for both. */
 html body #mainApp #content-chat .chat-media-missing {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  width: max-content;
+  max-width: 100%;
+  padding-block: 0.42rem;
+  padding-inline: 0.7rem 0.42rem;
+  border-radius: 0.85rem;
   border: 1px dashed rgba(148, 163, 184, 0.32);
   background: rgba(148, 163, 184, 0.08);
   color: #94a3b8;
-  font-size: 0.72rem;
-  line-height: 1.5;
+  font-size: 0.74rem;
+  line-height: 1.45;
 }
-html body #mainApp #content-chat .chat-media-missing i { color: #64748b; }
+html body #mainApp #content-chat .chat-media-missing:not(.is-fetchable) { padding-inline: 0.7rem; }
+html body #mainApp #content-chat .chat-media-missing-row { margin-top: 0.55rem; }
+html body #mainApp #content-chat .chat-media-missing-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+html body #mainApp #content-chat .chat-media-missing:not(.is-fetchable) .chat-media-missing-text { white-space: normal; }
+html body #mainApp #content-chat .chat-media-missing-text i { color: #64748b; flex: none; }
+html body #mainApp #content-chat .chat-media-fetch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  margin-inline-start: auto;
+  padding: 0.34rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.3), rgba(14, 165, 233, 0.18));
+  color: #e0f2fe;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 14px -8px rgba(14, 165, 233, 0.9);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+html body #mainApp #content-chat .chat-media-fetch i { color: inherit; font-size: 0.7rem; }
+html body #mainApp #content-chat .chat-media-fetch:hover { background: rgba(56, 189, 248, 0.4); border-color: rgba(125, 211, 252, 0.8); }
+html body #mainApp #content-chat .chat-media-fetch:active { transform: translateY(1px); }
+html body #mainApp #content-chat .chat-media-fetch:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+html body #mainApp #content-chat .chat-media-fetch:disabled { opacity: 0.8; cursor: progress; }
+html:not(.dark) body #mainApp #content-chat .chat-media-missing { color: #475569; background: rgba(148, 163, 184, 0.12); }
+html:not(.dark) body #mainApp #content-chat .chat-media-fetch { color: #0c4a6e; background: rgba(56, 189, 248, 0.18); border-color: rgba(2, 132, 199, 0.45); }
+/* A sticker or GIF that is not here has no artwork to be square around: the
+   bubble holds the line above, at its own width. */
+html body #mainApp #content-chat .chat-message-bubble.chat-sticker-bubble.is-missing { max-width: min(94%, 34rem) !important; width: max-content; }
+html body #mainApp #content-chat .chat-message-bubble.chat-sticker-bubble.is-missing .chat-sticker-body {
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  aspect-ratio: auto !important;
+}
+
+/* The account's devices — Settings › My devices and the identity card's
+   "Linked devices" (58-device-roster.js). */
+.chat-account-devices { display: flex; flex-direction: column; gap: 0.55rem; }
+.chat-account-devices .chat-device-heading { font-weight: 700; }
+.chat-account-devices .chat-device-summary { display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; font-weight: 700; color: #7dd3fc; }
+.chat-account-devices .chat-device-note,
+.chat-account-devices .chat-device-role { font-size: 0.74rem; color: #7d93b8; line-height: 1.75; margin: 0; }
+.chat-account-devices .chat-device-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.chat-account-devices .chat-device-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.75rem;
+  background: rgba(148, 163, 184, 0.05);
+}
+.chat-account-devices .chat-device-icon { color: #38bdf8; width: 1.1rem; text-align: center; }
+.chat-account-devices .chat-device-main { flex: 1 1 10rem; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.chat-account-devices .chat-device-name { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; font-weight: 600; font-size: 0.82rem; }
+.chat-account-devices .chat-device-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.05rem 0.45rem; border-radius: 999px;
+  font-size: 0.64rem; font-weight: 700;
+  background: rgba(148, 163, 184, 0.16); color: #94a3b8;
+}
+.chat-account-devices .chat-device-badge.is-primary { background: rgba(250, 204, 21, 0.16); color: #facc15; }
+.chat-account-devices .chat-device-meta { display: flex; align-items: center; gap: 0.6rem; font-size: 0.7rem; color: #7d93b8; }
+.chat-account-devices .chat-device-status { display: inline-flex; align-items: center; gap: 0.3rem; }
+.chat-account-devices .chat-device-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; background: #64748b; }
+.chat-account-devices .chat-device-row.is-online .chat-device-dot { background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18); }
+.chat-account-devices .chat-device-row.is-online .chat-device-status { color: #34d399; }
+.chat-account-devices .chat-device-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.64rem; opacity: 0.8; }
+.chat-account-devices .chat-device-actions,
+.chat-account-devices .chat-device-buttons { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chat-account-devices .chat-device-action {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.32rem 0.7rem; border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.12); color: #bae6fd;
+  font: inherit; font-size: 0.72rem; font-weight: 700; white-space: nowrap; cursor: pointer;
+}
+.chat-account-devices .chat-device-action:hover { background: rgba(56, 189, 248, 0.24); }
+.chat-account-devices .chat-device-action:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.chat-account-devices .chat-device-action.is-danger { border-color: rgba(248, 113, 113, 0.5); background: rgba(248, 113, 113, 0.1); color: #fecaca; }
+.chat-account-devices .chat-device-action.is-danger:hover { background: rgba(248, 113, 113, 0.22); }
+.chat-account-devices .chat-device-claim {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.7rem;
+  padding: 0.55rem 0.7rem; border-radius: 0.75rem;
+  border: 1px solid rgba(250, 204, 21, 0.35); background: rgba(250, 204, 21, 0.08);
+  font-size: 0.74rem; color: #fde68a; line-height: 1.7;
+}
+.chat-account-devices .chat-device-claim > span { flex: 1 1 12rem; }
+.chat-account-devices .chat-device-claim.is-warning { border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); color: #fecaca; }
+.chat-account-devices .chat-device-toggle {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.55rem 0.7rem; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 0.75rem; cursor: pointer;
+}
+.chat-account-devices .chat-device-toggle input { width: 1rem; height: 1rem; margin-top: 0.15rem; flex: none; }
+.chat-account-devices .chat-device-toggle > span { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.chat-account-devices .chat-device-toggle strong { font-size: 0.78rem; }
+.chat-account-devices .chat-device-toggle small { font-size: 0.7rem; color: #7d93b8; line-height: 1.7; }
+.chat-account-devices .chat-device-toggle em { font-style: normal; color: #7dd3fc; }
+.chat-account-devices.is-compact { margin-top: 0.55rem; }
+.chat-account-devices.is-compact .chat-device-summary { display: none; }
+html:not(.dark) .chat-account-devices .chat-device-row { background: rgba(148, 163, 184, 0.08); }
+html:not(.dark) .chat-account-devices .chat-device-action { color: #075985; background: rgba(56, 189, 248, 0.14); }
+html:not(.dark) .chat-account-devices .chat-device-action.is-danger { color: #991b1b; background: rgba(248, 113, 113, 0.12); }
+html:not(.dark) .chat-account-devices .chat-device-summary { color: #0369a1; }
+html:not(.dark) .chat-account-devices .chat-device-claim { color: #854d0e; }
 
 /* Shared sticker pack card */
 html body #mainApp #content-chat .chat-packcard {
@@ -17506,13 +17634,13 @@ html body #chatFloatingCall:is(#chatFloatingCall) .chat-floating-call-window[dat
    button toggled a class that could never do anything. Drive it through a
    custom property instead, which no `transform: none` can reach. */
 html body #chatFloatingCall:is(#chatFloatingCall) .chat-local-stage > video {
-  transform: var(--self-mirror, scaleX(-1)) !important;
+  transform: var(--self-mirror, none) !important;
 }
-html body #chatFloatingCall:is(#chatFloatingCall) .chat-local-stage.mirror-off > video {
-  --self-mirror: none;
+html body #chatFloatingCall:is(#chatFloatingCall) .chat-local-stage.mirror-on > video {
+  --self-mirror: scaleX(-1);
 }
-html body #mainApp #chatLocalVideo { transform: var(--self-mirror, scaleX(-1)) !important; }
-html body #mainApp #chatLocalVideo.mirror-off { --self-mirror: none; }
+html body #mainApp #chatLocalVideo { transform: var(--self-mirror, none) !important; }
+html body #mainApp #chatLocalVideo.mirror-on { --self-mirror: scaleX(-1); }
 
 /* ---- the peer asked to be mirrored ----
    Mirroring used to stop at my own preview. When the far end turns it on we
@@ -28316,3 +28444,110 @@ html body #mainApp #content-chat .chat-sticker-tab > span { width: 100%; height:
 .lottie-worker-holder { width: 100%; height: 100%; }
 .chat-lottie canvas,
 .lottie-worker-holder canvas { display: block; width: 100% !important; height: 100% !important; }
+
+/* Linking a device with a QR code (js/chat/59-device-link.js). */
+.chat-link-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.chat-link-card {
+  position: relative;
+  width: min(28rem, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 1.2rem 1.1rem 1.1rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8);
+}
+.chat-link-close {
+  position: absolute;
+  inset-inline-end: 0.7rem;
+  top: 0.7rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.chat-link-title { font-size: 1rem; font-weight: 800; margin: 0 0 0.8rem; padding-inline-end: 2.4rem; }
+.chat-link-body { display: flex; flex-direction: column; gap: 0.65rem; }
+.chat-link-note { font-size: 0.8rem; line-height: 1.8; color: #94a3b8; margin: 0; }
+.chat-link-status { font-size: 0.78rem; line-height: 1.7; margin: 0; min-height: 1.2em; color: #7dd3fc; }
+.chat-link-status[data-tone="error"] { color: #fca5a5; }
+.chat-link-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.1);
+  color: #e0f2fe;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.chat-link-option:hover { background: rgba(56, 189, 248, 0.2); }
+.chat-link-option:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.chat-link-option > i { font-size: 1.15rem; width: 1.4rem; text-align: center; color: #38bdf8; flex: none; }
+.chat-link-option > span { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.chat-link-option strong { font-size: 0.85rem; }
+.chat-link-option small { font-size: 0.72rem; color: #94a3b8; line-height: 1.6; }
+.chat-link-option.is-quiet { border-color: rgba(148, 163, 184, 0.25); background: transparent; }
+.chat-link-option.is-quiet > i { color: #94a3b8; }
+.chat-link-option.is-primary { justify-content: center; background: #0ea5e9; border-color: #0ea5e9; color: #fff; }
+.chat-link-option.is-primary > i { color: #fff; }
+.chat-link-option.is-danger { justify-content: center; border-color: rgba(248, 113, 113, 0.5); background: rgba(248, 113, 113, 0.1); color: #fecaca; }
+.chat-link-option.is-danger > i { color: #fca5a5; }
+.chat-link-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.chat-link-qr { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.chat-link-qr-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0.5rem;
+  border-radius: 0.9rem;
+  background: #ffffff;
+}
+.chat-link-qr-box canvas, .chat-link-qr-box img { display: block; max-width: 100%; height: auto; }
+.chat-link-countdown { width: min(340px, 100%); height: 4px; border-radius: 999px; background: rgba(148, 163, 184, 0.2); overflow: hidden; }
+.chat-link-countdown span { display: block; height: 100%; width: 100%; background: #38bdf8; transform-origin: left center; }
+html[dir="rtl"] .chat-link-countdown span { transform-origin: right center; }
+@keyframes chat-link-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.chat-link-sas {
+  align-self: center;
+  padding: 0.55rem 1.1rem;
+  border-radius: 0.8rem;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  font: 800 1.7rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+  direction: ltr;
+  color: #e0f2fe;
+}
+.chat-link-video { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 0.9rem; background: #000; }
+.chat-link-done { text-align: center; font-size: 2.6rem; color: #34d399; }
+html:not(.dark) .chat-link-card { background: #ffffff; color: #0f172a; }
+html:not(.dark) .chat-link-option { color: #075985; }
+html:not(.dark) .chat-link-sas { color: #0c4a6e; }
+@media (prefers-reduced-motion: reduce) { .chat-link-countdown span { animation-duration: 0s !important; } }
+@media (max-width: 420px) {
+  .chat-link-overlay { padding: 10px; }
+  .chat-link-card { padding: 1rem 0.8rem 0.9rem; }
+  .chat-link-qr-box { min-height: 0; padding: 0.35rem; }
+}

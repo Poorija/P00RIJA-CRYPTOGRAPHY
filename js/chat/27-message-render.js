@@ -339,7 +339,7 @@ ${(voiceWaveCache.get(entry.id) || seededVoiceWave(entry.id)).map((level) => `<d
 </div>
 <button class="audio-speed-btn">1x</button>
 </div>
-` : missingMediaHtml(t('این پیام صوتی روی این دستگاه ذخیره نشده است.', 'This voice message is not stored on this device.'), entry.id);
+` : missingMediaHtml(t('این پیام صوتی روی این دستگاه ذخیره نشده است.', 'This voice message is not stored on this device.'), entry.id, 'voice');
 return `
 <div class="${bubbleClass(entry)}" data-id="${eid(entry.id)}">
 ${senderHtml}
@@ -514,14 +514,14 @@ const stickerKind = entry.stickerKind || stickerKindForName(entry.name || '', en
    a square stamp. */
 const gif = isGifEntry(entry);
 return `
-<div class="${bubbleClass(entry)} chat-sticker-bubble${gif ? ' is-gif' : ''}" data-id="${eid(entry.id)}">
+<div class="${bubbleClass(entry)} chat-sticker-bubble${gif ? ' is-gif' : ''}${entry.downloadUrl ? '' : ' is-missing'}" data-id="${eid(entry.id)}">
 ${senderHtml}
 ${replyPreview}
-<div class="chat-sticker-body">${entry.downloadUrl
+<div class="chat-sticker-body${entry.downloadUrl ? '' : ' is-missing'}">${entry.downloadUrl
 ? stickerMediaHtml(safeMediaUrl(typeof loopedPictureUrl === 'function' ? loopedPictureUrl(entry.downloadUrl) : entry.downloadUrl) || 'about:blank', stickerKind, gif ? 'chat-sticker-media chat-gif-media' : 'chat-sticker-media', gif ? { width: entry.mediaWidth, height: entry.mediaHeight } : {})
 : missingMediaHtml(gif
 ? t('این گیف روی این دستگاه ذخیره نشده است.', 'This GIF is not stored on this device.')
-: t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'), entry.id)}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
+: t('استیکر روی این دستگاه ذخیره نشده است.', 'Sticker is not stored on this device.'), entry.id, gif ? 'gif' : 'sticker')}${gif && entry.downloadUrl ? '<span class="chat-gif-badge" aria-hidden="true">GIF</span>' : ''}</div>
 ${reactionToolbar}
 ${meta}
 </div>
@@ -541,11 +541,9 @@ ${replyPreview}
 <div class="font-bold text-sm truncate mb-0.5">${app().escapeHTML(entry.name || 'file.bin')}</div>
 <div class="text-[11px] opacity-60">${app().formatBytes?.(entry.size) || entry.size + ' B'}</div>
 ${(() => {
-if (!entry.downloadUrl) {
-/* A sibling online means the bytes are one tap away, device to device
-   (57-sibling-files.js). Without one, the row can only say what it is. */
-return missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'), entry.id);
-}
+/* Not here: said below the name, across the whole bubble (see after this
+   block), where the line and its button fit side by side. */
+if (!entry.downloadUrl) return '';
 // A self-destruct file is meant to disappear; handing over a Download link
 // would let the recipient keep it forever and make the timer meaningless.
 // Show a preview that cannot be saved, dragged, long-pressed or selected.
@@ -569,6 +567,7 @@ return downloadHref
 })()}
 </div>
 </div>
+${entry.downloadUrl ? '' : `<div class="chat-media-missing-row">${missingMediaHtml(t('این فایل روی این دستگاه ذخیره نشده است.', 'This file is not stored on this device.'), entry.id, 'named')}</div>`}
 ${reactionToolbar}
 ${meta}
 </div>

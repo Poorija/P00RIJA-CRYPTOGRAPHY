@@ -646,7 +646,7 @@ callVideoEnabled: true,
 callFacingMode: 'user',
 callDisplayMode: 'fullscreen',
 callPrimaryVideo: 'remote',
-callMirrorSelf: true,
+callMirrorSelf: false,
 callTimerInterval: null,
 callQualityTimer: null,
 callQuality: 'unknown',
@@ -773,6 +773,13 @@ console.error(`[chat] failed to save ${key}:`, error);
 reportChatStorageFailure(key);
 return false;
 }
+}
+/* A value gone for good: the live copy as well, or the next read would hand
+   it straight back from the cache. */
+function forgetEncrypted(key) {
+try { localStorage.removeItem(key); } catch (_error) { /* private mode */ }
+encryptedStoreCache.delete(chatStorageAddress(key));
+unreadableChatStores.delete(chatStorageAddress(key));
 }
 function loadEncrypted(key, fallback) {
 const address = chatStorageAddress(key);
@@ -1305,6 +1312,9 @@ function buildPortableProfilePayload() {
     contacts: loadEncrypted(CHAT_CONTACTS_STORAGE_KEY, []),
     spaces: spaces && typeof spaces === 'object' ? spaces : { groups: [], channels: [] },
     prekeys: loadPrekeys(),
+    /* Which device is the account's primary, as it signed it: the new device
+       knows it from its first moment, and cannot be told otherwise. */
+    roster: typeof currentRoster === 'function' ? currentRoster() : null,
   };
 }
 async function exportPortableProfileFile() {
@@ -1398,7 +1408,16 @@ async function importPortableProfileFile(file) {
     notify(t('فایل پروفایل معتبر نیست.', 'That is not a valid profile file.'), 'error');
     return;
   }
+  await applyPortableProfilePayload(payload);
+}
+/* The identity a portable profile carries, made this device's own — from the
+   password-protected file above, or handed over by another device of the
+   account when the two are linked with a code (59-device-link.js), which has
+   asked its own questions first (`confirmed`). */
+async function applyPortableProfilePayload(payload, { confirmed = false } = {}) {
+  if (payload?.type !== PORTABLE_PROFILE_TYPE || !payload.identity?.publicKeyData || !payload.identity?.privateKeyData) return false;
   const replacing = Boolean(chatState.identity?.fingerprint);
+  if (!confirmed) {
   const confirmText = replacing
     ? t('این کار هویت چت امنِ فعلی این دستگاه را با هویت داخل فایل جایگزین می‌کند. ادامه می‌دهید؟', 'This replaces this device\'s current secure-chat identity with the one inside the file. Continue?')
     : t('هویت داخل فایل روی این دستگاه فعال شود؟', 'Activate the identity inside the file on this device?');
@@ -1408,15 +1427,19 @@ async function importPortableProfileFile(file) {
       { value: 'yes', label: replacing ? t('جایگزین کن', 'Replace') : t('فعال‌سازی', 'Activate') },
     ], { title: t('پروفایل همراه', 'Portable Profile') });
   } catch (_error) {
-    return;
+    return false;
   }
-  if (choice !== 'yes') return;
+  if (choice !== 'yes') return false;
+  }
   /* Write the imported identity everywhere it lives, then adopt it live. */
   const identity = {
     publicKeyData: String(payload.identity.publicKeyData),
     privateKeyData: String(payload.identity.privateKeyData),
     fingerprint: String(payload.identity.fingerprint || ''),
     createdAt: String(payload.identity.createdAt || new Date().toISOString()),
+    /* Made on another device: this one never founds the account's roster on
+       its own, and knows its primary from the roster the file carries. */
+    origin: 'imported',
   };
   chatState.identity = identity;
   saveEncrypted(CHAT_IDENTITY_STORAGE_KEY, identity);
@@ -1459,6 +1482,8 @@ async function importPortableProfileFile(file) {
     chatState.hasLinkedDevices = false;
     chatState.profile.hasLinkedDevices = false;
   }
+  chatState.deviceRoster = null;
+  if (payload.roster && typeof adoptRoster === 'function') await adoptRoster(payload.roster).catch(() => false);
   chatState.p2pNoticeShown = false;
   chatState.reconnectAttempt = 0;
   renderStaticUi();
@@ -1473,6 +1498,7 @@ async function importPortableProfileFile(file) {
     setConnectionState(false, ['چت امن خاموش است', 'Secure chat is off']);
     renderStaticUi();
   }
+  return true;
 }
 function restrictionText(restriction = chatState.serverRestriction) {
 if (!restriction) return '';
@@ -2992,6 +3018,7 @@ chatCrossRelayComm: ['ارتباط بین رله‌ها روشن است؛ پیا
    on-colour — only the knob moved, which read as a different kind of switch. */
 chatLinkPreviews: ['پیش‌نمایش لینک روشن است', 'Link previews are on', 'پیش‌نمایش لینک خاموش است — هیچ صفحه‌ای باز نمی‌شود', 'Link previews are off — no page is opened'],
 chatStripMetadataToggle: ['متادیتای فایل‌ها پیش از ارسال پاک می‌شود', 'File metadata is removed before sending', 'فایل‌ها با متادیتای خودشان فرستاده می‌شوند', 'Files are sent with their metadata'],
+chatCallNoiseToggle: ['نویز محیط در تماس حذف می‌شود', 'Background noise is removed in calls', 'صدای تماس بدون حذف نویز فرستاده می‌شود (فقط کاهش نویز خود مرورگر)', 'Calls go without noise removal (only the browser\'s own reduction)'],
 chatConvertHeicToggle: ['پیش از ارسال عکس HEIC پرسیده می‌شود', 'You are asked before a HEIC photo is sent', 'عکس‌های HEIC همان‌طور که هستند فرستاده می‌شوند', 'HEIC photos are sent as they are'],
 };
 Object.entries(toggleMeta).forEach(([id, labels]) => {

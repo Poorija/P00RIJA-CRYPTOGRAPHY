@@ -194,6 +194,7 @@ async function handleBeacons(items) {
   let behindDevice = null;
   for (const item of Array.isArray(items) ? items : []) {
     if (!item?.deviceId || item.deviceId === mine || !item.blob) continue;
+    if (typeof deviceRevoked === 'function' && deviceRevoked(item.deviceId)) continue;
     let beacon;
     try {
       beacon = await openBeacon(item.blob);
@@ -212,6 +213,9 @@ async function handleBeacons(items) {
   }
   chatState.deviceSyncBehind = behindConversations ? { conversations: behindConversations, device: behindDevice?.n || '', deviceId: behindDevice?.d || '' } : null;
   renderDeviceSyncHint();
+  /* Every device the account has, listed even while it is away. */
+  if (typeof noteSeenAccountDevices === 'function') noteSeenAccountDevices();
+  if (typeof renderAccountDeviceViews === 'function') renderAccountDeviceViews();
   if (behindConversations) requestDeltaFromSiblings({ reason: 'beacon' });
 }
 
@@ -280,6 +284,7 @@ const deltaServedAt = new Map();
 async function serveDeltaRequest(request) {
   const requester = String(request?.fromDeviceId || '');
   if (!requester || requester === getDeviceId()) return;
+  if (typeof deviceRevoked === 'function' && deviceRevoked(requester)) return;
   const last = deltaServedAt.get(requester) || 0;
   if (Date.now() - last < SIBLING_SYNC_MIN_INTERVAL_MS / 2) return;
   deltaServedAt.set(requester, Date.now());
@@ -544,10 +549,13 @@ async function probeRemoteSiblings() {
 /* Called when the relay connection is up and this device's identity proven. */
 let deviceBeaconTimer = null;
 function startDeviceBeacon() {
+  /* Which devices the account has, and which is its primary. */
+  if (typeof startDeviceRoster === 'function') startDeviceRoster();
   requestBeacons();
   scheduleBeaconWrite(3000);
   /* Whatever changed here while this device was offline goes out now. */
   scheduleSiblingJournal();
+  if (typeof scheduleSiblingAutoPull === 'function') scheduleSiblingAutoPull(6000);
   if (deviceBeaconTimer) return;
   deviceBeaconTimer = window.setInterval(() => {
     if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return;

@@ -135,6 +135,7 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = fals
       CHAT_OFFLINE_STORE_DIR: path.join(side.dir, 'mailboxes'),
       CHAT_BEACON_DIR: path.join(side.dir, 'beacons'),
       CHAT_SIBLING_DIR: path.join(side.dir, 'siblings'),
+      CHAT_ROSTER_DIR: path.join(side.dir, 'rosters'),
       CHAT_PUSH_STORE_PATH: path.join(side.dir, 'push.json'),
       CHAT_VAPID_STORE_PATH: path.join(side.dir, 'vapid.json'),
       CHAT_POLICY_STORE_PATH: path.join(side.dir, 'policy.json'),

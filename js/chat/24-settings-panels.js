@@ -222,71 +222,14 @@ function settingsPaneTitle(id) {
 }
 
 /* My devices — one identity, several machines, one panel to see them on.
- * The list is chatState.linkedDevices, filled by the peers handler from the
- * relay's live presence table: it names sockets, so everyone in it is online
- * right now, and a device that is away is simply absent until it returns. */
+ * Every device the account has is listed, the ones that are away too (with
+ * when each was last seen), with which one is the primary; the list itself
+ * and what can be done from it live in 58-device-roster.js, shared with the
+ * identity card's "Linked devices". */
 function renderDevicesCard() {
   const card = document.getElementById('chatDevicesCard');
   if (!card) return;
-  const myDeviceId = typeof getDeviceId === 'function' ? getDeviceId() : '';
-  const linked = new Map();
-  for (const device of chatState.linkedDevices || []) {
-    linked.set(device.deviceId || device.clientId, {
-      name: device.name || String(device.deviceId || device.clientId || '').slice(0, 8) || '?',
-      online: true,
-      /* deviceId is the precise test. The clientId half only matters against a
-         relay that has not learned to echo deviceId yet — it still tells this
-         device's own socket from a sibling's. */
-      isSelf: Boolean(
-        (device.deviceId && device.deviceId === myDeviceId)
-        || (!device.deviceId && device.clientId && device.clientId === chatState.clientId)
-      ),
-    });
-  }
-  /* This device is always in the list, whether or not the relay round-trip
-     has shown it yet — the peers payload may lag a reconnect by a beat. */
-  if (!linked.has(myDeviceId)) {
-    linked.set(myDeviceId, { name: chatState.profile?.name || t('این دستگاه', 'This device'), online: true, isSelf: true });
-  }
-
-  const rows = Array.from(linked.entries()).map(([id, d]) =>
-    '<div class="chat-device-row" style="display:flex;align-items:center;gap:0.7rem;padding:0.55rem 0.7rem;border:1px solid rgba(148, 163, 184, 0.2);border-radius:0.7rem;margin-bottom:0.4rem">'
-    + '<i class="fas ' + (d.isSelf ? 'fa-mobile-screen' : 'fa-laptop') + '" style="color:#38bdf8"></i>'
-    + '<span style="flex:1;font-weight:600;color:#e2e8f0">' + app().escapeHTML(d.name) + (d.isSelf ? ' <em style="opacity:0.6">(' + t('این دستگاه', 'this device') + ')</em>' : '') + '</span>'
-    /* The id tail is what tells two same-named machines apart: every device
-       of one account shares the profile name, never the device id. */
-    + '<span style="font-size:0.66rem;color:#7d93b8;font-family:monospace">' + app().escapeHTML(String(id).slice(-6)) + '</span>'
-    + '<span style="font-size:0.72rem;color:' + (d.online ? '#34d399' : '#7d93b8') + '">' + (d.online ? t('آنلاین', 'online') : t('آفلاین', 'offline')) + '</span>'
-    + '</div>'
-  ).join('');
-
-  card.innerHTML =
-    '<div style="font-weight:700;margin-bottom:0.5rem">' + t('دستگاه‌های متصل به این هویت', 'Devices linked to this identity') + '</div>'
-    + '<p style="font-size:0.74rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
-    + t('هر دستگاهی که این هویت را دارد پیام‌ها را همزمان دریافت می‌کند و تاریخچه و تماس‌ها با آن‌ها سینک می‌شود — بسته‌شده، فقط برای دستگاه‌های خودتان. برای افزودن دستگاه جدید، پروفایل همراه را از این دستگاه خروجی بگیرید و روی دستگاه جدید وارد کنید.',
-        'Every device holding this identity receives messages simultaneously, and the history and call log sync with them — sealed, and readable only by your own devices. To add a device, export the portable profile from this device and import it on the new one.')
-    + '</p>'
-    + '<p style="font-size:0.72rem;color:#7d93b8;margin-bottom:0.8rem;line-height:1.7">'
-    + t('دستگاه‌های یک حساب همه‌چیزِ حساب را می‌بینند: مخاطبین و تأییدهای امنیتی آن‌ها مشترک است و پاک‌سازی اضطراری از هر دستگاهی، دادهٔ مشترک (مثل صف پیام‌های سرور) را برای همه برمی‌دارد.',
-        'Devices of one account see everything the account sees: contacts and their safety-number verifications are shared, and an emergency wipe from any device removes the account\'s shared data (such as the server\'s queued mail) for all of them.')
-    + '</p>'
-    + rows
-    + '<div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">'
-    + '<button type="button" class="btn" onclick="sendDeviceSyncFromUi()" style="font-size:0.78rem"><i class="fas fa-rotate"></i> '
-    + t('هم‌اکنون سینک کن', 'Sync now')
-    + '</button>'
-    + '<button type="button" class="btn" onclick="exportPortableProfileFile()" style="font-size:0.78rem"><i class="fas fa-qrcode"></i> '
-    + t('افزودن دستگاه (خروجی پروفایل)', 'Add device (export profile)')
-    + '</button>'
-    + '</div>'
-    + '<div style="display:flex;align-items:center;gap:0.55rem;margin-top:0.9rem;padding:0.55rem 0.7rem;border:1px solid rgba(148, 163, 184, 0.2);border-radius:0.7rem">'
-    + '<input type="checkbox" id="chatDeviceSyncFilesToggle" style="width:1rem;height:1rem" '
-    + (deviceSyncFilesEnabled() ? 'checked' : '')
-    + ' onchange="setDeviceSyncFilesEnabled(this.checked)">'
-    + '<label for="chatDeviceSyncFilesToggle" style="font-size:0.76rem;color:#e2e8f0;cursor:pointer">'
-    + t('جابه‌جایی فایل بین دستگاه‌ها (فایل‌های ریز خودکار؛ بقیه با دکمهٔ «دریافت از دستگاه دیگر»)', 'Move files between devices (tiny ones ride along; the rest via the "Fetch from my other device" button)')
-    + '</label>'
-    + '</div>';
+  card.innerHTML = typeof accountDevicesHtml === 'function' ? accountDevicesHtml() : '';
 }
 
 function setChatSettingsTab(id) {

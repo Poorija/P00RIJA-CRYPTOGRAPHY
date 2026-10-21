@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.98.68';
+const APP_VERSION_SEMVER = '2.98.70';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v161';
+  return 'chat-v163';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -1046,6 +1046,9 @@ autoConnect: 'اتصال خودکار',
 crossRelayComm: 'ارتباط بین رله‌ها',
 crossRelayCommHint: 'روشن: پیام، فایل و تماس (شخصی و گروهی) به مخاطبانی که روی رلهٔ دیگری هستند از مسیر رمزنگاری‌شدهٔ بین دو رله می‌رود و رلهٔ شما نمی‌بیند با چه کسی حرف می‌زنید. خاموش: همه‌چیز از رلهٔ خودتان می‌رود و رله می‌بیند با چه کسی ارتباط دارید (محتوا همیشه رمزنگاری‌شده می‌ماند).',
 videoCall: 'تماس تصویری',
+linkThisDevice: 'اتصال این دستگاه به حساب (با کد QR)',
+callNoiseSuppression: 'حذف نویز محیط در تماس',
+callNoiseSuppressionHint: 'صدای پس‌زمینه (پنکه، خیابان، کیبورد، همهمه) با RNNoise روی خود همین دستگاه از صدای شما حذف می‌شود و چیزی برای آن به جایی فرستاده نمی‌شود. در تماس صوتی، تصویری و گروهی.',
 localDiscovery: 'دیسکاوری محلی',
 suspensionCountdown: 'شمارش معکوس تعلیق',
 callRingtone: 'زنگ تماس',
@@ -2116,6 +2119,9 @@ autoConnect: 'Auto Connect',
 crossRelayComm: 'Cross-relay communication',
 crossRelayCommHint: 'On: messages, files and calls (1:1 and group) to contacts on another relay go through the encrypted route between the two relays, and your relay cannot see who you are talking to. Off: everything goes through your own relay, which can then see who you communicate with (contents are always encrypted).',
 videoCall: 'Video Call',
+linkThisDevice: 'Link this device to an account (QR code)',
+callNoiseSuppression: 'Background noise removal in calls',
+callNoiseSuppressionHint: 'Background sound (a fan, traffic, a keyboard, chatter) is removed from your voice by RNNoise, on this device itself; nothing is sent anywhere for it. In voice, video and group calls.',
 localDiscovery: 'Local Discovery',
 suspensionCountdown: 'Suspension Countdown',
 callRingtone: 'Call Ringtone',
@@ -6610,7 +6616,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.68-chat-v161';
+const reloadKey = 'poorija-sw-reload-2.98.70-chat-v163';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6623,7 +6629,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.68-chat-v161', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.70-chat-v163', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();

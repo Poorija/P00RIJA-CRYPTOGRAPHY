@@ -1592,6 +1592,9 @@ if (!wasRoutable && routableHomeRelay(peer) && typeof noteRouteBecameRoutable ==
  * keeping, because it is what rings somebody who was away and it carries its own
  * staleness check on arrival. */
 const EPHEMERAL_RELAY_TYPES = new Set([
+  /* Linking a device with a code: worth nothing a minute later, and never
+     to be kept by a relay. */
+  'device-link',
   'typing', 'receipt', 'ping', 'pong', 'relay-ack', 'call-reaction', 'call-busy',
   'call-relay-offer', 'call-relay-answer', 'call-relay-ice', 'call-relay-end',
   'call-ice', 'call-renegotiate', 'call-renegotiate-answer', 'call-accepted', 'call-path-relay',
@@ -3180,6 +3183,10 @@ homeRelay: myHomeRelay(),
    fingerprint but never the device id, and the peers table uses this to
    tell them apart. */
 deviceId: typeof getDeviceId === 'function' ? getDeviceId() : '',
+/* This install's own public key (58-device-roster.js): the identity proof
+   below is signed with it too, so the relay knows which device is speaking
+   and can keep out one the account's primary revoked. */
+deviceKey: typeof deviceHelloKey === 'function' ? deviceHelloKey() : '',
 }));
 /* Push is NOT armed from here any more. Subscribing on every hello meant the
    relay was handed a device record before the user had been told that a push

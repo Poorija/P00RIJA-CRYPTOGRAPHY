@@ -75,7 +75,10 @@ chatState.callHeld = false;
 chatState.callSpeakerEnabled = false;
 chatState.callVideoEnabled = mode === 'video';
 chatState.remoteCallState = { muted: false, held: false, videoOff: false, screen: false };
-chatState.callMirrorSelf = chatState.profile?.mirrorSelfVideo !== false;
+/* Not mirrored unless asked for: what the camera sees, the way the other
+   side sees it — the way FaceTime-era apps ship today. Turning it on is
+   remembered. */
+chatState.callMirrorSelf = chatState.profile?.mirrorSelfVideo === true;
 syncMirrorSelfView();
 applyRemoteCallState(chatState.remoteCallState);
 closeCallSettingsPanel();
@@ -321,7 +324,7 @@ if (!chatState.currentCall || chatState.currentCallMode !== 'video' || !navigato
 const nextFacingMode = chatState.callFacingMode === 'user' ? 'environment' : 'user';
 try {
 const replacement = hintTrackContent(await navigator.mediaDevices.getUserMedia({
-video: { facingMode: { ideal: nextFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+video: { facingMode: { ideal: nextFacingMode }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
 audio: false,
 }));
 const nextTrack = replacement.getVideoTracks()[0];
@@ -598,8 +601,10 @@ if (!await PoorijaDialogs.confirm(t('بازنشانی کلید چت، سشن‌�
 return;
 }
 const previousFingerprint = chatState.identity?.fingerprint || '';
-localStorage.removeItem(CHAT_IDENTITY_STORAGE_KEY);
-localStorage.removeItem(CHAT_SESSION_KEYS_STORAGE_KEY);
+/* Out of the live cache too: removing only the stored copy left the old
+   identity in memory, and the very next read handed it straight back. */
+forgetEncrypted(CHAT_IDENTITY_STORAGE_KEY);
+forgetEncrypted(CHAT_SESSION_KEYS_STORAGE_KEY);
 chatState.identity = null;
 chatState.sessionKeys = {};
 chatState.sessions.clear();

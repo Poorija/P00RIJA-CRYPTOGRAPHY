@@ -250,6 +250,13 @@ const siblingHeldChars = new Map();
 let siblingCachedChars = 0;
 let siblingTotalChars = 0;
 const beaconCache = new Map();
+/* Which devices are still part of an account; see "The device roster"
+   further down. A small signed document per account, nothing more. */
+const ROSTER_DIR = process.env.CHAT_ROSTER_DIR || path.join(path.dirname(OFFLINE_STORE_PATH), 'rosters');
+const ROSTER_MAX_CHARS = 32 * 1024;
+const ROSTER_MAX_MEMBERS = 32;
+const ROSTER_MAX_REVOKED = 128;
+const rosterCache = new Map();
 
 const POLICY_STORE_PATH = process.env.CHAT_POLICY_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'server-policy.json');
 const SELF_DESTRUCT_STORE_PATH = process.env.CHAT_SELF_DESTRUCT_STORE_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'self-destruct-records.json');
@@ -7040,6 +7047,177 @@ function dropBeacons(fingerprint) {
   try { fs.unlinkSync(beaconPath(fingerprint)); } catch (_error) { /* none */ }
   dropSiblingHeld(fingerprint);
 }
+/* One device is gone from the account — it left, or its primary revoked it:
+   its beacon goes, and so does every copy held for it. */
+function forgetSiblingDevice(fingerprint, deviceId) {
+  if (!deviceId) return;
+  const entries = loadBeacons(fingerprint);
+  if (entries[deviceId]) {
+    const kept = { ...entries };
+    delete kept[deviceId];
+    beaconCache.set(fingerprint, kept);
+    try {
+      if (Object.keys(kept).length) writeJsonAtomic(beaconPath(fingerprint), kept);
+      else fs.unlinkSync(beaconPath(fingerprint));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') console.warn('[Beacon] could not be written:', error.message);
+    }
+  }
+  const store = loadSiblingHeld(fingerprint);
+  const heldForIt = store.items.some((item) => item.pending.includes(deviceId)) || Boolean(store.overflow[deviceId]);
+  if (!heldForIt) return;
+  store.items = store.items
+    .map((item) => ({ ...item, pending: item.pending.filter((id) => id !== deviceId) }))
+    .filter((item) => item.pending.length);
+  delete store.overflow[deviceId];
+  saveSiblingHeld(fingerprint, store);
+}
+
+/* ------------------------------------------------------------------
+ * The device roster — which devices are still part of an account.
+ *
+ * Every device of an account holds the same identity key, so that key cannot
+ * be what tells the account's first device — its primary — from the others.
+ * Each device also has a key of its own, made on it and never exported. The
+ * roster names the primary by that key, with a certificate the identity key
+ * signed (only a device of the account can make one), and the roster itself
+ * is signed with the primary's own device key: no other device of the
+ * account, and not this relay, can write one that verifies. A successor must
+ * be signed by the primary the stored roster names, with a higher sequence
+ * number; handing the role on is that primary signing a roster that names
+ * another device.
+ *
+ * The relay keeps the newest valid roster and enforces what it revokes: a
+ * revoked device — by its id, or by its key once proven — is told so and
+ * shut out the moment its identity is proven, its beacon and whatever was
+ * held for it are dropped, and a socket of it already connected is closed.
+ * Nothing in the roster is secret: device ids, public keys and a label like
+ * "macOS app" — no name, no history.
+ * ------------------------------------------------------------------ */
+const ROSTER_DEVICE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const ROSTER_KEY_TEXT = /^[A-Za-z0-9+/=]{40,400}$/;
+const ROSTER_SIGNATURE_TEXT = /^[A-Za-z0-9+/=]{40,1100}$/;
+function rosterPath(fingerprint) {
+  return path.join(ROSTER_DIR, `${fingerprint}.json`);
+}
+function loadRoster(fingerprint) {
+  if (rosterCache.has(fingerprint)) return rosterCache.get(fingerprint);
+  let roster = null;
+  try { roster = JSON.parse(fs.readFileSync(rosterPath(fingerprint), 'utf8')); } catch (_error) { roster = null; }
+  if (!roster || typeof roster !== 'object' || roster.fp !== fingerprint) roster = null;
+  rosterCache.set(fingerprint, roster);
+  if (rosterCache.size > 2000) rosterCache.delete(rosterCache.keys().next().value);
+  return roster;
+}
+function saveRoster(fingerprint, roster) {
+  rosterCache.set(fingerprint, roster);
+  try {
+    fs.mkdirSync(ROSTER_DIR, { recursive: true });
+    writeJsonAtomic(rosterPath(fingerprint), roster);
+  } catch (error) {
+    console.warn('[Roster] could not be written:', error.message);
+  }
+}
+function dropRoster(fingerprint) {
+  rosterCache.delete(fingerprint);
+  try { fs.unlinkSync(rosterPath(fingerprint)); } catch (_error) { /* none */ }
+}
+/* Exactly the bytes the client signs (js/chat/58-device-roster.js), field by
+   field in a fixed order, so neither side depends on how an object's keys
+   happen to be ordered. */
+function rosterSignedText(roster) {
+  return 'poorija-roster|1|' + JSON.stringify([
+    roster.fp, roster.seq, roster.at,
+    [roster.primary.d, roster.primary.k, roster.primary.n],
+    roster.cert,
+    roster.members.map((member) => [member.d, member.k, member.n, member.at]),
+    roster.revoked.map((entry) => [entry.d, entry.k, entry.at, entry.why]),
+    roster.signer,
+  ]);
+}
+function rosterCertText(roster) {
+  return `poorija-roster-primary|${roster.fp}|${roster.primary.d}|${roster.primary.k}`;
+}
+function rosterLabelValid(text) {
+  return typeof text === 'string' && text.length <= 48 && !/[\u0000-\u001f\u007f]/.test(text);
+}
+function rosterShapeValid(roster, fingerprint) {
+  if (!roster || typeof roster !== 'object' || Array.isArray(roster)) return false;
+  if (roster.v !== 1 || roster.fp !== fingerprint) return false;
+  if (!Number.isSafeInteger(roster.seq) || roster.seq < 1 || !Number.isSafeInteger(roster.at) || roster.at < 0) return false;
+  const primary = roster.primary;
+  if (!primary || !ROSTER_DEVICE_ID.test(String(primary.d || '')) || !ROSTER_KEY_TEXT.test(String(primary.k || '')) || !rosterLabelValid(primary.n)) return false;
+  if (!ROSTER_SIGNATURE_TEXT.test(String(roster.cert || '')) || !ROSTER_SIGNATURE_TEXT.test(String(roster.sig || ''))) return false;
+  if (!ROSTER_KEY_TEXT.test(String(roster.signer || ''))) return false;
+  if (!Array.isArray(roster.members) || roster.members.length > ROSTER_MAX_MEMBERS) return false;
+  if (!Array.isArray(roster.revoked) || roster.revoked.length > ROSTER_MAX_REVOKED) return false;
+  for (const member of roster.members) {
+    if (!member || !ROSTER_DEVICE_ID.test(String(member.d || '')) || !ROSTER_KEY_TEXT.test(String(member.k || ''))
+      || !rosterLabelValid(member.n) || !Number.isSafeInteger(member.at)) return false;
+  }
+  for (const entry of roster.revoked) {
+    if (!entry || !ROSTER_DEVICE_ID.test(String(entry.d || '')) || (entry.k !== '' && !ROSTER_KEY_TEXT.test(String(entry.k || '')))
+      || !Number.isSafeInteger(entry.at) || (entry.why !== 'revoked' && entry.why !== 'left')) return false;
+  }
+  /* The primary cannot be one of the devices it revoked. */
+  if (roster.revoked.some((entry) => entry.d === primary.d || (entry.k && entry.k === primary.k))) return false;
+  return true;
+}
+function rosterSignaturesValid(roster, identityPublicKeyData) {
+  try {
+    const identityKey = crypto.createPublicKey({ key: Buffer.from(identityPublicKeyData, 'base64'), format: 'der', type: 'spki' });
+    if (!crypto.verify('sha256', Buffer.from(rosterCertText(roster)), identityKey, Buffer.from(roster.cert, 'base64'))) return false;
+    const primaryKey = crypto.createPublicKey({ key: Buffer.from(roster.primary.k, 'base64'), format: 'der', type: 'spki' });
+    if (primaryKey.asymmetricKeyType !== 'ec' || primaryKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') return false;
+    const signerKey = crypto.createPublicKey({ key: Buffer.from(roster.signer, 'base64'), format: 'der', type: 'spki' });
+    if (signerKey.asymmetricKeyType !== 'ec' || signerKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') return false;
+    return crypto.verify('sha256', Buffer.from(rosterSignedText(roster)), { key: signerKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(roster.sig, 'base64'));
+  } catch (_error) {
+    return false;
+  }
+}
+/* Who may write the next one: the primary the stored roster names — the
+   only key that can hand the role on, too. With none stored, a roster that
+   its own primary signed. */
+function rosterRefusal(next, current, identityPublicKeyData, fingerprint) {
+  let text = '';
+  try { text = JSON.stringify(next); } catch (_error) { text = ''; }
+  if (!text || text.length > ROSTER_MAX_CHARS || !rosterShapeValid(next, fingerprint)) return 'malformed';
+  if (!rosterSignaturesValid(next, identityPublicKeyData)) return 'bad-signature';
+  if (!current) return next.signer === next.primary.k ? '' : 'not-primary';
+  if (next.seq <= current.seq) return 'stale';
+  return next.signer === current.primary.k ? '' : 'not-primary';
+}
+function rosterRevokes(roster, deviceId, deviceKey) {
+  if (!roster || !Array.isArray(roster.revoked)) return false;
+  return roster.revoked.some((entry) => (deviceId && entry.d === deviceId) || (deviceKey && entry.k && entry.k === deviceKey));
+}
+function provenDeviceKey(record) {
+  return record?.deviceKeyProven ? record.deviceKey : '';
+}
+/* A revoked device that has just proven the account's identity: it is told
+   why, with the roster that says so (which it can verify for itself), and
+   the socket is closed. Nothing addressed to the account reaches it. */
+function shutOutRevokedDevice(record, roster) {
+  record.identityVerified = false;
+  record.deviceRevoked = true;
+  unindexVerified(record);
+  safeSend(record.ws, { type: 'device-revoked', roster });
+  setTimeout(() => {
+    try { if (record.ws?.readyState === WebSocket.OPEN) record.ws.close(4410, 'device-revoked'); } catch (_error) {}
+  }, 400).unref?.();
+  setTimeout(() => {
+    try { if (record.ws && record.ws.readyState !== WebSocket.CLOSED) record.ws.terminate(); } catch (_error) {}
+    presence.delete(record.clientId);
+    broadcastPeers();
+  }, 1500).unref?.();
+}
+function enforceRoster(fingerprint, roster) {
+  for (const entry of roster.revoked) forgetSiblingDevice(fingerprint, entry.d);
+  for (const candidate of [...(verifiedByFingerprint.get(fingerprint) || [])]) {
+    if (rosterRevokes(roster, candidate.deviceId, provenDeviceKey(candidate))) shutOutRevokedDevice(candidate, roster);
+  }
+}
 
 /* ------------------------------------------------------------------
  * Held for an absent sibling.
@@ -8701,6 +8879,10 @@ function clearIdentityChallenge(record) {
 }
 
 function beginIdentityChallenge(record) {
+  /* The challenges later hellos replace: their answers may still be on the
+     way, and must not spend the current one when they land (see id-proof).
+     A few at most — a client says hello again on its own profile changes. */
+  if (record.idChallengeNonce) record.idSupersededNonces = [...(record.idSupersededNonces || []), record.idChallengeNonce].slice(-4);
   clearIdentityChallenge(record);
   record.identityVerified = false;
   const nonce = crypto.randomBytes(32);
@@ -8877,6 +9059,13 @@ wsServer.on('connection', (ws, req) => {
          key pair, and this is the only field that tells their sockets apart.
          A random client-generated string, no more identifying than peerId. */
       record.deviceId = String(message.deviceId || '').slice(0, 128);
+      /* The install's own public key (P-256), separate from the identity the
+         account's devices share. Only a claim until the proof below signs
+         this socket's challenge with it; the roster's revocations are
+         enforced against it from then on. */
+      const deviceKey = String(message.deviceKey || '');
+      record.deviceKey = ROSTER_KEY_TEXT.test(deviceKey) ? deviceKey : '';
+      record.deviceKeyProven = false;
       /* A public key is under a kilobyte in every format the app uses, and the
          field is rebroadcast to every connected client on every presence
          change — one of the few fields with no ceiling of its own. */
@@ -8949,6 +9138,13 @@ wsServer.on('connection', (ws, req) => {
         /* Escape hatch: the claim itself counts as the proof, as before. */
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        /* A device the account's primary revoked stays out, escape hatch or
+           not; with nothing proven, its id is what names it. */
+        const roster = loadRoster(record.fingerprint);
+        if (rosterRevokes(roster, record.deviceId, '')) {
+          shutOutRevokedDevice(record, roster);
+          return;
+        }
       /* Mark the socket too: safeSendText reads this to decide whether the
          buffer limit is a hostile-socket kill or a slow-reader backoff. */
       ws.__poorijaVerifiedFingerprint = record.fingerprint || '';
@@ -8956,6 +9152,7 @@ wsServer.on('connection', (ws, req) => {
         noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
+        safeSend(ws, { type: 'roster', roster: roster || null });
         broadcastPeers();
         return;
       }
@@ -8977,6 +9174,16 @@ wsServer.on('connection', (ws, req) => {
     }
 
     if (message.type === 'id-proof') {
+      /* The late answer to a challenge a later hello replaced: set aside
+         quietly, whether or not the current one is answered yet. */
+      try {
+        const answer = Buffer.from(String(message.nonce || ''), 'base64');
+        const superseded = (record.idSupersededNonces || []).findIndex((nonce) => answer.length === nonce.length && crypto.timingSafeEqual(answer, nonce));
+        if (superseded >= 0) {
+          record.idSupersededNonces.splice(superseded, 1);
+          return;
+        }
+      } catch (_error) { /* a malformed answer is judged below */ }
       if (!record.idChallengeNonce) {
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
         return;
@@ -8990,11 +9197,35 @@ wsServer.on('connection', (ws, req) => {
       if (proven) {
         clearIdentityChallenge(record);
         record.identityVerified = true;
+        /* The same answer signed with the install's own key proves which
+           device this is, not only which account. */
+        record.deviceKeyProven = false;
+        if (record.deviceKey && message.deviceSig) {
+          try {
+            const deviceKey = crypto.createPublicKey({ key: Buffer.from(record.deviceKey, 'base64'), format: 'der', type: 'spki' });
+            record.deviceKeyProven = deviceKey.asymmetricKeyType === 'ec' && crypto.verify(
+              'sha256',
+              Buffer.from(`poorija-device-proof|${record.fingerprint}|${record.deviceId}|${String(message.nonce || '')}`),
+              { key: deviceKey, dsaEncoding: 'ieee-p1363' },
+              Buffer.from(String(message.deviceSig), 'base64'),
+            );
+          } catch (_error) { record.deviceKeyProven = false; }
+        }
+        const roster = loadRoster(record.fingerprint);
+        if (rosterRevokes(roster, record.deviceId, provenDeviceKey(record))) {
+          console.log(`[Presence] Revoked device shut out for ${record.fingerprint}`);
+          shutOutRevokedDevice(record, roster);
+          return;
+        }
         indexVerified(record);
         noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         console.log(`[Presence] Identity proven for ${record.fingerprint}`);
         deliverHeldMail(record, ws);
+        /* Which devices the account has, as its primary last signed it — or
+           that it has no roster yet, which is an answer too: the device that
+           made the identity founds one on hearing it. */
+        safeSend(ws, { type: 'roster', roster: roster || null });
       } else {
         /* Wrong answer: the nonce is spent so it cannot be guessed at again,
            and the socket stays with its degraded presence until a later
@@ -9080,6 +9311,47 @@ wsServer.on('connection', (ws, req) => {
     /* The account's device-sync beacons. Only the proven owner of the
        fingerprint may read or write them: they say which devices exist and
        when each last synced, which is the account's business alone. */
+    if (message.type === 'roster-put' || message.type === 'roster-get') {
+      /* Asked while the identity is being proven again (every hello re-asks):
+         the proof's own answer carries the roster, so this one is let go
+         without an error the app would show as "not accepted". */
+      if (!record.identityVerified && record.idChallengeNonce) return;
+      if (!record.identityVerified || !isFingerprintKey(record.fingerprint) || !record.publicKeyData) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      const current = loadRoster(record.fingerprint);
+      if (message.type === 'roster-get') {
+        safeSend(ws, { type: 'roster', roster: current });
+        return;
+      }
+      const next = message.roster;
+      const refusal = rosterRefusal(next, current, record.publicKeyData, record.fingerprint);
+      if (refusal) {
+        safeSend(ws, { type: 'roster-refused', reason: refusal, roster: current });
+        return;
+      }
+      saveRoster(record.fingerprint, next);
+      console.log(`[Roster] ${record.fingerprint.slice(0, 12)} now at ${next.seq}: ${next.members.length} device(s), ${next.revoked.length} gone`);
+      safeSend(ws, { type: 'roster-stored', seq: next.seq });
+      enforceRoster(record.fingerprint, next);
+      for (const candidate of verifiedByFingerprint.get(record.fingerprint) || []) {
+        if (candidate === record || candidate.ws?.readyState !== WebSocket.OPEN) continue;
+        safeSend(candidate.ws, { type: 'roster', roster: next });
+      }
+      return;
+    }
+    /* A device leaving its account says so on the way out: its beacon and
+       whatever was held for it go now, not after thirty days. Its own only. */
+    if (message.type === 'beacon-drop') {
+      if (!record.identityVerified || !isFingerprintKey(record.fingerprint) || !record.deviceId) {
+        safeSend(ws, { type: 'error', reason: 'identity-unverified' });
+        return;
+      }
+      forgetSiblingDevice(record.fingerprint, record.deviceId);
+      safeSend(ws, { type: 'beacon-dropped', deviceId: record.deviceId });
+      return;
+    }
     if (message.type === 'beacon-put' || message.type === 'beacon-get') {
       if (!record.identityVerified || !isFingerprintKey(record.fingerprint)) {
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
@@ -9087,9 +9359,12 @@ wsServer.on('connection', (ws, req) => {
       }
       if (message.type === 'beacon-get') {
         const entries = loadBeacons(record.fingerprint);
+        const roster = loadRoster(record.fingerprint);
         safeSend(ws, {
           type: 'beacons',
-          items: Object.entries(entries).map(([deviceId, entry]) => ({ deviceId, blob: entry.blob, at: entry.at })),
+          items: Object.entries(entries)
+            .filter(([deviceId]) => !rosterRevokes(roster, deviceId, ''))
+            .map(([deviceId, entry]) => ({ deviceId, blob: entry.blob, at: entry.at })),
         });
         return;
       }
@@ -9228,6 +9503,13 @@ for (const [box, queue] of offlineBoxes.entries()) {
       return;
     }
     if (message.type === 'purge-me') {
+      /* Proven, not claimed. A hello names a fingerprint and carries its
+         public key — both public — so without the proof anybody could empty
+         anybody's queued mail, beacons and push registration. */
+      if (!record.identityVerified) {
+        safeSend(ws, { type: 'purged', removed: 0, refused: 'identity-unverified' });
+        return;
+      }
       const target = record.fingerprint || '';
       let removed = 0;
       /* The hello that set this fingerprint was never challenged — a hello
@@ -9240,6 +9522,10 @@ for (const [box, queue] of offlineBoxes.entries()) {
         offlineBoxes.delete(target);
         saveOfflineBox(target);
         dropBeacons(target);
+        /* The roster goes only when its own primary wipes: from any other
+           device, removing it would let that device name itself primary. */
+        const roster = loadRoster(target);
+        if (roster && provenDeviceKey(record) && provenDeviceKey(record) === roster.primary.k) dropRoster(target);
         const pushKey = pushIndexKey(target);
         if (pushSubscriptions.has(pushKey)) {
           pushSubscriptions.delete(pushKey);

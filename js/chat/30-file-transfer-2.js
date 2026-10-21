@@ -306,8 +306,11 @@ try {
 const priv = await importIdentityPrivateKey();
 const nonceBytes = await crypto.subtle.decrypt(
 { name: 'RSA-OAEP' }, priv, app().base64ToArrayBuffer(message.cipher));
+const nonce = app().arrayBufferToBase64(nonceBytes);
+/* The same answer, signed with this install's own key. */
+const deviceSig = typeof deviceChallengeSignature === 'function' ? await deviceChallengeSignature(nonce).catch(() => '') : '';
 if (chatState.ws?.readyState === WebSocket.OPEN) {
-chatState.ws.send(JSON.stringify({ type: 'id-proof', nonce: app().arrayBufferToBase64(nonceBytes) }));
+chatState.ws.send(JSON.stringify({ type: 'id-proof', nonce, deviceSig }));
 }
 } catch (error) {
 console.warn('[Chat] could not answer the relay identity challenge:', error);
@@ -417,7 +420,11 @@ return;
 	if (message.type === 'welcome') {
 chatState.clientId = message.clientId || '';
 renderStaticUi();
-broadcastHello();
+/* With this install's own key in it (58-device-roster.js) — loaded first,
+   which takes a moment only the first time, so the hello goes once rather
+   than twice. */
+if (typeof ensureDeviceKey === 'function') ensureDeviceKey().catch(() => null).finally(() => broadcastHello());
+else broadcastHello();
 /* The relay is up and answering, which is the cheap moment to re-read its
    TURN block. An operator who re-runs the relay setup gets a fresh TURN
    password, and until now a client holding the old one lost every relayed
@@ -459,7 +466,9 @@ peer.status = 'offline';
 	const myFingerprint = chatState.identity?.fingerprint || '';
 	chatState.linkedDevices = myFingerprint
 	? verified
-	.filter((peer) => peer.fingerprint === myFingerprint)
+	/* A device the account's primary revoked is not one of the family, even
+	   for the moment before the relay closes it. */
+	.filter((peer) => peer.fingerprint === myFingerprint && !(typeof deviceRevoked === 'function' && deviceRevoked(String(peer.deviceId || ''))))
 	.map((peer) => ({
 	deviceId: String(peer.deviceId || ''),
 	clientId: String(peer.clientId || ''),
@@ -510,8 +519,12 @@ verified.forEach((peer) => mergePeerRecord({ ...peer, avatarData: '' }, { online
 	/* The live device list just changed: the strip count follows it, an
 	   open devices pane redraws so the list stays current while watched,
 	   and a sibling appearing is the moment to offer them the history. */
+	if (typeof noteSeenAccountDevices === 'function') noteSeenAccountDevices();
 	renderLinkedDeviceCount();
 	maybeAnnounceDeviceSync(chatState.linkedDevices.length);
+	/* A sibling here and "sync all content" on: whatever this device lacks
+	   comes over now (57-sibling-files.js). */
+	if (chatState.linkedDevices.length >= 2 && typeof scheduleSiblingAutoPull === 'function') scheduleSiblingAutoPull();
 	if (chatState.settingsPane === 'devices' && typeof renderDevicesCard === 'function') renderDevicesCard();
 /* Somebody being rung while they were away may have just walked in. */
 if (chatState.offlineRing) {
@@ -537,7 +550,24 @@ if (message.type === 'beacon-changed') {
 if (typeof requestBeacons === 'function') window.setTimeout(requestBeacons, 1500);
 return;
 }
-if (message.type === 'beacon-stored') return;
+if (message.type === 'beacon-stored' || message.type === 'beacon-dropped') return;
+/* The account's device roster (58-device-roster.js). */
+if (message.type === 'roster') {
+if (typeof handleRelayRoster === 'function') handleRelayRoster(message.roster || null).catch((error) => console.warn('[Devices] roster unreadable:', error?.message || error));
+return;
+}
+if (message.type === 'roster-refused') {
+if (typeof handleRosterRefused === 'function') handleRosterRefused(message).catch((error) => console.warn('[Devices] roster refusal unreadable:', error?.message || error));
+return;
+}
+if (message.type === 'roster-stored') {
+if (typeof handleRosterStored === 'function') handleRosterStored(message);
+return;
+}
+if (message.type === 'device-revoked') {
+if (typeof handleDeviceRevokedNotice === 'function') handleDeviceRevokedNotice(message).catch((error) => console.warn('[Devices] revocation unreadable:', error?.message || error));
+return;
+}
 /* What a sibling left with the relay for this device while it was away. */
 if (message.type === 'sibling-held') {
 if (typeof handleSiblingHeld === 'function') handleSiblingHeld(message).catch((error) => console.warn('[Devices] held sync unreadable:', error?.message || error));
@@ -678,6 +708,13 @@ return;
    point of the expiry log: without it the recipient never learns that anyone
    wrote to them, which is worse than knowing a file was missed. */
 /* Somebody reached for us while we were away. */
+/* Two devices being linked with a QR code (59-device-link.js): a short,
+   encrypted exchange between devices that do not share an account yet. */
+if (message.type === 'relay' && message.payload?.type === 'device-link') {
+if (typeof handleDeviceLinkEnvelope === 'function') handleDeviceLinkEnvelope(message).catch((error) => console.warn('[Link] unreadable:', error?.message || error));
+ackRelayMessage(message.relayId);
+return;
+}
 if (message.type === 'relay' && message.payload?.type === 'session-offer') {
 const identity = message.payload.identity || {};
 if (identity.fingerprint || identity.peerId) {
@@ -2879,6 +2916,9 @@ list.splice(0, Math.max(0, list.length - 2000));
 
 async function mergeDeviceSyncBundle(bundle) {
 let changed = false;
+/* Who is in the account, and what it chose for all its devices. */
+if (typeof handleRosterBundle === 'function' && (bundle?.roster || bundle?.deviceIntro || bundle?.deviceLeft)) await handleRosterBundle(bundle);
+if (bundle?.deviceSettings && typeof applySiblingDeviceSettings === 'function') applySiblingDeviceSettings(bundle.deviceSettings);
 /* Deletions first, so whatever else this bundle carries is weighed against
    them. */
 if (Array.isArray(bundle?.deletions)) {
@@ -2916,6 +2956,9 @@ if (changed) {
 storeHistory();
 renderPeers();
 renderMessages();
+/* A row whose file is still on the sibling: with "sync all content" on,
+   it comes over by itself. */
+if (typeof scheduleSiblingAutoPull === 'function') scheduleSiblingAutoPull();
 }
 }
 /* Messages a sibling deleted. Deleted here too, with their files. */
@@ -3036,6 +3079,8 @@ if (!payload.body || payload.fromFingerprint !== myFingerprint) return;
    including the one that sent it — this device's own copy is a receipt
    it has no use for. */
 if (payload.fromDeviceId && payload.fromDeviceId === getDeviceId()) return;
+/* Nor from a device the account's primary revoked (58-device-roster.js). */
+if (payload.fromDeviceId && typeof deviceRevoked === 'function' && deviceRevoked(payload.fromDeviceId)) return;
 	/* The whole gate: signed by this account's private key — over the
 	   deviceId it names as well — which only a linked device holds. Anything
 	   else is a stranger sealing garbage and claiming a deviceId, and it

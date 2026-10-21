@@ -1,10 +1,307 @@
-# P00RIJA Cryptography 2.98.68
+# P00RIJA Cryptography 2.98.70
 
-Version 2.98.68 · build chat-v161
+Version 2.98.70 · build chat-v163
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## سه اصلاح امنیتی پس از بازبینی · Three security fixes after review
+
+بازبینی امنیتی کد 2.98.69، که به‌محض استقرار انجام شد، سه نکته پیدا کرد و هر سه بسته شدند:
+
+- **رله نمی‌تواند دستگاهی را وادار به پاک کردن حساب کند**: اعلان «دسترسی این دستگاه لغو شد»
+  که از سرور می‌رسد حالا دقیقاً با همان قاعده‌ای پذیرفته می‌شود که هر فهرست دستگاه دیگری
+  پذیرفته می‌شود: باید با کلید همان دستگاه اصلی‌ای امضا شده باشد که این دستگاه می‌شناسد، و از
+  فهرست فعلی جدیدتر باشد. قبلاً رله‌ای بدخواه می‌توانست دور گواهی واقعی حساب، فهرستی با امضای
+  خودش بسازد.
+- **اولین فهرست، بدون پرسیدن پاک نمی‌کند**: دستگاهی که هنوز دستگاه اصلی را نمی‌شناخت، اولین
+  فهرست را فقط وقتی می‌پذیرد که با کلید همان دستگاه اصلی‌ای که در آن نام برده شده امضا شده باشد.
+  اگر آن فهرست لغو دسترسی همین دستگاه را بگوید، پیش از پاک کردن حساب از شما پرسیده می‌شود. سرور
+  به هر حال دیگر آن دستگاه را راه نمی‌دهد.
+- **اتصال با QR بدون رضایت، حسابی را جا نمی‌اندازد**: در حالتی که دستگاه جدید کد را نشان می‌دهد،
+  دستگاه جدید حسابی را که پیش از زدن «پیوستن» برسد نادیده می‌گیرد. قبلاً کسی که کد را اسکن کرده
+  بود می‌توانست حساب خودش را پیش از تأیید شما روی دستگاه جدید بنشاند.
+
+هر سه با تست تازه پوشش داده شده‌اند.
+
+A security review of the 2.98.69 code, run as soon as it was deployed, found three
+points, and all three are closed:
+
+- **A relay cannot make a device wipe the account**: a "this device was revoked" notice
+  from the server is now taken by exactly the rule any device list is taken by: it must
+  be signed with the key of the primary this device knows, and be newer than the list it
+  holds. Before, a malicious relay could have built a list signed with its own key around
+  the account's genuine certificate.
+- **The first list does not wipe without asking**: a device that did not yet know the
+  primary takes its first list only when it is signed with the key of the primary it
+  names. If that list says this device was revoked, you are asked before the account is
+  removed. The relay keeps that device out either way.
+- **QR linking cannot slip an account in without consent**: when the new device is the
+  one showing the code, it ignores an account that arrives before "Join" is pressed.
+  Before, whoever had scanned the code could have put their own account on the new
+  device ahead of your approval.
+
+All three are covered by new tests.
+
+---
+
+# P00RIJA Cryptography 2.98.69
+
+Version 2.98.69 · build chat-v162
+
+---
+
+## اتصال دستگاه با کد QR · Linking a device with a QR code
+
+مثل تلگرام و واتس‌اپ، دستگاه جدید را می‌شود با یک کد QR به حساب وصل کرد. روی دستگاهی که حساب
+را دارد «دستگاه‌های من › افزودن دستگاه» و روی دستگاه جدید «هویت شما در چت › اتصال این دستگاه
+به حساب» را بزنید. یکی از دو دستگاه کد نشان می‌دهد و دیگری با دوربین اسکنش می‌کند. هر دو
+جهت کار می‌کند، پس دسکتاپ بی‌دوربین کد را نشان می‌دهد و گوشی اسکن می‌کند؛ گوشی به گوشی هم
+همین‌طور. پروفایل همراه (فایل با رمز) هم مثل قبل هست.
+
+- **کد هر ده ثانیه عوض می‌شود**: هر کد یک اتاق تصادفی و یک کلید ECDH (P-256) تازه دارد و
+  فقط نیم دقیقه پذیرفته می‌شود. عکسی که از صفحه گرفته شود زود بی‌ارزش می‌شود. دستگاهی که کد
+  کهنه را اسکن کند همان لحظه باخبر می‌شود.
+- **رمزگذاری سرتاسری**: دو دستگاه از تبادل ECDH یک کلید AES-GCM مشترک می‌سازند که به اتاق و
+  هر دو کلید عمومی گره خورده است. همه‌چیز، از نام دستگاه تا خود حساب، با همین کلید رمز می‌شود.
+  سرور فقط پیام‌های رمزی را جابه‌جا می‌کند و چیزی از آن‌ها نگه نمی‌دارد.
+- **تأیید با عدد شش‌رقمی**: بعد از اسکن، هر دو صفحه یک عدد شش‌رقمی نشان می‌دهند که از کلید
+  مشترک ساخته شده است. اگر کسی وسط راه باشد، دو عدد یکی نمی‌شوند. دستگاه حساب پیش از تحویل
+  حساب می‌پرسد و دستگاه جدید پیش از پذیرفتن آن؛ بدون تأیید شما هیچ اتفاقی نمی‌افتد. حسابی هم
+  که می‌رسد، پیش از فعال شدن بررسی می‌شود که همان حسابی باشد که کد نشان داده بود.
+- **بعد از اتصال**: هویت، مخاطبین، گروه‌ها و فهرست دستگاه‌ها منتقل می‌شوند و تاریخچه و فایل‌ها
+  مستقیم، دستگاه‌به‌دستگاه، از دستگاه دیگر می‌رسند.
+
+Like Telegram and WhatsApp, a new device can join the account with a QR code. On the
+device that has the account open "My devices › Add a device", and on the new one "Your
+chat identity › Link this device to an account". One of the two shows a code and the
+other scans it with its camera. It works both ways, so a desktop without a camera shows
+the code and a phone scans it, and phone to phone works the same way. The portable
+profile (a password-protected file) is still there too.
+
+- **The code changes every ten seconds**: each code carries a random room and a fresh
+  ECDH (P-256) key, and is accepted for half a minute only. A photo of the screen soon
+  becomes worthless, and a device that scans a stale code is told so at once.
+- **End-to-end encryption**: the two devices derive one shared AES-GCM key from the
+  ECDH exchange, bound to the room and to both public keys. Everything, from the
+  device's name to the account itself, is encrypted with it. The server only passes
+  ciphertext along and keeps none of it.
+- **Approval with six digits**: after the scan, both screens show the same six digits,
+  made from the shared key. With anyone in between, the two numbers would not match.
+  The account's device asks before it hands the account over, and the new device asks
+  before it accepts one; nothing happens without your approval. The account that
+  arrives is checked to be the one the code named before it is activated.
+- **After linking**: the identity, contacts, groups, and device list move across, and
+  the history and files arrive straight from the other device, device to device.
+
+---
+
+## صدا و تصویر تماس · Call sound and picture
+
+- **حذف نویز محیط**: صدای پس‌زمینه (پنکه، خیابان، کیبورد، همهمه) با RNNoise از صدای شما جدا
+  می‌شود. RNNoise شبکهٔ عصبی بنیاد Xiph، سازندگان Opus، است. پردازش روی خود دستگاه و در
+  AudioWorklet انجام می‌شود و چیزی برای آن به جایی فرستاده نمی‌شود. از کتابخانهٔ آمادهٔ
+  `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) استفاده شده که RNNoise را از
+  `@shiguredo/rnnoise-wasm` (Apache-2.0) اجرا می‌کند؛ فایل‌ها با مجوزهایشان داخل برنامه‌اند.
+  این گزینه به‌طور پیش‌فرض روشن است و در تنظیمات چت و در تنظیمات داخل تماس کلید دارد. در تماس
+  صوتی، تصویری و گروهی کار می‌کند. هر جا اجرا نشود، تماس با میکروفون معمولی و کاهش نویز خود
+  مرورگر ادامه پیدا می‌کند، هرگز با سکوت.
+- **بالاترین کیفیت صدا**: میکروفون با ۴۸ کیلوهرتز و تک‌کاناله گرفته می‌شود و Opus تمام‌باند،
+  بدون DTX (که ابتدای کلمه‌ها را می‌برید) و با FEC فرستاده می‌شود، تا ۱۲۸ کیلوبیت بر ثانیه.
+- **بالاترین فریم‌ریت و کیفیت تصویر**: دوربین با ۶۰ فریم در ثانیه درخواست می‌شود (حداکثر چیزی
+  که دوربین بدهد) و سقف پهنای باند در ۶۰ فریم تا ۱۲ مگابیت بالا می‌رود. تعویض دوربین و دستگاه
+  هم با همین کیفیت انجام می‌شود. کیفیت مثل قبل با شبکه و پردازنده تطبیق داده می‌شود تا حرکت
+  روان بماند.
+- **تصویر خودتان آینه‌ای نیست**: به‌طور پیش‌فرض همان را می‌بینید که طرف مقابل می‌بیند. با دکمهٔ
+  «نمای آینه‌ای خودم» می‌شود آینه‌ای‌اش کرد و این انتخاب به خاطر سپرده می‌شود.
+
+- **Background noise removal**: background sound (a fan, traffic, a keyboard, chatter)
+  is taken out of your voice by RNNoise, the neural suppressor from Xiph, the makers of
+  Opus. It runs on the device itself, in an AudioWorklet, and nothing is sent anywhere
+  for it. It uses the ready-made library `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT),
+  which runs RNNoise from `@shiguredo/rnnoise-wasm` (Apache-2.0); the files ship inside
+  the app with their licences. It is on by default, with a switch in the chat settings
+  and in the call's own settings, and works in voice, video, and group calls. Wherever
+  it cannot run, the call carries on with the plain microphone and the browser's own
+  noise reduction, never with silence.
+- **The best sound**: the microphone is taken at 48 kHz in one channel, and Opus goes
+  at full band, without DTX (which clips word onsets) and with FEC, up to 128 kbit/s.
+- **The highest frame rate and picture quality**: the camera is asked for 60 frames a
+  second (the most the camera gives), and the bandwidth ceiling rises to 12 Mbit/s at
+  60 fps. Switching camera or device keeps the same quality. As before, quality adapts
+  to the network and the processor so that movement stays smooth.
+- **Your own picture is not mirrored**: by default you see what the other side sees.
+  "Mirror my preview" mirrors it, and the choice is remembered.
+
+---
+
+## دستگاه اصلی، لغو دسترسی و جدا شدن · A primary device, revoking, and detaching
+
+همهٔ دستگاه‌های یک حساب کلید هویت یکسانی دارند. برای همین، آن کلید نمی‌تواند تشخیص بدهد
+کدام دستگاه اول بوده است. حالا هر دستگاه یک کلید امضای مخصوص خودش هم دارد (ECDSA P-256).
+این کلید روی همان دستگاه ساخته می‌شود و هرگز از آن خارج نمی‌شود: نه در پروفایل همراه، نه
+در بستهٔ همگام‌سازی.
+
+- **دستگاه اصلی**: دستگاهی که هویت را ساخته، دستگاه اصلی حساب است. فهرست دستگاه‌های حساب
+  را همین دستگاه می‌نویسد و با کلید خودش امضا می‌کند. یک گواهی هم کنار آن است که کلید هویت
+  حساب امضایش کرده. پس نه سرور و نه هیچ دستگاه دیگری نمی‌تواند فهرستی بسازد که معتبر باشد.
+  سرور و همهٔ دستگاه‌ها اولین دستگاه اصلی‌ای را که دیده‌اند نگه می‌دارند و فهرست را از کس
+  دیگری قبول نمی‌کنند.
+- **لغو دسترسی، فقط از دستگاه اصلی**: دستگاه اصلی می‌تواند دسترسی هر دستگاه دیگری را لغو
+  کند. سرور آن دستگاه را، هم با شناسه‌اش و هم با کلیدش، همان لحظهٔ اثبات هویت بیرون
+  می‌گذارد. اتصال باز آن دستگاه بسته می‌شود و آنچه برایش نگه داشته شده بود پاک می‌شود.
+  دستگاه‌های دیگر حساب هم دیگر با آن همگام نمی‌شوند و فایلی به آن نمی‌دهند. خود آن دستگاه،
+  به‌محض اینکه باخبر شود (اگر آفلاین بوده، همان لحظهٔ برگشتن)، فهرست امضاشده را خودش بررسی
+  می‌کند، حساب را از روی خودش پاک می‌کند و با هویتی تازه ادامه می‌دهد. سرور به‌تنهایی
+  نمی‌تواند دستگاهی را وادار به پاک کردن خودش کند؛ فقط می‌تواند راهش ندهد.
+- **جدا شدن**: هر دستگاه دیگری می‌تواند خودش را از حساب جدا کند. هویت، گفتگوها، مخاطبین و
+  فایل‌های حساب از روی همان دستگاه پاک می‌شود و دستگاه با یک هویت تازه، مثل قبل از اتصال،
+  جداگانه کار می‌کند. دستگاه‌های دیگر بی‌تغییر ادامه می‌دهند و دستگاه اصلی آن را در فهرست
+  «رفته» ثبت می‌کند. دستگاه غیراصلی نمی‌تواند دسترسی دستگاه دیگری را لغو کند.
+- **سپردن نقش اصلی**: دستگاه اصلی می‌تواند این نقش را به دستگاه دیگری بسپارد. اگر خود
+  دستگاه اصلی بخواهد جدا شود، اول می‌پرسد نقش را به کدام دستگاه بسپارد.
+- **حساب‌های قدیمی**: حسابی که پیش از این نسخه چند دستگاه داشت، خودبه‌خود دستگاه اصلی
+  نمی‌گیرد، چون حدس زدن آن شیر یا خط است. در «دستگاه‌های من» دکمهٔ «این دستگاه اصلی شود»
+  هست؛ آن را روی دستگاهی بزنید که اول هویت را رویش ساخته‌اید. حسابی که فقط یک دستگاه
+  داشته، خودبه‌خود همان را اصلی می‌کند.
+- **محدودیت**: دستگاهی که لغو دسترسی شده هنوز کلید هویتی را که داشت می‌داند. اگر کسی
+  برنامهٔ آن را دست‌کاری کند تا لغو را نادیده بگیرد، می‌تواند به‌عنوان «دستگاه تازه»
+  برگردد. چنین دستگاهی در فهرست دستگاه اصلی دیده می‌شود و می‌شود دوباره لغوش کرد. اگر
+  دستگاهی دزدیده شده و رمز برنامه‌اش هم لو رفته، راه‌حل کامل یک هویت تازه برای حساب است.
+
+The devices of one account all hold the same identity key, so that key cannot tell
+which device came first. Each device now also has a signing key of its own (ECDSA
+P-256). It is made on that device and never leaves it: not in the portable profile,
+and not in a sync bundle.
+
+- **The primary device**: the device that created the identity is the account's
+  primary. It writes the account's list of devices and signs it with its own key,
+  alongside a certificate signed by the account's identity key. Neither the relay nor
+  any other device can make a list that verifies. The relay and every device keep the
+  first primary they saw, and accept a list from no one else.
+- **Revoking, from the primary only**: the primary can revoke any other device. The
+  relay shuts that device out, by its id and by its key, the moment it proves the
+  identity. Its open connection is closed and whatever was held for it is dropped. The
+  account's other devices stop syncing with it and hand it no files. The device itself,
+  as soon as it learns of it (at once if it is online, or the moment it comes back),
+  checks the signed list for itself, removes the account from itself, and carries on
+  with a new identity of its own. The relay alone cannot make a device wipe itself; it
+  can only refuse it.
+- **Detaching**: any other device can detach itself from the account. The account's
+  identity, conversations, contacts, and files are removed from that device, which then
+  carries on separately with a new identity, as it was before it was linked. The other
+  devices carry on unchanged, and the primary records it as gone. A device that is not
+  the primary cannot revoke another device.
+- **Handing the role on**: the primary can hand its role to another device. If the
+  primary itself wants to detach, it first asks which device should take over.
+- **Older accounts**: an account that had several devices before this version does not
+  get a primary on its own, because guessing would be a coin toss. "My devices" offers
+  "Make this the primary"; press it on the device you first created the identity on.
+  An account that only ever had one device makes that one the primary by itself.
+- **A limit**: a revoked device still knows the identity key it held. With its app
+  modified to ignore the revocation, it could come back as a "new device". Such a
+  device shows up in the primary's list and can be revoked again. If a device was
+  stolen and its app password is known too, the complete answer is a new identity for
+  the account.
+
+---
+
+## همهٔ دستگاه‌ها، همیشه در فهرست · Every device, always listed
+
+در «تنظیمات › دستگاه‌های من» و در «هویت شما در چت › دستگاه‌های متصل» حالا همهٔ دستگاه‌های
+حساب دیده می‌شوند، نه فقط آن‌هایی که الان آنلاین‌اند. دستگاه آفلاین با زمان آخرین بازدیدش
+در فهرست می‌ماند و فقط وضعیتش عوض می‌شود. تعداد هم همیشه نمایش داده می‌شود: «۳ دستگاه · ۲
+آنلاین». دستگاه اصلی با نشان تاج مشخص است و دکمه‌های «لغو دسترسی»، «اصلی شود» و «جدا
+کردن این دستگاه» در هر دو جا هستند.
+
+Settings › My devices and Your chat identity › Linked devices now list every device of
+the account, not only the ones online right now. An offline device stays in the list
+with when it was last seen, and only its status changes. The count is always shown:
+"3 devices · 2 online". The primary carries a crown, and "Revoke", "Make primary", and
+"Detach this device" are in both places.
+
+---
+
+## همگام‌سازی کامل همهٔ محتوا · Sync all content
+
+یک گزینهٔ تازه در همان دو جا: «همگام‌سازی کامل همهٔ محتوا». وقتی روشن است، هر فایل، عکس،
+ویدیو، پیام صوتی، استیکر و گیفی که دستگاهی ندارد، هر بار که دستگاه دیگری که آن را دارد
+آنلاین است، خودکار منتقل و روی این دستگاه نگه داشته می‌شود. لازم نیست روی چیزی بزنید.
+انتقال مستقیم و دستگاه‌به‌دستگاه است، با همان رمزگذاری دوباره‌ای که برای «دریافت از دستگاه
+دیگر» هست. هیچ بایتی از سرور رد نمی‌شود و هیچ چیزی روی آن نمی‌ماند.
+
+- این انتخاب برای کل حساب است: روی هر دستگاهی روشن یا خاموش شود، به بقیه هم می‌رسد.
+- پیام خودتخریب و یک‌بارمصرف خودکار آورده نمی‌شود.
+- فایل بزرگ‌تر از فضای داخلی برنامه (۶۴ مگابایت) همچنان با یک زدن آورده می‌شود.
+- انتقال خودکار هیچ‌وقت آن‌قدر پیش نمی‌رود که برنامه برای جا باز کردن، فایل‌های
+  نگه‌داشته‌شده را پاک کند.
+- مکان‌ها و متن‌ها مثل قبل با همگام‌سازی تاریخچه می‌رسند.
+
+A new switch in the same two places: "Sync all content". While it is on, every file,
+photo, video, voice note, sticker, and GIF a device lacks moves over by itself and is
+kept there, whenever another device that has it is online. There is nothing to press.
+The transfer is direct, device to device, with the same extra encryption "Fetch from my
+other device" uses. No byte passes through the server, and nothing stays on it.
+
+- The choice is the account's: switched on or off on any device, it reaches the others.
+- A self-destruct or view-once message is not fetched by itself.
+- A file larger than the app's own store (64 MB) is still one tap away.
+- The automatic transfer never goes so far that the app would remove files it already
+  keeps to make room.
+- Locations and text arrive with the history sync, as before.
+
+---
+
+## کارت «این فایل روی این دستگاه نیست» · The "not on this device" card
+
+این کارت حالا یک ردیف است: یک خط که می‌گوید چه چیزی اینجا نیست (فایل، استیکر، گیف یا
+پیام صوتی)، و کنارش «دریافت از دستگاه دیگر» که شکل یک دکمهٔ واقعی دارد. استیکر و گیف هم
+دیگر در یک قاب مربع باریک فشرده نمی‌شوند. فقط روی صفحه‌ای که برای هر دو جا ندارد، دکمه به
+خط بعد می‌رود.
+
+The card is now one row: one line saying what is missing here (a file, sticker, GIF, or
+voice note), and beside it "Fetch from my other device", which looks like a real button.
+Stickers and GIFs are no longer squeezed into a narrow square frame. Only on a screen too
+narrow for both does the button move to the next line.
+
+---
+
+## اصلاحات امنیتی و پایداری · Security and reliability fixes
+
+- **پاک‌سازی اضطراری فقط با اثبات هویت**: درخواست پاک کردن داده‌های یک حساب روی سرور
+  (صف پیام‌ها، beacon‌ها و اشتراک اعلان) قبلاً فقط به ادعای اثرانگشت بسنده می‌کرد. اثرانگشت
+  و کلید عمومی هر دو عمومی‌اند، پس هر کسی می‌توانست صف پیام‌های دیگران را خالی کند. حالا
+  سرور فقط از اتصالی که هویتش را ثابت کرده قبول می‌کند. فهرست دستگاه‌ها هم فقط با پاک‌سازی
+  خود دستگاه اصلی حذف می‌شود.
+- **اثبات هویت پس از سلام دوباره**: وقتی برنامه دو بار پشت سر هم سلام می‌کرد، جواب دیررسِ
+  چالش اول، چالش دوم را هم باطل می‌کرد. اتصال تا آخر ثابت‌نشده می‌ماند و صندوق پیام، beacon
+  و همگام‌سازی به آن جواب نمی‌دادند. سرور حالا جواب چالش قدیمی را کنار می‌گذارد و برنامه
+  کلید دستگاه را پیش از اولین سلام آماده می‌کند تا فقط یک بار سلام کند.
+- **«بازنشانی کلید چت» واقعاً کلید تازه می‌سازد**: کلید قبلی از حافظهٔ زنده دوباره خوانده
+  می‌شد و بازنشانی در عمل کاری نمی‌کرد.
+
+- **An emergency wipe needs proof of identity**: the request to wipe an account's data
+  on the server (queued mail, beacons, and the push registration) used to accept a
+  claimed fingerprint alone. A fingerprint and its public key are both public, so anyone
+  could empty someone else's queued mail. The relay now accepts it only from a connection
+  that has proven the identity. The device list is removed only when the primary itself
+  wipes.
+- **Proof of identity after a second hello**: when the app said hello twice in a row,
+  the late answer to the first challenge cancelled the second one. The connection then
+  stayed unproven for good, and the mailbox, beacons, and sync did not answer it. The
+  relay now sets an old challenge's answer aside, and the app gets the device key ready
+  before its first hello, so it says hello only once.
+- **"Reset chat key" really makes a new key**: the old key was read straight back from
+  the live cache, so the reset did nothing in practice.
+
+---
+
+# P00RIJA Cryptography 2.98.68
+
+Version 2.98.68 · build chat-v161
 
 ---
 

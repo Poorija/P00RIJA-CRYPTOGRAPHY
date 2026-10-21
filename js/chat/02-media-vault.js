@@ -179,13 +179,24 @@ function base64ToBytes(text) {
   return out;
 }
 
-/* A file that is not on this device. When another device of this account is
-   online it is one tap away (57-sibling-files.js), whatever kind of file it
-   is — a voice note, a sticker, a GIF or a document. */
-function missingMediaHtml(label, entryId = '') {
-  const fetchable = Boolean(entryId) && (chatState.linkedDevices || []).length >= 2;
-  return `<div class="chat-media-missing"><i class="fas fa-cloud-arrow-down"></i><span>${app().escapeHTML(fetchable ? t('این فایل روی این دستگاه نیست.', 'This file is not on this device.') : label)}</span>${fetchable
-    ? `<button type="button" class="btn" data-chat-device-file="${app().escapeHTML(String(entryId))}" style="font-size:0.74rem;margin-top:0.4rem">${app().escapeHTML(t('دریافت از دستگاه دیگر', 'Fetch from my other device'))}</button>`
+/* A file that is not on this device. When the account has another device it
+   is one tap away (57-sibling-files.js), whatever kind of file it is — a
+   voice note, a sticker, a GIF or a document: one line saying so, and a
+   button that looks like one. */
+function missingMediaHtml(label, entryId = '', kind = 'file') {
+  const fetchable = Boolean(entryId) && (typeof accountHasSiblings === 'function'
+    ? accountHasSiblings()
+    : (chatState.linkedDevices || []).length >= 2);
+  const short = {
+    sticker: t('این استیکر روی این دستگاه نیست', 'This sticker is not on this device'),
+    gif: t('این گیف روی این دستگاه نیست', 'This GIF is not on this device'),
+    voice: t('این پیام صوتی روی این دستگاه نیست', 'This voice note is not on this device'),
+    /* Under a file's own name, which already says which file. */
+    named: t('روی این دستگاه نیست', 'Not on this device'),
+  }[kind] || t('این فایل روی این دستگاه نیست', 'This file is not on this device');
+  const text = fetchable ? short : label;
+  return `<div class="chat-media-missing${fetchable ? ' is-fetchable' : ''}"><span class="chat-media-missing-text" title="${app().escapeHTML(text)}"><i class="fas fa-cloud-arrow-down" aria-hidden="true"></i><span>${app().escapeHTML(text)}</span></span>${fetchable
+    ? `<button type="button" class="chat-media-fetch" data-chat-device-file="${app().escapeHTML(String(entryId))}"><i class="fas fa-download" aria-hidden="true"></i><span>${app().escapeHTML(t('دریافت از دستگاه دیگر', 'Fetch from my other device'))}</span></button>`
     : ''}</div>`;
 }
 function isMediaEntry(entry) {
@@ -335,6 +346,16 @@ async function hydrateConversationMedia(conversationId) {
   }
   if (restored && conversationId === chatState.activeConversationId) renderMessages();
   if (restored) renderPeers();
+}
+
+/* Which messages have their file here — ids only, no bytes read. */
+async function mediaVaultIds() {
+  const db = await openMediaDb();
+  return new Promise((resolve) => {
+    const request = db.transaction(MEDIA_STORE, 'readonly').objectStore(MEDIA_STORE).getAllKeys();
+    request.onsuccess = () => resolve(new Set(request.result || []));
+    request.onerror = () => resolve(new Set());
+  });
 }
 
 async function mediaStorageStats() {

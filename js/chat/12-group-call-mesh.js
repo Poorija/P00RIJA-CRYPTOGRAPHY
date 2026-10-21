@@ -172,10 +172,17 @@ function mediaFailureText(error, want) {
 }
 
 async function acquireGroupCallStream(mode) {
+  /* The same voice as a 1:1 call — full band, with the noise suppressor when
+     it is on (60-call-audio.js). The picture stays at 640x480: every member
+     sends it to every other member. */
+  if (typeof prepareNoiseSuppressor === 'function') await prepareNoiseSuppressor();
+  const audio = typeof callAudioConstraints === 'function' ? callAudioConstraints() : true;
   const constraints = mode === 'video'
-    ? { audio: true, video: { width: { ideal: 640 }, height: { ideal: 480 } } }
-    : { audio: true, video: false };
-  return hintTrackContent(await navigator.mediaDevices.getUserMedia(constraints));
+    ? { audio, video: { width: { ideal: 640 }, height: { ideal: 480 } } }
+    : { audio, video: false };
+  let stream = await navigator.mediaDevices.getUserMedia(constraints);
+  if (typeof denoiseCallStream === 'function') stream = await denoiseCallStream(stream);
+  return hintTrackContent(stream);
 }
 
 /* A call among people who are not a group. Everything the call protocol needs

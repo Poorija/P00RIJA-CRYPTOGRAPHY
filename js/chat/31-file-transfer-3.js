@@ -272,12 +272,11 @@ const wantsVideo = mode === 'video';
    and several round trips before an SDP exists. The camera prompt alone
    usually outlasts the probe. */
 if (wantsVideo) primeVideoCodecOrder();
+/* The voice at full band (48 kHz, one channel), and the browser's own noise
+   suppression only where this app's is not taking over (60-call-audio.js). */
+if (includeAudio && typeof prepareNoiseSuppressor === 'function') await prepareNoiseSuppressor();
 const audioConstraints = includeAudio
-? {
-echoCancellation: true,
-noiseSuppression: true,
-autoGainControl: true,
-}
+? (typeof callAudioConstraints === 'function' ? callAudioConstraints() : { echoCancellation: true, noiseSuppression: true, autoGainControl: true })
 : false;
 /* Asked for, not insisted on. `ideal` lets the engine hand back whatever the
    camera and the machine can actually manage, so a device that cannot do 1080p
@@ -299,19 +298,26 @@ height: { ideal: 1080 },
    encoder setting can put back frames that were never captured. `min` makes
    that a constraint the camera has to satisfy or refuse, and the refusal is
    caught below by asking again for anything it can do. */
-frameRate: { min: 24, ideal: 30 },
+/* Sixty where the camera can: a face that moves smoothly is the
+   difference people notice first. A camera that cannot do 60 at this size
+   gives its best (most do 30), and the ladder below decides what is sent. */
+frameRate: { min: 24, ideal: 60 },
 }
 : false,
 };
+let stream;
 try {
-return hintTrackContent(await navigator.mediaDevices.getUserMedia(preferredConstraints));
+stream = await navigator.mediaDevices.getUserMedia(preferredConstraints);
 } catch (error) {
 if (!wantsVideo) throw error;
-return hintTrackContent(await navigator.mediaDevices.getUserMedia({
+stream = await navigator.mediaDevices.getUserMedia({
 audio: audioConstraints,
 video: true,
-}));
+});
 }
+/* The microphone through the noise suppressor, when it is on. */
+if (includeAudio && typeof denoiseCallStream === 'function') stream = await denoiseCallStream(stream);
+return hintTrackContent(stream);
 }
 /* Tell the encoder what it is looking at.
  *
@@ -1587,7 +1593,19 @@ function videoCodecOrder() {
  * its own value, since it came from an engine that knows its own encoder
  * better than this does. */
 function tuneOpus(lines, codecs) {
-  const wanted = { useinbandfec: '1', maxaveragebitrate: '128000' };
+  /* And the voice at its best: full band (48 kHz both ways), one channel
+     (a voice is mono; stereo would halve the bits per channel for nothing),
+     and no DTX — "discontinuous transmission" saves a little bandwidth in
+     pauses at the price of clipped word onsets and pumping background. */
+  const wanted = {
+    useinbandfec: '1',
+    maxaveragebitrate: '128000',
+    usedtx: '0',
+    stereo: '0',
+    'sprop-stereo': '0',
+    maxplaybackrate: '48000',
+    'sprop-maxcapturerate': '48000',
+  };
   for (const [payloadType, name] of codecs) {
     if (name !== 'opus') continue;
     const at = lines.findIndex((line) => line.startsWith(`a=fmtp:${payloadType} `));
@@ -2004,7 +2022,10 @@ async function adaptCallSenders(pc, reading) {
          so where they disagree the measurement wins -- the rung's job is to
          stop this asking for more than the situation deserves, not to refuse
          what the link has already said it can carry. */
-      const ceilings = video ? [1500000, 3000000, 8000000] : [24000, 48000, 128000];
+      /* At sixty frames a second the same sharpness needs more bits than at
+         thirty; the top rung grows with the frame rate the camera delivers. */
+      const captureFps = video ? Number(sender.track.getSettings?.().frameRate || 30) : 0;
+      const ceilings = video ? [1500000, 3000000, captureFps > 32 ? 12000000 : 8000000] : [24000, 48000, 128000];
       let bitrate = ceilings[state.level];
       if (bandwidth != null) {
         /* Video bids for most of the link. Audio never does -- it is small
@@ -2056,7 +2077,8 @@ async function adaptCallSenders(pc, reading) {
           if (SCALE_STEPS[state.scale] > 1) encoding.scaleResolutionDownBy = SCALE_STEPS[state.scale];
           else delete encoding.scaleResolutionDownBy;
           if (topRung) {
-            encoding.maxFramerate = 30;
+            /* Whatever the camera delivers, up to 60. */
+            encoding.maxFramerate = Math.max(24, Math.min(60, Math.round(captureFps || 30)));
             /* Video is what a call is watching. Saying so lets the stack put it
                ahead of whatever else this page is sending when the two compete
                -- a file transfer in another conversation most of all, which
@@ -2467,11 +2489,16 @@ stage.classList.toggle('remote-mirrored', Boolean(mirrored));
 });
 }
 function syncMirrorSelfView() {
+const mirrored = Boolean(chatState.callMirrorSelf);
 document.querySelectorAll('.chat-local-stage').forEach((stage) => {
-stage.classList.toggle('mirror-off', !chatState.callMirrorSelf);
+stage.classList.toggle('mirror-on', mirrored);
+stage.classList.toggle('mirror-off', !mirrored);
 });
 const inlineLocal = document.getElementById('chatLocalVideo');
-if (inlineLocal) inlineLocal.classList.toggle('mirror-off', !chatState.callMirrorSelf);
+if (inlineLocal) {
+inlineLocal.classList.toggle('mirror-on', mirrored);
+inlineLocal.classList.toggle('mirror-off', !mirrored);
+}
 }
 function activeCallPrimaryVideoElement() {
 const ids = chatState.callPrimaryVideo === 'local'
@@ -2620,10 +2647,13 @@ await applyCallSink(deviceId);
 notify(t('خروجی صدا تغییر کرد.', 'Audio output switched.'), 'success');
 return;
 }
+if (kind === 'audioinput' && typeof prepareNoiseSuppressor === 'function') await prepareNoiseSuppressor();
 const constraints = kind === 'audioinput'
-? { audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }
-: { audio: false, video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } };
-const replacement = hintTrackContent(await navigator.mediaDevices.getUserMedia(constraints));
+? { audio: typeof callAudioConstraints === 'function' ? callAudioConstraints({ deviceId: { exact: deviceId } }) : { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }
+: { audio: false, video: { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } };
+let captured = await navigator.mediaDevices.getUserMedia(constraints);
+if (kind === 'audioinput' && typeof denoiseCallStream === 'function') captured = await denoiseCallStream(captured);
+const replacement = hintTrackContent(captured);
 const nextTrack = replacement.getTracks()[0];
 if (!nextTrack) throw new Error('no track');
 const sender = chatState.currentCall.peerConnection?.getSenders?.().find((item) => item.track?.kind === (kind === 'audioinput' ? 'audio' : 'video'));

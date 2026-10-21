@@ -476,6 +476,8 @@ if (file) await importRelayConfigFile(file);
 document.getElementById('chatProfileExportBtn')?.addEventListener('click', () => exportPortableProfileFile());
 document.getElementById('chatIdentityProfileExportBtn')?.addEventListener('click', () => exportPortableProfileFile());
 document.getElementById('chatIdentityProfileImportBtn')?.addEventListener('click', () => document.getElementById('chatProfileImportInput')?.click());
+/* Joining an account on another device with a QR code (59-device-link.js). */
+document.getElementById('chatIdentityLinkBtn')?.addEventListener('click', () => { if (typeof openLinkChooser === 'function') openLinkChooser('new'); });
 document.getElementById('chatProfileImportBtn')?.addEventListener('click', () => document.getElementById('chatProfileImportInput')?.click());
 document.getElementById('chatProfileImportInput')?.addEventListener('change', async (event) => {
 const file = event.target.files?.[0];

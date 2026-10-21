@@ -42,7 +42,14 @@
    than that store holds is offered to be saved on the device instead.
 
    Whether a device hands its files to a sibling at all is the setting "Move
-   files between devices" on the device that has them.
+   files between devices" on the device that has them — or "Sync all
+   content", the account's choice, under which every file, photo, video,
+   voice note, sticker and GIF a device lacks comes over by itself whenever a
+   sibling that has it is online (runSiblingAutoPull, below).
+
+   Once the account's primary has revoked a device, a sibling also asks the
+   device asking for a file to prove which device it is, with its own key
+   (58-device-roster.js), and a revoked one gets nothing.
 
    A sibling still on an older build does not answer here; for one of those,
    a small file (within what the old way could carry) is fetched the old way,
@@ -58,7 +65,27 @@ const siblingFilePulls = new Map();
 
 function siblingDevicesOnline() {
   const mine = typeof getDeviceId === 'function' ? getDeviceId() : '';
-  return (chatState.linkedDevices || []).filter((device) => device.peerId && device.deviceId !== mine && device.peerId !== chatState.peerId);
+  return (chatState.linkedDevices || []).filter((device) => device.peerId && device.deviceId !== mine && device.peerId !== chatState.peerId
+    && !(typeof deviceRevoked === 'function' && deviceRevoked(device.deviceId)));
+}
+/* Which device is asking, signed with its own key over this exchange. */
+function siblingDeviceProofText(challenge, toPeerId) {
+  return `poorija-sibling-device|${challenge}|${toPeerId}`;
+}
+async function siblingDeviceProof(challenge, toPeerId) {
+  if (typeof ensureDeviceKey !== 'function') return null;
+  const key = await ensureDeviceKey().catch(() => null);
+  if (!key) return null;
+  return { d: getDeviceId(), k: key.publicKeyData, s: await deviceSign(siblingDeviceProofText(challenge, toPeerId)) };
+}
+/* Nothing to prove while the account has revoked nobody (an older sibling
+   sends no proof at all); after that, a proof from a device still in it. */
+async function siblingDeviceAcceptable(proof, challenge) {
+  if (typeof rosterHasRevocations !== 'function' || !rosterHasRevocations()) return true;
+  if (!proof?.d || !proof?.k || deviceRevoked(proof.d, proof.k)) return false;
+  const listed = currentRoster()?.members.find((member) => member.d === proof.d);
+  if (listed && listed.k !== proof.k) return false;
+  return deviceVerify(proof.k, siblingDeviceProofText(challenge, chatState.peerId), proof.s);
 }
 
 /* The proof: a signature, with the account's private key, over what this
@@ -130,7 +157,8 @@ function serveSiblingFileConnection(connection) {
     try { message = JSON.parse(data); } catch (_error) { return; }
     if (message?.t === 'hello') {
       const challenge = `${String(message.nonce || '')}|${await siblingSealDigest(message.key)}`;
-      if (!message.key || !await siblingProofValid('pull', challenge, chatState.peerId, message.sig)) {
+      if (!message.key || !await siblingProofValid('pull', challenge, chatState.peerId, message.sig)
+        || !await siblingDeviceAcceptable(message.dev, challenge)) {
         send({ t: 'error', reason: 'not-a-sibling' });
         closeSoon();
         return;
@@ -169,7 +197,7 @@ async function siblingChannelRoom(connection) {
 
 async function serveSiblingFile(connection, key, messageId, offset) {
   const send = (object) => connection.send(JSON.stringify(object));
-  if (!deviceSyncFilesEnabled()) { send({ t: 'error', reason: 'files-off' }); return; }
+  if (!deviceSyncFilesEnabled() && !deviceSyncAllEnabled()) { send({ t: 'error', reason: 'files-off' }); return; }
   const stored = messageId ? await readMessageMedia(messageId).catch(() => null) : null;
   const sessionUrl = !stored && chatState.mediaUrls?.get(messageId);
   const blob = stored?.blob || (sessionUrl ? await (await fetch(sessionUrl)).blob().catch(() => null) : null);
@@ -189,7 +217,7 @@ async function serveSiblingFile(connection, key, messageId, offset) {
 
 function siblingPullLabel(messageId, text) {
   document.querySelectorAll(`[data-chat-device-file="${CSS.escape(messageId)}"]`).forEach((button) => {
-    button.textContent = text;
+    (button.querySelector('span') || button).textContent = text;
     button.disabled = Boolean(siblingFilePulls.get(messageId));
   });
 }
@@ -241,7 +269,10 @@ function pullFromSibling(peerId, state) {
       touch();
       transfer = await siblingTransferKey();
       const challenge = `${nonce}|${await siblingSealDigest(transfer.sealed)}`;
-      connection.send(JSON.stringify({ t: 'hello', nonce, key: transfer.sealed, sig: await siblingProof('pull', challenge, peerId) }));
+      connection.send(JSON.stringify({
+        t: 'hello', nonce, key: transfer.sealed, sig: await siblingProof('pull', challenge, peerId),
+        dev: await siblingDeviceProof(challenge, peerId),
+      }));
     });
     connection.on('error', () => finish(state.received ? 'dropped' : 'unreachable'));
     connection.on('close', () => finish(state.done ? 'done' : (state.received ? 'dropped' : 'unreachable')));
@@ -326,6 +357,7 @@ async function keepSiblingFile(state) {
   }
   renderMessages();
   const name = state.meta?.name || entry?.name || t('فایل', 'file');
+  if (state.quiet && kept) return;
   if (kept) {
     notify(t(`«${name}» از دستگاه دیگر شما رسید و روی این دستگاه ذخیره شد.`, `"${name}" arrived from your other device and is kept on this one.`), 'success');
   } else if (typeof saveFilesToDevice === 'function') {
@@ -335,15 +367,17 @@ async function keepSiblingFile(state) {
   }
 }
 
-/* The button on a row whose file is on another device of this account. */
-async function fetchFromSibling(conversationKey, messageId) {
-  if (!messageId || siblingFilePulls.has(messageId)) return;
+/* The button on a row whose file is on another device of this account —
+   and, `quiet`, the automatic pass, which neither toasts nor falls back to
+   the relay. Resolves what happened: 'done', 'refused' or 'unreachable'. */
+async function fetchFromSibling(conversationKey, messageId, { quiet = false } = {}) {
+  if (!messageId || siblingFilePulls.has(messageId)) return 'busy';
   const siblings = siblingDevicesOnline();
   const peerReady = chatState.peer && !chatState.peer.destroyed && chatState.peer.open;
-  const state = { messageId, conversationKey, chunks: [], received: 0, size: 0, meta: null, verified: false, done: false, shownPercent: -1 };
+  const state = { messageId, conversationKey, chunks: [], received: 0, size: 0, meta: null, verified: false, done: false, shownPercent: -1, quiet };
   if (!siblings.length || !peerReady) {
-    notify(t('هیچ دستگاه دیگری از این حساب الان آنلاین نیست؛ وقتی آنلاین شد دوباره بزنید.', 'No other device of this account is online right now; try again when one is.'), 'warning');
-    return;
+    if (!quiet) notify(t('هیچ دستگاه دیگری از این حساب الان آنلاین نیست؛ وقتی آنلاین شد دوباره بزنید.', 'No other device of this account is online right now; try again when one is.'), 'warning');
+    return 'unreachable';
   }
   siblingFilePulls.set(messageId, state);
   siblingPullLabel(messageId, t('در حال اتصال به دستگاه دیگر…', 'Reaching your other device…'));
@@ -358,23 +392,153 @@ async function fetchFromSibling(conversationKey, messageId) {
     }
     if (outcome === 'done') {
       await keepSiblingFile(state);
-      return;
+      return 'done';
     }
   } finally {
     siblingFilePulls.delete(messageId);
   }
+  renderMessages();
+  if (quiet) return outcome === 'refused' ? 'refused' : 'unreachable';
   const entry = (chatState.history[conversationKey] || []).find((item) => item.id === messageId);
   if (outcome === 'unreachable' && typeof requestDeviceFile === 'function' && entry && Number(entry.size || 0) <= SIBLING_FILE_LEGACY_MAX) {
     requestDeviceFile(conversationKey, messageId);
-    return;
+    return 'legacy';
   }
-  renderMessages();
   notify(outcome === 'refused'
     ? t('دستگاه دیگر این فایل را ندارد یا «جابه‌جایی فایل بین دستگاه‌ها» روی آن خاموش است.', 'Your other device does not have this file, or "Move files between devices" is off on it.')
     : t('به دستگاه دیگر مستقیم وصل نشدیم؛ هر دو آنلاین باشند و دوباره امتحان کنید.', 'Could not reach your other device directly; with both online, try again.'), 'warning');
+  return outcome === 'refused' ? 'refused' : 'unreachable';
+}
+
+/* ---- everything, by itself ------------------------------------------------- */
+
+/* "Sync all content" is the account's choice, not one device's: switched on
+   or off on any device, it is carried to the others (sealed, like any sync
+   bundle), and the newest word wins. */
+const SIBLING_AUTO_MAX_TRIES = 3;
+const SIBLING_AUTO_BUDGET_SHARE = 0.85;
+const siblingAuto = { timer: 0, running: false, again: false, tries: new Map(), done: 0, left: 0, full: false };
+
+function deviceSyncAllSetting() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CHAT_DEVICE_SYNC_ALL_STORAGE_KEY) || 'null');
+    return stored && typeof stored === 'object' ? { on: Boolean(stored.on), at: Number(stored.at) || 0 } : { on: false, at: 0 };
+  } catch (_error) {
+    return { on: false, at: 0 };
+  }
+}
+function deviceSyncAllEnabled() {
+  return deviceSyncAllSetting().on;
+}
+function storeDeviceSyncAll(on, at) {
+  try { localStorage.setItem(CHAT_DEVICE_SYNC_ALL_STORAGE_KEY, JSON.stringify({ on: Boolean(on), at })); } catch (_error) { /* private mode */ }
+}
+function setDeviceSyncAllEnabled(on) {
+  const at = Date.now();
+  storeDeviceSyncAll(on, at);
+  if (typeof sendDeviceBundles === 'function') sendDeviceBundles([{ deviceSettings: { syncAll: Boolean(on), at } }], { hold: true }).catch(() => false);
+  if (on) {
+    siblingAuto.tries.clear();
+    siblingAuto.full = false;
+    scheduleSiblingAutoPull(400);
+  }
+  if (typeof renderAccountDeviceViews === 'function') renderAccountDeviceViews();
+}
+function applySiblingDeviceSettings(settings) {
+  if (!settings || typeof settings.syncAll !== 'boolean') return;
+  const at = Number(settings.at) || 0;
+  if (at <= deviceSyncAllSetting().at) return;
+  storeDeviceSyncAll(settings.syncAll, at);
+  if (settings.syncAll) scheduleSiblingAutoPull(1500);
+  if (typeof renderAccountDeviceViews === 'function') renderAccountDeviceViews();
+}
+
+function scheduleSiblingAutoPull(delay = 3000) {
+  if (siblingAuto.timer || !deviceSyncAllEnabled()) return;
+  siblingAuto.timer = window.setTimeout(() => {
+    siblingAuto.timer = 0;
+    runSiblingAutoPull().catch((error) => console.warn('[Devices] the automatic file sync stopped:', error?.message || error));
+  }, delay);
+}
+
+/* Every row whose file is not on this device, newest first. Not a message
+   meant to disappear (that is opened by hand or not at all), and not one
+   larger than the in-app store keeps (still one tap away). */
+async function siblingAutoCandidates() {
+  const stored = await mediaVaultIds().catch(() => new Set());
+  const out = [];
+  for (const [conversationKey, entries] of Object.entries(chatState.history || {})) {
+    if (!conversationKey || conversationKey === 'system' || !Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (!entry?.id || !isMediaEntry(entry)) continue;
+      if (entry.downloadUrl || chatState.mediaUrls.has(entry.id) || stored.has(entry.id)) continue;
+      if (entry.viewOnce || entry.expiresAt || Number(entry.timerSeconds || 0) > 0) continue;
+      if (Number(entry.size || 0) > MEDIA_VAULT_MAX_FILE_BYTES) continue;
+      if ((siblingAuto.tries.get(entry.id) || 0) >= SIBLING_AUTO_MAX_TRIES) continue;
+      out.push({ conversationKey, entry });
+    }
+  }
+  return out.sort((a, b) => (Date.parse(b.entry.createdAt || 0) || 0) - (Date.parse(a.entry.createdAt || 0) || 0));
+}
+
+/* One file at a time, device to device, while a sibling is here — and never
+   so much that the store starts evicting what it already holds to make room. */
+async function runSiblingAutoPull() {
+  /* Asked again mid-pass — something new arrived: it is looked at the moment
+     this pass ends, not dropped. */
+  if (siblingAuto.running) { siblingAuto.again = true; return; }
+  if (!deviceSyncAllEnabled()) return;
+  if (!siblingDevicesOnline().length || !chatState.peer || chatState.peer.destroyed || !chatState.peer.open) return;
+  siblingAuto.running = true;
+  let failed = 0;
+  try {
+    const candidates = await siblingAutoCandidates();
+    siblingAuto.left = candidates.length;
+    let used = Number((await mediaStorageStats()).bytes || 0);
+    for (const { conversationKey, entry } of candidates) {
+      if (!deviceSyncAllEnabled() || !siblingDevicesOnline().length) break;
+      const size = Number(entry.size || 0);
+      if (used + size > MEDIA_BUDGET_BYTES * SIBLING_AUTO_BUDGET_SHARE) { siblingAuto.full = true; break; }
+      siblingAuto.tries.set(entry.id, (siblingAuto.tries.get(entry.id) || 0) + 1);
+      const outcome = entry.downloadUrl ? 'done' : await fetchFromSibling(conversationKey, entry.id, { quiet: true });
+      siblingAuto.left = Math.max(0, siblingAuto.left - 1);
+      if (outcome === 'done') {
+        siblingAuto.done += 1;
+        siblingAuto.tries.delete(entry.id);
+        used += size;
+      } else if (outcome !== 'busy') {
+        failed += 1;
+      }
+      if (typeof renderAccountDeviceViews === 'function') renderAccountDeviceViews();
+      /* A breath between two channels to the same device: the one just
+         closed is let go before the next one opens. */
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  } finally {
+    siblingAuto.running = false;
+    if (typeof renderAccountDeviceViews === 'function') renderAccountDeviceViews();
+  }
+  if (siblingAuto.again) {
+    siblingAuto.again = false;
+    scheduleSiblingAutoPull(800);
+    return;
+  }
+  /* What did not come is tried again a little later — soon the first time, a
+     transient miss being the usual reason — and a few times at most. */
+  if (failed && !siblingAuto.full) scheduleSiblingAutoPull(siblingAuto.retried ? 30000 : 5000);
+  siblingAuto.retried = Boolean(failed);
+}
+function siblingAutoPullStatus() {
+  if (!deviceSyncAllEnabled()) return '';
+  if (siblingAuto.running && siblingAuto.left) return t(`در حال همگام‌سازی… ${siblingAuto.left} فایل مانده`, `Syncing… ${siblingAuto.left} file(s) left`);
+  if (siblingAuto.full) return t('فضای داخلی برنامه نزدیک سقف است؛ بقیه با دکمهٔ «دریافت از دستگاه دیگر».', 'The in-app store is nearly full; the rest come with the "Fetch" button.');
+  if (siblingAuto.done) return t(`${siblingAuto.done} فایل از دستگاه دیگر رسید.`, `${siblingAuto.done} file(s) arrived from your other device.`);
+  return '';
 }
 
 window.__siblingFileProbe = {
   pulls: () => [...siblingFilePulls.keys()],
   online: () => siblingDevicesOnline().map((device) => device.deviceId),
+  auto: () => ({ running: siblingAuto.running, done: siblingAuto.done, left: siblingAuto.left, full: siblingAuto.full, on: deviceSyncAllEnabled() }),
+  runAuto: () => runSiblingAutoPull(),
 };

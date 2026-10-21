@@ -24,6 +24,16 @@ const CHAT_DEVICE_ID_STORAGE_KEY = 'poorija_chat_device_id';
 /* Whether file attachments travel with a device-sync bundle. Off by default:
    text and call history are small and always wanted; media is neither. */
 const CHAT_DEVICE_SYNC_FILES_STORAGE_KEY = 'poorija_chat_device_sync_files';
+/* Whether every file, photo, sticker and GIF moves between the account's
+   devices by itself while they are online together (57-sibling-files.js) —
+   the account's choice, carried to every device of it. */
+const CHAT_DEVICE_SYNC_ALL_STORAGE_KEY = 'poorija_chat_device_sync_all';
+/* This install's own signing key, the account's device roster as its primary
+   signed it, and every device of the account this one has seen
+   (58-device-roster.js). The key never leaves the device. */
+const CHAT_DEVICE_KEY_STORAGE_KEY = 'poorija_chat_device_key';
+const CHAT_DEVICE_ROSTER_STORAGE_KEY = 'poorija_chat_device_roster';
+const CHAT_KNOWN_DEVICES_STORAGE_KEY = 'poorija_chat_known_devices';
 const CHAT_HISTORY_STORAGE_KEY = 'poorija_chat_history';
 const CHAT_SESSION_KEYS_STORAGE_KEY = 'poorija_chat_session_keys';
 const CHAT_SPACES_STORAGE_KEY = 'poorija_chat_spaces';
