@@ -1,5 +1,8 @@
-# Node 22: Node 20 left support on 2026-04-30 and gets no security fixes.
-FROM node:22-alpine
+# Node 26.12.0, the newest release. Pinned to the exact version rather than
+# node:26-alpine: a build reuses whatever image the machine already holds, so a
+# floating tag kept running a months-old patch release without saying so, and
+# on the relay in Iran a pull can stall for good. Moving up is this one line.
+FROM node:26.12.0-alpine
 WORKDIR /app
 # Versions are pinned here rather than read from package.json, so this line is
 # the ONLY thing that decides what the relay actually runs. An audit found the

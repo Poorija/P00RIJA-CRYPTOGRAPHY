@@ -30,6 +30,9 @@ const { linkPreview } = require('./lib/link-preview.js');
 const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
+const {
+  alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram,
+} = require('./lib/relay-alerts.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
 // Simple .env loader for native runs
@@ -1582,6 +1585,8 @@ app.get('/healthz', authMiddleware, (_req, res) => {
        unannounced (see filesNearlyExhausted). */
     files: { open: fileGuard.open, limit: fileGuard.limit },
     memoryLimitMb: Math.round(MEMORY_LIMIT_BYTES / 1048576),
+    /* What is wrong right now, and whether it reaches the operator. */
+    alerts: { active: alertState.active(), telegram: alertsByTelegram(), waiting: alertOutbox.length },
     uptime: Math.round(process.uptime()),
     sysUptime: Math.round(os.uptime()),
     timestamp: new Date().toISOString(),
@@ -5418,6 +5423,15 @@ async function imagesInUse() {
   return new Set((containers.data || []).map((container) => String(container.ImageID || '')).filter(Boolean));
 }
 
+/* Proves the whole way to the operator's phone: from a relay without
+   Telegram, over the link to the one with it, and on. */
+app.post('/Monitor_Server/alert-test', authMiddleware, async (req, res) => {
+  const via = alertsByTelegram() ? 'telegram' : (Array.from(ALERT_PEERS).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none');
+  queueAlert(`🔔 ${ALERT_LABEL}: پیام آزمایشی هشدار، از پنل مدیریت.`);
+  await flushAlerts();
+  res.json({ ok: via !== 'none', via, waiting: alertOutbox.length });
+});
+
 app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
   if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
   /* system/df walks every layer on disk and can outlast an nginx proxy
@@ -5606,7 +5620,9 @@ const OPS_DOCKER_SOCKET = process.env.OPS_DOCKER_SOCKET || '/var/run/docker.sock
    container, so this is the host path even though the relay only ever
    passes it on as text. */
 const INSTALL_HOST_DIR = process.env.OPS_INSTALL_DIR || '';
-const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:22-alpine';
+/* The relay's own base image, which every machine running it already holds:
+   a job never waits on a registry. */
+const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:26.12.0-alpine';
 const OPS_BACKUP_HOST_DIR = process.env.OPS_BACKUP_DIR || (INSTALL_HOST_DIR ? `${INSTALL_HOST_DIR}/backups` : '');
 /* Where this relay's own /data lives on the host — the compose file mounts
    data/chat-signal there. A file a job hands to this process (a backup on
@@ -6428,6 +6444,172 @@ function filesNearlyExhausted() {
   const reserve = Math.max(64, Math.floor(fileGuard.limit * 0.1));
   return fileGuard.open >= fileGuard.limit - reserve;
 }
+/* ---- alerts to the operator (scripts/lib/relay-alerts.js) -------------------
+ *
+ * Telegram, from the relay that has the bot's token and a chat to send to;
+ * every other relay hands its messages over its transit link to one that does.
+ */
+const ALERT_TELEGRAM_CHAT_ID = String(process.env.CHAT_ALERT_TELEGRAM_CHAT_ID || '').trim();
+const ALERT_LABEL = String(process.env.CHAT_ALERT_LABEL || '').trim() || (() => {
+  try { return new URL(process.env.CHAT_PUBLIC_RELAY_ORIGIN || '').hostname || os.hostname(); } catch (_error) { return os.hostname(); }
+})();
+const ALERT_INTERVAL_MS = Math.max(5000, Number(process.env.CHAT_ALERT_INTERVAL_MS || 60000));
+/* coturn's relay ports, as config/docker-compose.yaml hands them to it. */
+const TURN_PORT_MIN = Number(process.env.CHAT_TURN_PORT_MIN || 49152);
+const TURN_PORT_MAX = Number(process.env.CHAT_TURN_PORT_MAX || 50152);
+const COTURN_CONTAINER = process.env.COTURN_CONTAINER || 'Poorija-Cryptography_Coturn';
+const alertLimits = alertThresholds();
+const alertState = createAlertState({ label: ALERT_LABEL, remindMs: Math.max(1, Number(process.env.CHAT_ALERT_REMIND_HOURS || 6)) * 3600000 });
+/* The relays alerts may go to and come from, by id. Named outright, never
+   "whoever is linked": an alert says how full this machine is and what it is
+   called, and a transit link can be with another operator's relay, who has
+   no business reading that — or writing into this operator's Telegram. */
+const ALERT_PEERS = new Set(String(process.env.CHAT_ALERT_PEERS || '').split(',').map((id) => id.trim().toLowerCase()).filter((id) => /^[a-f0-9]{64}$/.test(id)));
+/* Waiting for Telegram, or for the link to the relay that has it: { id,
+   text, fromPeer, sentAt }. Over a link one is in flight at a time and stays
+   first until the far relay acknowledges it, so a link that drops mid-send
+   loses nothing and the order holds. */
+const alertOutbox = [];
+const ALERT_OUTBOX_LIMIT = 50;
+/* What a peer may take of the outbox: its alerts can never push this relay's
+   own out. */
+const ALERT_PEER_SHARE = 20;
+const alertPeerDownSince = new Map();
+const alertsFromPeers = new Map();
+const alertIdsSeen = new Set();
+let alertNetworkBefore = null;
+let alertsChecking = false;
+let alertsFlushing = false;
+const alertsByTelegram = () => Boolean(TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID);
+
+function queueAlert(text, fromPeer = '') {
+  if (fromPeer && alertOutbox.filter((entry) => entry.fromPeer).length >= ALERT_PEER_SHARE) return;
+  alertOutbox.push({ id: crypto.randomBytes(8).toString('hex'), text: String(text), fromPeer, sentAt: 0 });
+  /* Full: the oldest of a peer's go first, then the oldest of this relay's. */
+  while (alertOutbox.length > ALERT_OUTBOX_LIMIT) {
+    const peerIndex = alertOutbox.findIndex((entry) => entry.fromPeer);
+    alertOutbox.splice(peerIndex >= 0 ? peerIndex : 0, 1);
+  }
+  console.log(`[Alerts] ${text}`);
+}
+/* Oldest first, stopping at the first that cannot go yet: order is kept, and
+   nothing is lost to a Telegram or a link that is down for a while. */
+async function flushAlerts() {
+  if (alertsFlushing) return;
+  alertsFlushing = true;
+  try {
+    while (alertOutbox.length) {
+      const entry = alertOutbox[0];
+      if (alertsByTelegram()) {
+        if (!await sendTelegram(TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, entry.text)) return;
+        alertOutbox.shift();
+        continue;
+      }
+      /* Sent and not yet acknowledged: wait a minute before sending it again. */
+      if (entry.sentAt && Date.now() - entry.sentAt < 60000) return;
+      const link = Array.from(ALERT_PEERS).map((id) => relayPeers.linkFor(id)).find((candidate) => candidate?.isOpen());
+      if (!link) return;
+      link.send({ kind: 'alert', id: entry.id, text: entry.text });
+      entry.sentAt = Date.now();
+      return;
+    }
+  } finally {
+    alertsFlushing = false;
+  }
+}
+/* From a linked relay named in CHAT_ALERT_PEERS, authenticated by the link:
+   sent on only from a relay that can, never passed along again (no loops),
+   at most thirty an hour per link, on one line, and opened with the id the
+   link proved — the text after it is the peer's own word for itself, and on
+   its own it could claim to be any relay. Acknowledged even when already
+   seen: the sender resends until it hears back. */
+function receiveRelayAlert(payload, link) {
+  if (!ALERT_PEERS.has(link.peerId) || !alertsByTelegram()) return;
+  const id = /^[a-f0-9]{16}$/.test(String(payload.id || '')) ? payload.id : '';
+  if (id) link.send({ kind: 'alert-ack', id });
+  if (id && alertIdsSeen.has(id)) return;
+  if (id) {
+    alertIdsSeen.add(id);
+    if (alertIdsSeen.size > 500) alertIdsSeen.delete(alertIdsSeen.values().next().value);
+  }
+  const now = Date.now();
+  const tally = alertsFromPeers.get(link.peerId) || { since: now, count: 0 };
+  if (now - tally.since > 3600000) { tally.since = now; tally.count = 0; }
+  tally.count += 1;
+  alertsFromPeers.set(link.peerId, tally);
+  if (tally.count > 30) return;
+  const text = String(payload.text || '').replace(/[\u0000-\u001f\u2028\u2029]+/g, ' ').trim().slice(0, 1500);
+  if (!text) return;
+  queueAlert(`[${link.peerId.slice(0, 12)}] ${text}`, link.peerId);
+  flushAlerts().catch(() => {});
+}
+/* The far relay has it: the next one may go. */
+function receiveRelayAlertAck(payload, link) {
+  const entry = alertOutbox[0];
+  if (!entry || entry.id !== payload.id || !ALERT_PEERS.has(link.peerId)) return;
+  alertOutbox.shift();
+  flushAlerts().catch(() => {});
+}
+async function alertReadings() {
+  const reading = {};
+  const stat = await fsp.statfs(defaultDataDir).catch(() => null);
+  if (stat) reading.disk = { free: Number(stat.bavail) * Number(stat.bsize), total: Number(stat.blocks) * Number(stat.bsize) };
+  reading.memory = readMeminfo();
+  /* Only a real container ceiling: without one the machine's memory, above,
+     is the measure. */
+  if (MEMORY_LIMIT_BYTES < os.totalmem()) reading.relay = { rss: process.memoryUsage.rss(), limit: MEMORY_LIMIT_BYTES };
+  reading.files = { open: fileGuard.open, limit: fileGuard.limit };
+  if (TURN_URLS.length) {
+    let running = null;
+    if (dockerAvailable()) {
+      const state = await dockerEngineJson('GET', `/v1.44/containers/${encodeURIComponent(COTURN_CONTAINER)}/json`);
+      if (state.ok) running = Boolean(state.data?.State?.Running);
+    }
+    reading.turn = { used: turnPortsInUse(TURN_PORT_MIN, TURN_PORT_MAX), size: TURN_PORT_MAX - TURN_PORT_MIN + 1, running };
+  }
+  const bytes = networkBytes();
+  const now = Date.now();
+  if (bytes !== null) {
+    if (alertNetworkBefore && now > alertNetworkBefore.at) {
+      reading.network = { mbps: ((bytes - alertNetworkBefore.bytes) * 8) / ((now - alertNetworkBefore.at) / 1000) / 1e6 };
+    }
+    alertNetworkBefore = { bytes, at: now };
+  }
+  reading.peersDown = [];
+  for (const id of relayPeers.allowedPeers()) {
+    if (relayPeers.linkFor(id)) { alertPeerDownSince.delete(id); continue; }
+    if (!alertPeerDownSince.has(id)) alertPeerDownSince.set(id, now);
+    const forMs = now - alertPeerDownSince.get(id);
+    if (forMs >= alertLimits.peerDownMs) reading.peersDown.push({ id, forMs });
+  }
+  return reading;
+}
+let alertsAnnounced = false;
+async function checkAlerts() {
+  /* A relay with nowhere to send them (a development machine, a test) keeps
+     quiet. */
+  if (alertsChecking || !(alertsByTelegram() || ALERT_PEERS.size)) return;
+  alertsChecking = true;
+  /* A start is announced: after a crash and a restart, that is how the
+     operator hears of it. */
+  if (!alertsAnnounced) {
+    alertsAnnounced = true;
+    queueAlert(`🔄 ${ALERT_LABEL}: رله راه‌اندازی شد (نسخهٔ ${RELAY_BUILD?.version || 'نامعلوم'}). هشدار دیسک، حافظه و TURN فعال است.`);
+  }
+  try {
+    alertState.update(evaluateAlerts(await alertReadings(), alertLimits)).forEach(queueAlert);
+    await flushAlerts();
+  } catch (error) {
+    console.warn('[Alerts] the check failed:', error?.message || error);
+  } finally {
+    alertsChecking = false;
+  }
+}
+if (process.env.CHAT_ALERTS !== '0') {
+  setTimeout(checkAlerts, Math.min(15000, ALERT_INTERVAL_MS)).unref?.();
+  setInterval(checkAlerts, ALERT_INTERVAL_MS).unref?.();
+}
+
 function socketBudgetRefused(request, socket) {
   const address = socketAddress(request);
   if (filesNearlyExhausted() || memoryNearlyExhausted()) {
@@ -6676,6 +6858,14 @@ function presenceQueryAllowed(link) {
 }
 
 function handleTransitFrame(payload, link) {
+  if (payload?.kind === 'alert') {
+    receiveRelayAlert(payload, link);
+    return;
+  }
+  if (payload?.kind === 'alert-ack') {
+    receiveRelayAlertAck(payload, link);
+    return;
+  }
   if (payload?.kind === 'transit') {
     let inner;
     try {

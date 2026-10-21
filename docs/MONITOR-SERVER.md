@@ -156,12 +156,22 @@ curl -sSL http://SERVER:9080/install | bash -s -- http://SERVER:9080 <token> ~/p
 | `MONITOR_USER` | admin | نام کاربری |
 | `OPS_INSTALL_DIR` | — | مسیر نصب روی host (برای bind mounts) |
 | `OPS_BACKUP_DIR` | `$INSTALL/backups` | محل بکاپ‌ها |
-| `OPS_JOB_IMAGE` | node:20-alpine | ایمیج job containerها |
+| `OPS_JOB_IMAGE` | node:26.12.0-alpine | ایمیج job containerها |
 | `OPS_DOCKER_SOCKET` | /var/run/docker.sock | سوکت داکر |
 | `CHAT_BOOTSTRAP_PORT` | 9080 | پورت نصب‌کنندهٔ خام |
 | `OPS_HUB_MIRROR` | https://hub.docker.com | میرور داکر هاب (برای ایران) |
 | `MONITOR_SESSION_TTL_MS` | 12h | TTL سشن (سلسله‌ای) |
 | `APP_VERSION` | — | نسخهٔ جاری (برای تشخیص تگ stale) |
+| `OPS_DATA_DIR` | `$INSTALL/data/chat-signal` | دادهٔ رله روی host (تحویل فایل دانلود پشتیبان و bundle) |
+| `CHAT_ALERT_TELEGRAM_CHAT_ID` | — | چت تلگرامی که هشدارها به آن می‌رود (با `TELEGRAM_BOT_TOKEN`)؛ رلهٔ بدون این دو، هشدار را از لینک transit به رلهٔ دیگر می‌دهد |
+| `CHAT_ALERT_PEERS` | — | شناسهٔ رله‌هایی که هشدار به آن‌ها فرستاده یا از آن‌ها پذیرفته می‌شود (با کاما)؛ خالی یعنی هیچ‌کدام |
+| `CHAT_ALERT_LABEL` | نام میزبان | نام این رله در پیام‌های هشدار |
+| `CHAT_ALERT_DISK_FREE_PCT` / `_GB` | 10 / 2 | هشدار دیسک زیر این درصد یا گیگابایت آزاد |
+| `CHAT_ALERT_MEMORY_FREE_PCT` | 10 | هشدار حافظهٔ سرور زیر این درصد آزاد |
+| `CHAT_ALERT_TURN_PCT` | 80 | هشدار وقتی این درصد از پورت‌های رلهٔ coturn گرفته شده باشد |
+| `CHAT_ALERT_LINK_MBPS` | 0 | سرعت لینک سرور (مگابیت)؛ ۰ یعنی هشدار پهنای باند خاموش |
+| `CHAT_ALERT_REMIND_HOURS` | 6 | فاصلهٔ یادآوری تا وقتی مشکل ادامه دارد |
+| `TURN_MIN_PORT` / `TURN_MAX_PORT` | 49152 / 50152 | بازهٔ پورت رلهٔ coturn (در `.env`) |
 
 ---
 

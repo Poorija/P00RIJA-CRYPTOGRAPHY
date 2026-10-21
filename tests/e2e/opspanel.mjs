@@ -77,7 +77,7 @@ const images = [
   { Id: 'sha256:stale', RepoTags: ['poorija-crypto:2.98.60'], Size: 200, Containers: -1 },
   { Id: 'sha256:dangling', RepoTags: [], Size: 50, Containers: -1 },
   /* The base image the next build needs; nothing runs from it right now. */
-  { Id: 'sha256:base', RepoTags: ['node:22-alpine'], Size: 400, Containers: -1 },
+  { Id: 'sha256:base', RepoTags: ['node:26.12.0-alpine'], Size: 400, Containers: -1 },
 ];
 const containers = [
   { Id: 'app', ImageID: 'sha256:current', State: 'running' },
@@ -300,7 +300,7 @@ try {
   const pruned = await ops('ops-cleanup', { what: 'dangling' });
   const asked = engineLog.prunes.slice(-1)[0] || {};
   check('the dangling button asks the engine for dangling layers only', Object.keys(asked.dangling || {}).join() === 'true', JSON.stringify(asked));
-  check('the untagged layer is gone, the base image the next build needs is not', !findImage('sha256:dangling') && Boolean(findImage('node:22-alpine')), `${pruned.freedBytes} bytes freed; left ${images.map((image) => image.RepoTags[0] || image.Id).join(', ')}`);
+  check('the untagged layer is gone, the base image the next build needs is not', !findImage('sha256:dangling') && Boolean(findImage('node:26.12.0-alpine')), `${pruned.freedBytes} bytes freed; left ${images.map((image) => image.RepoTags[0] || image.Id).join(', ')}`);
 
   exitCode = results.every((result) => result.ok) ? 0 : 1;
 } catch (error) {

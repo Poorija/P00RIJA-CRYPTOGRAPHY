@@ -1,10 +1,93 @@
-# P00RIJA Cryptography 2.98.73
+# P00RIJA Cryptography 2.98.75
 
-Version 2.98.73 · build chat-v166
+Version 2.98.75 · build chat-v168
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هشدارهای بین دو رله، امن‌تر · Alerts between relays, safer
+
+- **فقط به رله‌های نام‌برده**: هشدار، که می‌گوید سرور چقدر پر است و چه نامی دارد، به هر رلهٔ
+  لینک‌شده‌ای فرستاده می‌شد؛ اگر روزی رلهٔ یک اپراتور دیگر لینک شود، این اطلاعات به او هم می‌رسید و
+  او هم می‌توانست در تلگرام این اپراتور بنویسد. حالا هشدار فقط به رله‌هایی که در `CHAT_ALERT_PEERS`
+  نام برده شده‌اند فرستاده و فقط از همان‌ها پذیرفته می‌شود.
+- **منشأ قطعی**: هشداری که از رلهٔ دیگر می‌رسد با شناسه‌ای شروع می‌شود که خود لینک ثابت کرده، و در
+  یک خط؛ رله‌ای نمی‌تواند خود را جای رلهٔ دیگری جا بزند.
+- **هیچ هشداری گم نمی‌شود**: رلهٔ گیرنده دریافت هر هشدار را تأیید می‌کند و فرستنده تا تأیید، آن را
+  نگه می‌دارد و دوباره می‌فرستد؛ هشدارهای رلهٔ دیگر هم سهم محدودی از صف دارند و هشدارهای خود این
+  رله را بیرون نمی‌اندازند.
+
+- **Only to relays named outright**: an alert, which says how full the server is and what
+  it is called, went to every linked relay; should another operator's relay ever be
+  linked, it would have read that, and could write into this operator's Telegram. Alerts
+  now go only to the relays named in `CHAT_ALERT_PEERS`, and are taken only from them.
+- **Provenance that holds**: an alert from another relay opens with the id the link
+  proved, on one line; no relay can pass itself off as another.
+- **No alert is lost**: the receiving relay acknowledges each alert, and the sender keeps
+  it and sends it again until it does; another relay's alerts have a limited share of the
+  queue and cannot push out this relay's own.
+
+---
+
+# P00RIJA Cryptography 2.98.74
+
+Version 2.98.74 · build chat-v167
+
+---
+
+## هشدار تلگرامی، Node 26 و nginx 1.31 · Telegram alerts, Node 26, and nginx 1.31
+
+- **هشدار به تلگرام مدیر**: رله هر دقیقه این‌ها را می‌سنجد و وقتی چیزی از حد بگذرد، با ربات تلگرام
+  به مدیر پیام می‌دهد:
+  - فضای دیسکی که داده‌ها روی آن است، و حافظهٔ سرور؛
+  - حافظهٔ خود رله در برابر سقف کانتینرش، و فایل‌های بازش؛
+  - ظرفیت TURN: چند پورت از پورت‌های رلهٔ coturn گرفته شده، اینکه coturn اصلاً اجرا می‌شود یا نه،
+    و پهنای باند سرور (اگر سرعت لینک تعیین شده باشد)؛
+  - رلهٔ دیگری که ده دقیقه در دسترس نیست؛ رله‌ای که از کار افتاده نمی‌تواند خودش خبر بدهد.
+
+  پیام یک بار وقتی مشکل شروع می‌شود فرستاده می‌شود، دوباره اگر بدتر شود، هر شش ساعت یک یادآوری تا
+  وقتی ادامه دارد، و یک پیام وقتی برطرف شد؛ هرگز هر دقیقه یک پیام. هر راه‌اندازی رله هم اعلام می‌شود،
+  تا مثلاً بعد از یک کرش و راه‌اندازی دوباره، مدیر بداند. رله‌ای که به تلگرام دسترسی ندارد (سرور داخلی)
+  هشدارهایش را از لینک رمزنگاری‌شدهٔ بین دو رله به رلهٔ دیگر می‌دهد و آن رله می‌فرستد. پنل با
+  `alert-test` یک پیام آزمایشی می‌فرستد و `healthz` هشدارهای فعال را نشان می‌دهد. شناسهٔ چت در
+  `CHAT_ALERT_TELEGRAM_CHAT_ID` و آستانه‌ها در `CHAT_ALERT_*` تنظیم می‌شوند.
+- **Node 26.12.0 و nginx 1.31.7**، جدیدترین نسخه‌ها: رله، رلهٔ مستقل و کارهای پنل روی Node 26.12.0،
+  و nginx روی 1.31.7. نسخه‌ها دقیق ثابت شده‌اند: با برچسب شناور، ساخت از هر نسخه‌ای که از قبل روی
+  سرور بود استفاده می‌کرد و بی‌صدا ماه‌ها عقب می‌ماند.
+- بازهٔ پورت‌های رلهٔ coturn حالا از `.env` (`TURN_MIN_PORT` و `TURN_MAX_PORT`) تنظیم می‌شود و همان
+  عددها به هشدار TURN می‌رسند.
+
+- **Alerts to the operator's Telegram**: once a minute the relay checks the following and,
+  when something crosses a line, sends the operator a message through the Telegram bot:
+  - the disk its data is on, and the machine's memory;
+  - its own memory against its container's ceiling, and its open files;
+  - TURN capacity: how many of coturn's relay ports are taken, whether coturn is running
+    at all, and the machine's bandwidth (when the link speed is given);
+  - a linked relay unreachable for ten minutes; a relay that has died cannot say so
+    itself.
+
+  One message when a problem starts, another if it gets worse, a reminder every six hours
+  while it lasts, and one when it is over; never one a minute. Every start of the relay
+  is announced too, so a crash and restart does not go unnoticed. A relay that cannot
+  reach Telegram (the server inside Iran) hands its alerts over the encrypted link between the
+  two relays, and the other relay sends them on. The dashboard's `alert-test` sends a test
+  message, and `healthz` lists what is active. The chat is set with
+  `CHAT_ALERT_TELEGRAM_CHAT_ID` and the thresholds with `CHAT_ALERT_*`.
+- **Node 26.12.0 and nginx 1.31.7**, the newest releases: the relay, the standalone relay,
+  and the dashboard's jobs run on Node 26.12.0, and nginx on 1.31.7. The versions are
+  pinned exactly: with a floating tag, a build used whatever copy the server already held
+  and quietly fell months behind.
+- coturn's relay port range is now set in `.env` (`TURN_MIN_PORT` and `TURN_MAX_PORT`), and
+  the same numbers reach the TURN alert.
+
+---
+
+# P00RIJA Cryptography 2.98.73
+
+Version 2.98.73 · build chat-v166
 
 ---
 
@@ -47,7 +130,7 @@ Version 2.98.72 · build chat-v165
 ## پنل مدیریت سرور: پشتیبان‌ها و پاکسازی دیسک · The server dashboard: backups and disk cleanup
 
 - **دکمهٔ «لایه‌های بی‌نام»** در کارت دیسک، به‌جای لایه‌های بی‌نام، همهٔ ایمیج‌هایی را پاک می‌کرد که
-  کانتینری از آن‌ها استفاده نمی‌کرد: ایمیج‌های پایه‌ای که ساخت بعدی لازم دارد (که روی سرور ایران
+  کانتینری از آن‌ها استفاده نمی‌کرد: ایمیج‌های پایه‌ای که ساخت بعدی لازم دارد (که روی سرور داخلی
   دانلود دوباره‌شان ساعت‌ها طول می‌کشد یا اصلاً ممکن نیست) و ایمیج‌های سرویس‌های دیگر همان سرور.
   حالا فقط لایه‌های بی‌نام و بی‌استفاده را پاک می‌کند.
 - **ایمیج در حال استفاده**: پنل ایمیجی را که کانتینری از آن ساخته شده بود هم برای حذف پیشنهاد می‌داد
@@ -66,7 +149,7 @@ Version 2.98.72 · build chat-v165
 
 - **The "dangling layers" button** on the disk card removed, instead of dangling layers,
   every image no container was using: the base images the next build needs (which take
-  hours to fetch again on the server in Iran, if they can be fetched at all) and the
+  hours to fetch again on the server inside Iran, if they can be fetched at all) and the
   images of the machine's other services. It now removes untagged layers nothing uses,
   and only those.
 - **Images in use**: the dashboard offered an image a container is made from for removal,
@@ -130,7 +213,7 @@ Version 2.98.71 · build chat-v164
 - **صف پذیرش اتصال** از ۵۱۱ به ۴۰۹۶ رسید، تا هجوم اتصال‌های هم‌زمان جا نماند.
 - **Node.js 22**: پشتیبانی Node 20 در آوریل 2026 تمام شده بود. رله و کارهای پنل حالا روی Node 22‌اند.
 - **سقف اتصال هر IP**: برای کاربرانی که پشت NAT مشترک اپراتور موبایل‌اند (رایج در ایران)، بالاتر
-  رفت (رلهٔ خارج از ایران حدود ۳۰۰، رلهٔ ایران حدود ۱۶۰). جلوی سوءاستفاده را سقف کل، نگهبان فایل
+  رفت (سرور خارجی حدود ۳۰۰، سرور داخلی حدود ۱۶۰). جلوی سوءاستفاده را سقف کل، نگهبان فایل
   و حافظه، و محدودیت نرخ می‌گیرند.
 - **سیل درخواست**: رله دیگر به هر فریم اضافی جواب نمی‌دهد (حداکثر یک جواب در ثانیه) و اتصالی را که
   بعد از هزاران تخطی ادامه بدهد می‌بندد.
@@ -144,8 +227,8 @@ Version 2.98.71 · build chat-v164
   به آن دستگاه نمی‌رسید (و فایلش هم خودکار منتقل نمی‌شد)، چون برنامه آن را نقطهٔ شروع مقایسه حساب
   می‌کرد. حالا از اولین پیام به بعد همه چیز به دستگاه‌های دیگر می‌رسد.
 - **ظرفیت اندازه‌گیری‌شده**، با بار معمولی (هر کاربر هر ده ثانیه یک پیام) و محدودیت‌های واقعی هر
-  سرور: رلهٔ خارج از ایران تا **۱۰٬۰۰۰ اتصال (حدود ۵۰۰۰ کاربر هم‌زمان)** با تأخیر p95 حدود ۱۰۰
-  میلی‌ثانیه و بدون حتی یک پیام گم‌شده؛ رلهٔ ایران تا سقف خودش، **حدود ۴۷۰۰ اتصال (حدود ۲۳۰۰
+  سرور: سرور خارجی تا **۱۰٬۰۰۰ اتصال (حدود ۵۰۰۰ کاربر هم‌زمان)** با تأخیر p95 حدود ۱۰۰
+  میلی‌ثانیه و بدون حتی یک پیام گم‌شده؛ سرور داخلی تا سقف خودش، **حدود ۴۷۰۰ اتصال (حدود ۲۳۰۰
   کاربر)**، با تأخیر p95 زیر ۲۰ میلی‌ثانیه، و اتصال‌های بیشتر از سقف با پاسخ «پر است» رد می‌شوند.
   هزار اتصالی که یک‌باره قطع شوند در چند ثانیه همه برمی‌گردند. پیش از این اصلاحات، هر سرور حدود
   ۵۰۰ کاربر را تحمل می‌کرد.
@@ -190,7 +273,7 @@ storms, persistence after a hard kill, leaks, and abuse. Everything it found is 
 - **Node.js 22**: Node 20 support ended in April 2026. The relay and the panel's jobs now
   run on Node 22.
 - **The per-address cap** is higher, for people behind a mobile carrier's shared NAT
-  (common in Iran): about 300 on the relay outside Iran and 160 on the relay in Iran.
+  (common in Iran): about 300 on the server outside Iran and 160 on the server inside Iran.
   Abuse is held back by the total cap, the open-file and memory guards, and rate
   limiting.
 - **Floods**: the relay no longer answers every excess frame (one answer a second at
@@ -208,9 +291,9 @@ storms, persistence after a hard kill, leaks, and abuse. Everything it found is 
   took it as the starting point to compare against. Everything from the first message
   on now reaches the other devices.
 - **Measured capacity**, under ordinary use (each person sending a message every ten
-  seconds) and each server's real limits: the relay outside Iran up to **10,000 sockets
+  seconds) and each server's real limits: the server outside Iran up to **10,000 sockets
   (about 5,000 people at once)** at about a 100 ms p95 and not one message lost; the
-  relay in Iran up to its own ceiling, **about 4,700 sockets (about 2,300 people)**, at
+  server inside Iran up to its own ceiling, **about 4,700 sockets (about 2,300 people)**, at
   under a 20 ms p95, with sockets past the ceiling refused with a "full" answer. A
   thousand sockets dropped at once all come back within seconds. Before these fixes,
   each server held about 500 people.

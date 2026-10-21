@@ -1,4 +1,6 @@
-FROM nginx:alpine
+# nginx 1.31.7, the newest mainline release, pinned for the same reason as the
+# relay's Node: nginx:alpine meant whichever copy the machine happened to hold.
+FROM nginx:1.31.7-alpine
 # Room for many proxied sockets: nginx's stock 1024 connections per worker,
 # two per WebSocket, was a second ceiling near 500 people per server.
 RUN rm /etc/nginx/conf.d/default.conf \

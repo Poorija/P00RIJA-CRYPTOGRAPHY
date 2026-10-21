@@ -13,7 +13,7 @@
  *   node tests/e2e/prodready.mjs            # needs Docker
  *
  * The relay is built from the same Dockerfile production uses
- * (config/Dockerfile.chat-signal, node:20-alpine) and run with the limits
+ * (config/Dockerfile.chat-signal) and run with the limits
  * the two production servers actually have — two cores, their memory, and
  * the 1024 open files Docker gives a container by default — so the numbers
  * are the servers' numbers, not this laptop's:
@@ -567,7 +567,10 @@ try {
     const rest = { rss: (await health(relay))?.memory?.rss, fds: containerReading(relay).fds };
     const identities = Array.from({ length: 300 }, () => relayTestIdentity());
     const samples = [];
-    for (let cycle = 0; cycle < 12; cycle += 1) {
+    /* PROD_LEAK_WAVES for a longer look: a runtime whose collector is lazier
+       holds more between waves, and only more waves tell that from a leak. */
+    const waves = Math.max(8, Number(process.env.PROD_LEAK_WAVES || 12));
+    for (let cycle = 0; cycle < waves; cycle += 1) {
       const wave = [];
       for (let start = 0; start < identities.length; start += 50) {
         const batch = await Promise.allSettled(identities.slice(start, start + 50).map((identity) => client(relay.ws, identity)));
@@ -582,11 +585,11 @@ try {
     }
     await sleep(20000);
     const settled = { rss: (await health(relay))?.memory?.rss, fds: containerReading(relay).fds };
-    console.log(`  at rest ${rest.rss} MB / ${rest.fds} files · after 12 waves of ${identities.length}: ${settled.rss} MB / ${settled.fds} files`);
+    console.log(`  at rest ${rest.rss} MB / ${rest.fds} files · after ${waves} waves of ${identities.length}: ${settled.rss} MB / ${settled.fds} files`);
     console.log(`  per wave: ${samples.map((sample) => `${sample.rss}MB/${sample.fds}f`).join(' ')}`);
-    const growthLate = (samples[samples.length - 1]?.rss || 0) - (samples[5]?.rss || 0);
+    const growthLate = (samples[samples.length - 1]?.rss || 0) - (samples[Math.floor(waves / 2) - 1]?.rss || 0);
     check('open files return to where they started', settled.fds <= rest.fds + 5, `${rest.fds} → ${settled.fds}`);
-    check('memory levels off instead of climbing wave after wave', growthLate < 40, `+${growthLate} MB over the last six waves`);
+    check('memory levels off instead of climbing wave after wave', growthLate < 40, `+${growthLate} MB over the last ${waves - Math.floor(waves / 2)} waves`);
     report.leaks = { rest, settled, samples, growthLate };
   } finally {
     stopRelay(relay);

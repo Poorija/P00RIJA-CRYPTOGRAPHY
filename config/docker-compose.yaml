@@ -125,6 +125,25 @@ services:
       # ask Telegram; without one, an upstream relay that has a token is asked.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_STICKERS_UPSTREAM: ${TELEGRAM_STICKERS_UPSTREAM:-}
+      # Alerts to the operator (scripts/lib/relay-alerts.js): disk, memory,
+      # open files, TURN ports, coturn down, a linked relay unreachable. Sent
+      # by the bot above to this chat; a relay without the two hands its
+      # alerts over the transit link to one that has them.
+      CHAT_ALERT_TELEGRAM_CHAT_ID: ${CHAT_ALERT_TELEGRAM_CHAT_ID:-}
+      # The relays (ids) alerts may go to and come from over the transit link;
+      # empty means none. Never "whoever is linked": an alert says how full
+      # this machine is and what it is called.
+      CHAT_ALERT_PEERS: ${CHAT_ALERT_PEERS:-}
+      CHAT_ALERT_LABEL: ${CHAT_ALERT_LABEL:-}
+      CHAT_ALERT_DISK_FREE_PCT: ${CHAT_ALERT_DISK_FREE_PCT:-10}
+      CHAT_ALERT_DISK_FREE_GB: ${CHAT_ALERT_DISK_FREE_GB:-2}
+      CHAT_ALERT_MEMORY_FREE_PCT: ${CHAT_ALERT_MEMORY_FREE_PCT:-10}
+      CHAT_ALERT_TURN_PCT: ${CHAT_ALERT_TURN_PCT:-80}
+      # The server's link speed in Mbit/s; 0 leaves the bandwidth alert off.
+      CHAT_ALERT_LINK_MBPS: ${CHAT_ALERT_LINK_MBPS:-0}
+      # coturn's relay ports, the same two numbers coturn is given below.
+      CHAT_TURN_PORT_MIN: ${TURN_MIN_PORT:-49152}
+      CHAT_TURN_PORT_MAX: ${TURN_MAX_PORT:-50152}
       # The relay's own plain-http ports (9000, 9001, 9080) answer only this
       # machine and nginx, never the internet. docker0 stands for the Docker
       # bridge address nginx reaches the relay at (chat-signal:host-gateway).
@@ -213,8 +232,8 @@ services:
       - --fingerprint
       - --no-cli
       - --no-multicast-peers
-      - --min-port=49152
-      - --max-port=50152
+      - --min-port=${TURN_MIN_PORT:-49152}
+      - --max-port=${TURN_MAX_PORT:-50152}
       # Required, not defaulted: a TURN server advertising 127.0.0.1 to the
       # world answers every relayed call with a connection to itself, and the
       # failure is silent from the operator's side. Missing is an error, the

@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "p00rija-cryptography"
-version = "2.98.73"
+version = "2.98.75"
 dependencies = [
  "block2 0.6.2",
  "getrandom 0.3.4",
