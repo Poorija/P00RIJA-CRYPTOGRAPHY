@@ -51,7 +51,10 @@
    or somebody on the path sees a handful of sizes instead of a length.
    ============================================================================ */
 
-const LOCAL_CAPS = ['ss1', 'pad1'];
+/* 'pd1': this build reads the relay's presence table as changes
+   (peers-delta) after the first whole one, rather than the whole table on
+   every change (30-file-transfer-2.js). */
+const LOCAL_CAPS = ['ss1', 'pad1', 'pd1'];
 const PAD_LADDER = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
 const PAD_STEP_ABOVE = 16384;
 const LIVE_PAD_LIMIT = 16384;

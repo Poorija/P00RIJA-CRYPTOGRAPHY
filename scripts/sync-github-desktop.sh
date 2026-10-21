@@ -89,7 +89,10 @@ log "Mirroring the export into the clone"
 #   file this round dropped would otherwise live on there forever.
 # .git excluded for obvious reasons; .DS_Store because Finder leaves them
 #   behind and they are not anybody's work.
-rsync -a --delete --exclude='.git' --exclude='.DS_Store' "$EXPORT"/ "$DEST"/
+# --checksum: by size and time alone, a version bump (2.98.70 → 2.98.73 is
+#   the same length) in a clone file newer than the export was skipped, and
+#   the commit went out with seventeen files still naming the old version.
+rsync -a --checksum --delete --exclude='.git' --exclude='.DS_Store' "$EXPORT"/ "$DEST"/
 
 # ------------------------------------------------------------------- 4. the commit
 log "Committing in the clone"

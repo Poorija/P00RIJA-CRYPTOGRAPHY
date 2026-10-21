@@ -216,9 +216,12 @@ check('and the server still answers afterwards', afterGarbage.status > 0,
 
 /* One machine holding thousands of sockets is the cheapest denial of service
    there is, and nothing in the upgrade path counts them. */
-/* Same reasoning: the per-address ceiling scales with RAM, so read it. */
+/* Same reasoning: the per-address ceiling scales with RAM, so read it. It is
+   generous now — a mobile carrier puts thousands behind one address — and
+   reaches its 2,000 ceiling on a big development machine, so the attempts go
+   past whatever it is rather than stopping at a few hundred. */
 const perAddress = Number(CAPACITY?.sockets?.maxPerAddress || 40);
-const SOCKET_ATTEMPTS = Math.min(perAddress + 8, 320);
+const SOCKET_ATTEMPTS = Math.min(perAddress + 8, 2100);
 const sockets = [];
 let accepted = 0;
 for (let i = 0; i < SOCKET_ATTEMPTS; i += 1) {

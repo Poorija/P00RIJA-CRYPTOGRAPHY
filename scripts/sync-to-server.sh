@@ -274,7 +274,11 @@ log "Building images (no cache)"
 # run instead of a number frozen in 2024. Read from package.json, the one
 # place the version already lives.
 APP_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
-"${COMPOSE_CMD[@]}" build --no-cache poorija-cryptography chat-signal || {
+# The version goes to the build as well as to `up`: without it the build
+# tagged its image with the compose file's default, `up` then found no image
+# for this version and built the app a second time, and every deploy left a
+# stale extra tag behind.
+APP_VERSION="$APP_VERSION" "${COMPOSE_CMD[@]}" build --no-cache poorija-cryptography chat-signal || {
     fail "The image build failed; the running stack was left alone."
     exit 1
 }
@@ -366,6 +370,27 @@ verify_assets || status=1
 verify_relay || status=1
 verify_health || status=1
 verify_through_nginx || status=1
+
+# ---------------------------------------------------------- what a deploy leaves
+#
+# Every deploy builds without cache and tags the app image with its version,
+# and nothing ever removed the old ones: a dozen 160 MB images and 6 to 13 GB
+# of build cache had piled up on a 38 GB disk. Kept: this version's image and
+# the one before it (the rollback), and the build cache of the last week.
+# Only images nothing runs are removed, and only this stack's own tags.
+if [ "$status" -eq 0 ]; then
+    log "Removing what earlier deployments left behind"
+    keep_previous="$(docker images --format '{{.Tag}}' poorija-crypto 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -vFx "$APP_VERSION" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+    docker images --format '{{.Repository}}:{{.Tag}}' poorija-crypto 2>/dev/null | while read -r ref; do
+        tag="${ref##*:}"
+        [ "$tag" = "$APP_VERSION" ] && continue
+        [ -n "$keep_previous" ] && [ "$tag" = "$keep_previous" ] && continue
+        docker rmi "$ref" >/dev/null 2>&1 && printf "  removed %s\n" "$ref"
+    done
+    docker image prune -f >/dev/null 2>&1 || true
+    docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
+    ok "kept poorija-crypto:$APP_VERSION${keep_previous:+ and :$keep_previous}"
+fi
 
 echo
 if [ "$status" -eq 0 ]; then

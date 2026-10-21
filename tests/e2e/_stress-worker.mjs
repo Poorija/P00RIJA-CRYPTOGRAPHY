@@ -65,6 +65,9 @@ function connect(index) {
         clientId: client.clientId,
         fingerprint: client.fingerprint,
         publicKeyData: identityFor(index).publicKeyData,
+        /* As the app does: it reads the presence table as changes after the
+           first whole one. STRESS_CAPS='' measures an older build instead. */
+        caps: String(process.env.STRESS_CAPS ?? 'pd1').split(',').filter(Boolean),
       }));
       resolve(client);
     });
@@ -220,9 +223,115 @@ async function runCalls(limit, iceEach) {
   return { attempted: pairs.length, completed, setups };
 }
 
+/* People arriving, not a stampede: a batch at a time, each failure tried
+   again a couple of times after a pause, the way the app's own reconnect
+   does. */
+async function addClientsPaced(from, count, batch, gapMs) {
+  const totals = { opened: 0, failed: 0, refused: 0, timedOut: 0, reasons: {} };
+  const retry = [];
+  for (let offset = 0; offset < count; offset += batch) {
+    const indices = Array.from({ length: Math.min(batch, count - offset) }, (_, step) => from + offset + step);
+    const settled = await Promise.allSettled(indices.map((index) => connect(index)));
+    settled.forEach((entry, position) => {
+      if (entry.status === 'fulfilled') { clients.push(entry.value); totals.opened += 1; }
+      else retry.push(indices[position]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, gapMs));
+  }
+  for (let attempt = 0; attempt < 2 && retry.length; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1500 + attempt * 1500));
+    const again = retry.splice(0);
+    const settled = await Promise.allSettled(again.map((index) => connect(index)));
+    settled.forEach((entry, position) => {
+      if (entry.status === 'fulfilled') { clients.push(entry.value); totals.opened += 1; }
+      else retry.push(again[position]);
+    });
+  }
+  for (const index of retry) {
+    totals.failed += 1;
+    void index;
+  }
+  return { ...totals, held: clients.filter((client) => client.socket.readyState === 1).length };
+}
+
+/* Ordinary use: every client sends one message every `periodMs`, at its own
+   moment within the period, for `durationMs`. */
+async function runSteady(durationMs, periodMs) {
+  const live = clients.filter((client) => client.socket.readyState === 1);
+  const pairs = [];
+  for (let index = 0; index + 1 < live.length; index += 2) pairs.push([live[index], live[index + 1]]);
+  const latencies = [];
+  const sentAt = new Map();
+  let delivered = 0;
+  let expected = 0;
+  onWireMessage = (client, message) => {
+    if (message.type !== 'relay') return;
+    const id = message.payload?.stressId;
+    if (!id || !sentAt.has(id)) return;
+    latencies.push(Number(process.hrtime.bigint() - sentAt.get(id)) / 1e6);
+    sentAt.delete(id);
+    delivered += 1;
+  };
+  const body = 'x'.repeat(1024);
+  const timers = [];
+  let sequence = 0;
+  const started = Date.now();
+  for (const [a, b] of pairs) {
+    for (const [from, to] of [[a, b], [b, a]]) {
+      const tick = () => {
+        if (Date.now() - started > durationMs || from.socket.readyState !== 1) return;
+        const id = `${ID}-s-${from.index}-${sequence += 1}`;
+        sentAt.set(id, process.hrtime.bigint());
+        expected += 1;
+        from.socket.send(JSON.stringify({ type: 'relay', toFingerprint: to.fingerprint, toClientId: to.clientId, payload: { type: 'offline-chat', inner: 'text', stressId: id, ciphertext: body } }));
+        timers.push(setTimeout(tick, periodMs));
+      };
+      timers.push(setTimeout(tick, Math.random() * periodMs));
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, durationMs + 6000));
+  timers.forEach((timer) => clearTimeout(timer));
+  onWireMessage = null;
+  return { pairs: pairs.length, expected, delivered, latencies };
+}
+
+/* Drop some sockets at once, as a network blip does. */
+function dropClients(count) {
+  const dropped = [];
+  for (const client of clients.splice(0, count)) {
+    try { client.socket.terminate(); } catch (_error) { /* gone */ }
+    dropped.push(client.index);
+  }
+  return dropped;
+}
+
 process.on('message', async (command) => {
   try {
-    if (command.op === 'connect') {
+    if (command.op === 'connect-paced') {
+      process.send({ id: command.id, ok: true, ...(await addClientsPaced(command.from, command.count, command.batch || 25, command.gapMs || 250)) });
+    } else if (command.op === 'steady') {
+      process.send({ id: command.id, ok: true, ...(await runSteady(command.durationMs || 20000, command.periodMs || 10000)) });
+    } else if (command.op === 'drop') {
+      process.send({ id: command.id, ok: true, dropped: dropClients(command.count) });
+    } else if (command.op === 'reconnect') {
+      /* Everybody that was dropped, at once — the storm a restart causes —
+         with the retries the app makes. */
+      const started = Date.now();
+      const indices = command.indices || [];
+      const result = await addClientsPaced(indices[0] ?? 0, 0, 1, 0);
+      void result;
+      const settled = await Promise.allSettled(indices.map((index) => connect(index)));
+      const failedIndices = [];
+      settled.forEach((entry, position) => { if (entry.status === 'fulfilled') clients.push(entry.value); else failedIndices.push(indices[position]); });
+      let back = indices.length - failedIndices.length;
+      for (let attempt = 0; attempt < 3 && failedIndices.length; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        const again = failedIndices.splice(0);
+        const retried = await Promise.allSettled(again.map((index) => connect(index)));
+        retried.forEach((entry, position) => { if (entry.status === 'fulfilled') { clients.push(entry.value); back += 1; } else failedIndices.push(again[position]); });
+      }
+      process.send({ id: command.id, ok: true, asked: indices.length, back, seconds: (Date.now() - started) / 1000 });
+    } else if (command.op === 'connect') {
       process.send({ id: command.id, ok: true, ...(await addClients(command.from, command.count)) });
     } else if (command.op === 'burst') {
       process.send({ id: command.id, ok: true, ...(await runBurst(command.rounds)) });

@@ -64,6 +64,15 @@ services:
     network_mode: host
     volumes:
       - ./data:/data
+    # A socket is an open file. Docker's default of 1024 held the relay to
+    # about a thousand sockets — some 500 people, each app holding two.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    # A ceiling, so a runaway relay cannot take memory from whatever else the
+    # machine runs; the relay refuses new sockets well before reaching it.
+    mem_limit: ${RELAY_MEM_LIMIT:-2g}
     restart: unless-stopped
 
   coturn:

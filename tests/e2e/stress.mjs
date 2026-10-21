@@ -71,8 +71,10 @@ let auth;
 
 if (REMOTE) {
   const base = new URL(REMOTE);
-  healthUrl = `${base.origin}/healthz`;
-  signalUrl = `${base.protocol === 'https:' ? 'wss' : 'ws'}://${base.host}/chat-signal`;
+  /* A relay reached directly rather than behind its web front (a container
+     under test, say) answers presence on its own port: both are overridable. */
+  healthUrl = process.env.RELAY_HEALTH_URL || `${base.origin}/healthz`;
+  signalUrl = process.env.RELAY_WS_URL || `${base.protocol === 'https:' ? 'wss' : 'ws'}://${base.host}/chat-signal`;
   auth = process.env.MONITOR_PASSWORD
     ? 'Basic ' + Buffer.from(`admin:${process.env.MONITOR_PASSWORD}`).toString('base64')
     : '';
@@ -151,6 +153,9 @@ function connect(index) {
         clientId: client.clientId,
         fingerprint,
         publicKeyData: identityFor(index).publicKeyData,
+        /* As the app does: it reads the presence table as changes after the
+           first whole one. STRESS_CAPS='' measures an older build instead. */
+        caps: String(process.env.STRESS_CAPS ?? 'pd1').split(',').filter(Boolean),
       }));
       resolve(client);
     });
@@ -384,6 +389,16 @@ try {
   /* ===== the reading ==================================================== */
 
   const after = await health();
+  globalThis.__stressSummary = {
+    connected: connectedTotal,
+    harnessLimited,
+    ceilingHit,
+    waves: waveReport.map((row) => ({ total: row.total, failed: row.failed, p50: Math.round(row.p50), p95: Math.round(row.p95), p99: Math.round(row.p99), lost: row.expected - row.delivered, rss: row.rss })),
+    full: { expected: full.expected, delivered: full.delivered, offered: Math.round(full.offeredRate || 0), sustained: Math.round(full.sustainedRate || 0), p50: Math.round(full.p50 || 0), p95: Math.round(full.p95 || 0), p99: Math.round(full.p99 || 0), max: Math.round(full.max || 0) },
+    calls: { attempted: callAttempted, completed: callCompleted, p50: Math.round(callStats.p50), p95: Math.round(callStats.p95) },
+    rss: after?.memory?.rss ?? null,
+    limits: after?.relay?.limits || null,
+  };
   console.log('\n===== what this relay can hold =====');
   console.log(`  concurrent clients      ${connectedTotal} across ${WORKERS} processes`);
   console.log(`  messages offered        ${full.offeredRate.toFixed(0)}/s, all delivered at p95 ${full.p95.toFixed(0)}ms`);
@@ -459,6 +474,8 @@ try {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (error) { /* gone */ }
 }
 
+/* One line a harness driving this suite can read (prodready.mjs). */
+if (globalThis.__stressSummary) console.log(`STRESS_SUMMARY ${JSON.stringify(globalThis.__stressSummary)}`);
 const failed = results.filter((result) => !result.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) {

@@ -59,6 +59,12 @@ services:
       - "chat-signal:host-gateway"
     networks:
       - poorija_net
+    # Every proxied WebSocket holds two of nginx's connections, each a file.
+    # Docker's default of 1024 open files capped a server near 500 people.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     restart: unless-stopped
 
   chat-signal:
@@ -155,6 +161,16 @@ services:
       # relay answers; remove the volume on any box where that trade is
       # wrong, and the dashboard simply reports those actions as unavailable.
       - /var/run/docker.sock:/var/run/docker.sock
+    # A socket is an open file. Docker's default of 1024 held the relay to
+    # about a thousand sockets — some 500 people, each app holding two.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    # A ceiling, so a runaway relay cannot take memory from whatever else the
+    # machine runs. The relay itself stops taking sockets at three quarters
+    # of it (memoryNearlyExhausted), so reaching it is never a kill.
+    mem_limit: ${CHAT_SIGNAL_MEM_LIMIT:-2g}
     restart: unless-stopped
 
   coturn:

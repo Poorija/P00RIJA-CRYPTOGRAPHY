@@ -1,7 +1,8 @@
 # P00RIJA Standalone Relay
 # This Dockerfile only includes the signaling server — the same program the
 # full stack runs (scripts/server.js), started through standalone-relay/server.js.
-FROM node:20-alpine
+# Node 22: Node 20 left support on 2026-04-30 and gets no security fixes.
+FROM node:22-alpine
 WORKDIR /app
 COPY standalone-relay/package.json .
 RUN npm install --production

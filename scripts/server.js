@@ -92,14 +92,19 @@ const LISTEN_HOSTS = resolveListenHosts(process.env.CHAT_LISTEN_HOSTS);
 /* One server, several addresses: a plain listener per extra address hands
    its sockets to the real server, so every request and upgrade handler
    attached to it sees them as its own. */
+/* The queue of connections not yet accepted. Node's default of 511 overflows
+   when everybody reconnects at once — after a restart, or a network blip at
+   a carrier — and the overflow is dropped handshakes that wait for their own
+   retry. The kernel still caps it at net.core.somaxconn. */
+const LISTEN_BACKLOG = Number(process.env.CHAT_LISTEN_BACKLOG || 4096);
 function listenOn(target, port, fallbackHost, onReady) {
   const hosts = LISTEN_HOSTS.length ? LISTEN_HOSTS : [fallbackHost];
   const [first, ...rest] = hosts;
-  target.listen(port, first, onReady);
+  target.listen({ port, host: first, backlog: LISTEN_BACKLOG }, onReady);
   for (const host of rest) {
     const extra = net.createServer((socket) => target.emit('connection', socket));
     extra.on('error', (error) => console.warn(`[Listen] ${host}:${port} not available: ${error.code || error.message}`));
-    extra.listen(port, host);
+    extra.listen({ port, host, backlog: LISTEN_BACKLOG });
   }
 }
 const PORT = Number(process.env.CHAT_SIGNAL_PORT || 9000);
@@ -317,9 +322,13 @@ function capacityProfile() {
     /* ~1 socket per 0.35 MB of RAM, floor 500, ceiling 50k. At 1 GB that is
        ~2900; at 64 GB the ceiling bites long before the RAM does. */
     wsMaxTotal: clamp(totalMemMb / 0.35, 500, 50000),
-    /* A household behind one NAT is a handful of devices and tabs. It scales
-       with the machine so a big relay can host a big office. */
-    wsMaxPerIp: clamp(20 + totalMemMb / 256, 20, 400),
+    /* A household behind one NAT is a handful of devices and tabs — but a
+       mobile carrier puts thousands of subscribers behind one address
+       (CGNAT, the rule on Iranian mobile networks), and each running app
+       holds two sockets. The cap exists to stop one machine flooding, which
+       the total ceiling, the open-file guard and the frame rate do as well;
+       it is generous enough not to turn away the people behind a carrier. */
+    wsMaxPerIp: clamp(64 + totalMemMb / 16, 64, 2000),
     /* Mailbox bytes per recipient. Disk, not RAM, but the store is read into
        memory to be rewritten, so RAM is the honest constraint. */
     mediaQuotaBytes: clamp(totalMemMb * 0.35, 128, 4096) * 1024 * 1024,
@@ -1569,6 +1578,10 @@ app.get('/healthz', authMiddleware, (_req, res) => {
       heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
       heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
     },
+    /* Open files against the process's limit: the ceiling that used to arrive
+       unannounced (see filesNearlyExhausted). */
+    files: { open: fileGuard.open, limit: fileGuard.limit },
+    memoryLimitMb: Math.round(MEMORY_LIMIT_BYTES / 1048576),
     uptime: Math.round(process.uptime()),
     sysUptime: Math.round(os.uptime()),
     timestamp: new Date().toISOString(),
@@ -5396,19 +5409,28 @@ app.post('/Monitor_Server/ops-memory-set', authMiddleware, async (req, res) => {
  * each thing that is safe to drop: old tagged images of ourselves, dangling
  * layers, the dashboard's temp transfers, and backups past the retention. */
 
+/* The images some container, running or stopped, is made from. images/json
+   has a Containers count, but the engine leaves it at -1 unless asked to
+   work it out, so "in use" read from it was never true and an image a
+   container runs could be offered for removal. */
+async function imagesInUse() {
+  const containers = await dockerEngineJson('GET', '/v1.44/containers/json?all=1');
+  return new Set((containers.data || []).map((container) => String(container.ImageID || '')).filter(Boolean));
+}
+
 app.post('/Monitor_Server/ops-disk', authMiddleware, async (req, res) => {
   if (!dockerAvailable()) return res.json({ ok: false, reason: 'docker-socket-not-mounted' });
   /* system/df walks every layer on disk and can outlast an nginx proxy
      window; images/json answers the same question about images in one fast
      call, which is what this card actually shows. */
-  const imagesRaw = await dockerEngineJson('GET', '/v1.44/images/json');
+  const [imagesRaw, used] = await Promise.all([dockerEngineJson('GET', '/v1.44/images/json'), imagesInUse()]);
   const images = (imagesRaw.data || []).map((image) => ({
     /* Id survives the remap — the cleanup lists hand it to the engine by
        exact ref, and a remapped row without it deletes nothing. */
     id: String(image.Id || ''),
     tags: (image.RepoTags || []).filter(Boolean),
     size: image.Size,
-    inUse: Number(image.Containers || 0) > 0,
+    inUse: used.has(String(image.Id || '')),
   }));
   /* Our own old tags — every poorija-crypto tag that is not this round's —
      plus anything the engine calls dangling. These are the bytes nobody will
@@ -5446,11 +5468,13 @@ app.post('/Monitor_Server/ops-cleanup', authMiddleware, async (req, res) => {
   if (what === 'selected' && chosen.length) {
     let freedBytes = 0;
     const gone = [];
+    const used = await imagesInUse();
     for (const ref of chosen) {
       const inspect = await dockerEngineJson('GET', `/v1.44/images/${encodeURIComponent(ref)}/json`);
       if (!inspect.ok) continue;
-      const inUse = Number(inspect.data?.Containers || 0) > 0;
-      if (inUse) continue;
+      /* An image inspection has no container count at all: what runs from
+         it is read from the containers. */
+      if (used.has(String(inspect.data?.Id || ''))) continue;
       freedBytes += Number(inspect.data?.Size || 0);
       const removed = await dockerEngineRequest('DELETE', `/v1.44/images/${encodeURIComponent(ref)}?force=1&noprune=0`, null, { timeoutMs: 120000 });
       if (!removed.unreachable && removed.status < 300) gone.push(ref);
@@ -5463,20 +5487,26 @@ app.post('/Monitor_Server/ops-cleanup', authMiddleware, async (req, res) => {
   const df = { data: { Images: dfRaw.data || [] } };
   let freed = 0;
   if (what === 'stale-images') {
+    const used = await imagesInUse();
     for (const image of df.data.Images) {
       const tags = (image.RepoTags || []).filter(Boolean);
-      if (!tags.length || Number(image.Containers || 0) > 0) continue;
+      if (!tags.length || used.has(String(image.Id || ''))) continue;
       if (!tags.some((tag) => tag.startsWith('poorija-crypto:') && (!APP_IMAGE_TAG || !tag.endsWith(APP_IMAGE_TAG)))) continue;
       for (const tag of tags) await dockerEngineJson('DELETE', `/v1.44/images/${encodeURIComponent(tag)}`);
       freed += image.Size || 0;
     }
   }
   if (what === 'dangling') {
-    const prune = await dockerEngineRequest('POST', '/v1.44/images/prune?filters=' + encodeURIComponent(JSON.stringify({ dangling: { false: false } })), null, { timeoutMs: 300000 });
+    /* dangling=true: untagged layers nothing uses. The filter said
+       { false: false } — the engine reads the key, not the value, so that
+       was dangling=false, which prunes EVERY image no container uses: the
+       base images the next build needs (slow or impossible to fetch again
+       from a filtered network) and whatever else the machine keeps. */
+    const prune = await dockerEngineRequest('POST', '/v1.44/images/prune?filters=' + encodeURIComponent(JSON.stringify({ dangling: { true: true } })), null, { timeoutMs: 300000 });
     freed += Number(opsParseJson(prune.body)?.SizeReclaimed || 0);
   }
   if (what === 'temps') {
-    const job = await runOpsJob(['sh', '-c', 'rm -f /job/data/.monitor-* 2>/dev/null; true']);
+    const job = await runOpsJob(['sh', '-c', 'rm -f /relaydata/.monitor-* /job/data/.monitor-* 2>/dev/null; true']);
     if (job.ok) freed += 0;
   }
   monitorLog(`Cleanup (${what}) freed ${Math.round(freed / 1024 / 1024)} MB`);
@@ -5576,8 +5606,19 @@ const OPS_DOCKER_SOCKET = process.env.OPS_DOCKER_SOCKET || '/var/run/docker.sock
    container, so this is the host path even though the relay only ever
    passes it on as text. */
 const INSTALL_HOST_DIR = process.env.OPS_INSTALL_DIR || '';
-const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:20-alpine';
+const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:22-alpine';
 const OPS_BACKUP_HOST_DIR = process.env.OPS_BACKUP_DIR || (INSTALL_HOST_DIR ? `${INSTALL_HOST_DIR}/backups` : '');
+/* Where this relay's own /data lives on the host — the compose file mounts
+   data/chat-signal there. A file a job hands to this process (a backup on
+   its way to the browser, the clean bundle) is written into it as
+   /relaydata. It went to /job/data instead, which is the install's data/,
+   one level up: the relay then streamed a file that was not there, and every
+   backup download and every bundle — the bootstrap installer's included —
+   came out empty. */
+const OPS_DATA_HOST_DIR = process.env.OPS_DATA_DIR || (INSTALL_HOST_DIR ? `${INSTALL_HOST_DIR}/data/chat-signal` : '');
+/* How many of the dashboard's own backups stay: the newest two, as with the
+   deployment snapshots. */
+const OPS_BACKUPS_KEPT = Math.max(1, Number(process.env.OPS_BACKUPS_KEPT || 2));
 const dockerAvailable = () => fs.existsSync(OPS_DOCKER_SOCKET);
 
 function dockerEngineRequest(method, urlPath, body, { timeoutMs = 120000 } = {}) {
@@ -5628,6 +5669,7 @@ async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
   const name = `poorija-ops-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
   const binds = [`${INSTALL_HOST_DIR}:/job`];
   if (OPS_BACKUP_HOST_DIR) binds.push(`${OPS_BACKUP_HOST_DIR}:/backups`);
+  if (OPS_DATA_HOST_DIR) binds.push(`${OPS_DATA_HOST_DIR}:/relaydata`);
   let created = await dockerEngineJson('POST', `/v1.44/containers/create?name=${name}`, {
     Image: OPS_JOB_IMAGE,
     Cmd: command,
@@ -5686,6 +5728,15 @@ async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
    carry (everything of this machine's own). */
 const OPS_BACKUP_EXCLUDE = ['node_modules', '.git', 'backups', 'dist', 'Export', 'GitHub', 'standalone-relay/lib', 'release-logs'];
 const OPS_BUNDLE_EXCLUDE = [...OPS_BACKUP_EXCLUDE, 'data', '.env', 'certs', 'server-config.json'];
+
+/* Retention: the newest OPS_BACKUPS_KEPT, plus any named (the one just
+   restored, which may be older). Run after every path that makes a backup —
+   a restore, an update and a rollback each take a safety snapshot, and only
+   a backup made by hand used to be followed by a prune, so those piled up. */
+function pruneOpsBackups(keep = []) {
+  const spare = keep.filter((name) => /^server-backup_[\w.-]+\.tar\.gz$/.test(name)).map((name) => ` | grep -vxF '/backups/${name}'`).join('');
+  return runOpsJob(['sh', '-c', `mkdir -p /backups && ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | tail -n +${OPS_BACKUPS_KEPT + 1}${spare} | xargs -r rm -f`], { timeoutMs: 120000 });
+}
 
 /* A pre-restore / pre-update snapshot, always taken the same way. */
 async function opsSnapshot() {
@@ -5788,21 +5839,28 @@ app.post('/Monitor_Server/ops-image-export', authMiddleware, async (req, res) =>
       'Content-Disposition': 'attachment; filename="poorija-relay-image.tar"',
       'Cache-Control': 'no-store',
     });
+    /* The engine going away part-way ends this download, not the relay: an
+       error event with no listener is thrown, and so is a JSON answer after
+       the tar's headers have gone out. */
+    response.on('error', () => res.destroy());
     response.pipe(res);
   });
-  request.on('error', () => res.status(502).json({ ok: false, reason: 'docker-unreachable' }));
+  request.on('error', () => {
+    if (res.headersSent) res.destroy();
+    else res.status(502).json({ ok: false, reason: 'docker-unreachable' });
+  });
   request.end();
 });
 
 /* Backups are packed by a job container straight into the host's backups
    directory; this process never touches the bytes. Retention keeps the
-   newest ten — a backup directory that grows forever is a disk-full outage
-   being scheduled in advance. */
+   newest OPS_BACKUPS_KEPT (two) — a backup directory that grows forever is a
+   disk-full outage being scheduled in advance. */
 app.post('/Monitor_Server/ops-backup-create', authMiddleware, async (req, res) => {
   if (!INSTALL_HOST_DIR || !OPS_BACKUP_HOST_DIR) return res.json({ ok: false, reason: 'ops-paths-not-configured' });
   const snapshot = await opsSnapshot();
   if (!snapshot.ok) return res.json({ ok: false, reason: 'archive-failed' });
-  await runOpsJob(['sh', '-c', 'mkdir -p /backups && ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm -f'], { timeoutMs: 120000 });
+  await pruneOpsBackups();
   monitorLog(`Backup created: ${snapshot.name}`);
   res.json({ ok: true, name: snapshot.name });
 });
@@ -5834,15 +5892,22 @@ app.post('/Monitor_Server/ops-backup-download', authMiddleware, async (req, res)
   /* The engine cannot reach the host filesystem from here; the bytes travel
      through a job container into this relay's data directory and stream
      from there — one fixed pipeline, one fixed name shape. */
-  const copy = await runOpsJob(['sh', '-c', `test -f "/backups/${name}" && cp "/backups/${name}" /job/data/.monitor-transfer.tar.gz`], { timeoutMs: 300000 });
+  /* A name of its own per download: two at once shared one file, and the
+     second copy overwrote — or the first one's cleanup deleted — the bytes
+     the other was still streaming. */
+  const transfer = `.monitor-transfer-${crypto.randomBytes(6).toString('hex')}.tar.gz`;
+  const copy = await runOpsJob(['sh', '-c', `test -f "/backups/${name}" && cp "/backups/${name}" "/relaydata/${transfer}"`], { timeoutMs: 300000 });
   if (!copy.ok) return res.status(404).json({ ok: false, reason: 'no-such-backup' });
-  const local = path.join(defaultDataDir, '.monitor-transfer.tar.gz');
+  const local = path.join(defaultDataDir, transfer);
   res.writeHead(200, {
     'Content-Type': 'application/gzip',
     'Content-Disposition': `attachment; filename="${name}"`,
     'Cache-Control': 'no-store',
   });
+  /* A stream error with nobody listening is thrown — it took the whole relay
+     down when the file was not there. Now it ends this one download. */
   fs.createReadStream(local)
+    .on('error', () => res.destroy())
     .on('close', () => { fs.unlink(local, () => {}); })
     .pipe(res);
 });
@@ -5865,6 +5930,7 @@ app.post('/Monitor_Server/ops-backup-restore', authMiddleware, async (req, res) 
   if (!/^server-backup_[\w.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ ok: false, reason: 'bad-name' });
   const safety = await opsSnapshot();
   const job = await runOpsJob(['tar', 'xzf', `/backups/${name}`, '-C', '/job'], { timeoutMs: 900000 });
+  await pruneOpsBackups([name]);
   monitorLog(`Restore overlaid: ${name}`);
   res.json({
     ok: job.ok,
@@ -5877,7 +5943,7 @@ app.post('/Monitor_Server/ops-backup-restore', authMiddleware, async (req, res) 
 /* The clean bundle: the program with none of this machine's state — what
    the bootstrap installer ships to a fresh server. */
 async function opsBundleTo(res, filename) {
-  const cmd = ['tar', 'czf', '/job/data/.monitor-bundle.tar.gz'];
+  const cmd = ['tar', 'czf', '/relaydata/.monitor-bundle.tar.gz'];
   for (const item of OPS_BUNDLE_EXCLUDE) cmd.push(`--exclude=./${item}`);
   cmd.push('./');
   const job = await runOpsJob(cmd, { timeoutMs: 600000 });
@@ -5889,6 +5955,7 @@ async function opsBundleTo(res, filename) {
   });
   const local = path.join(defaultDataDir, '.monitor-bundle.tar.gz');
   fs.createReadStream(local)
+    .on('error', () => res.destroy())
     .on('close', () => { fs.unlink(local, () => {}); })
     .pipe(res);
 }
@@ -5966,6 +6033,7 @@ app.post('/Monitor_Server/ops-github-apply', authMiddleware, async (req, res) =>
   })();
   if (!download.ok) return res.json({ ok: false, reason: download.reason || 'download-failed', output: String(download.logs || '').slice(-500) });
   monitorLog(`GitHub ${tag} applied; safety: ${safety.ok ? safety.name : 'none'}`);
+  await pruneOpsBackups();
   res.json({ ok: true, tag, safetyBackup: safety.ok ? safety.name : '', note: 'tree updated; restart the stack from the dashboard to run it' });
 });
 
@@ -5976,12 +6044,16 @@ app.post('/Monitor_Server/ops-github-rollback', authMiddleware, async (req, res)
      the update was the last thing that happened. */
   let chosen = name;
   if (!chosen) {
+    /* ls prints the path; the name is what follows /backups/. The check
+       below took the whole line, never matched, and a rollback with no name
+       always answered "no backup". */
     const listJob = await runOpsJob(['sh', '-c', 'ls -1t /backups/server-backup_*.tar.gz 2>/dev/null | head -n 1'], { timeoutMs: 60000 });
-    chosen = String(listJob.logs || '').replace(/\u0000/g, '').split('\n').map((line) => line.trim()).find((line) => /^server-backup_[\w.-]+\.tar\.gz$/.test(line)) || '';
+    chosen = String(listJob.logs || '').replace(/\u0000/g, '').split('\n').map((line) => line.trim().replace(/^.*\//, '')).find((line) => /^server-backup_[\w.-]+\.tar\.gz$/.test(line)) || '';
   }
   if (!chosen) return res.json({ ok: false, reason: 'no-backup' });
   const safety = await opsSnapshot();
   const job = await runOpsJob(['tar', 'xzf', `/backups/${chosen}`, '-C', '/job'], { timeoutMs: 900000 });
+  await pruneOpsBackups([chosen]);
   monitorLog(`Rollback overlaid: ${chosen}`);
   res.json({
     ok: job.ok,
@@ -6233,12 +6305,19 @@ const WS_MAX_PER_IP = Number(process.env.CHAT_WS_MAX_PER_IP || CAPACITY.wsMaxPer
    which is how every other ceiling here is sized. */
 const WS_RATE_BURST = Number(process.env.CHAT_WS_RATE_BURST || 1024);
 const WS_RATE_REFILL_PER_MS = Number(process.env.CHAT_WS_RATE_REFILL_PER_SECOND || 256) / 1000;
+/* Frames refused in a row before the socket is closed: a client that keeps
+   going this far past its budget is not a person's browser catching up. */
+const WS_FLOOD_CLOSE_AFTER = Number(process.env.CHAT_WS_FLOOD_CLOSE_AFTER || 5000);
 const wsPerAddress = new Map();
 let wsTotal = 0;
 
+/* The address a socket is counted under — by the same rule every HTTP
+   security decision uses (securityKey: the hop our own nginx vouches for,
+   counted from the right). It took the LEFTMOST X-Forwarded-For, which is
+   whatever the client wrote, so one machine could rename itself per socket
+   and open as many as it liked past the per-address cap. */
 function socketAddress(request) {
-  const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || request.socket?.remoteAddress || 'unknown';
+  return securityKey(request) || 'unknown';
 }
 
 function rejectUpgrade(socket, status, reason) {
@@ -6292,8 +6371,70 @@ function noteRefusal(address, kind) {
   }
 }
 
+/* Open files, against the process's own limit (Linux reports both in /proc).
+   A socket is a file; so is every mailbox write and every HTTP request,
+   health checks included. With the limit reached, new connections hung
+   without an answer, the health endpoint went dark with them, and a mailbox
+   write could fail. So sockets stop being accepted while a reserve is left
+   for everything else. */
+const fileGuard = { open: 0, limit: 0, checkedAt: 0 };
+function readFileLimit() {
+  try {
+    const line = fs.readFileSync('/proc/self/limits', 'utf8').split('\n').find((row) => row.startsWith('Max open files'));
+    const soft = Number(String(line || '').trim().split(/\s{2,}/)[1]);
+    return Number.isFinite(soft) && soft > 0 ? soft : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+function refreshFileGuard() {
+  try {
+    fileGuard.open = fs.readdirSync('/proc/self/fd').length;
+    fileGuard.limit = fileGuard.limit || readFileLimit();
+  } catch (_error) {
+    fileGuard.open = 0;
+  }
+  fileGuard.checkedAt = Date.now();
+}
+setInterval(refreshFileGuard, 2000).unref?.();
+refreshFileGuard();
+/* Memory, against the container's own limit (cgroup) or the machine's. Past
+   three quarters of it, or with the machine itself nearly out, new sockets
+   wait: the relay was killed outright by the kernel at 7,000 sockets, taking
+   everybody with it, and a crowd reconnecting at once would do it again. */
+function memoryLimitBytes() {
+  for (const file of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const value = Number(fs.readFileSync(file, 'utf8').trim());
+      if (Number.isFinite(value) && value > 0 && value < os.totalmem()) return value;
+    } catch (_error) { /* not this cgroup version */ }
+  }
+  return os.totalmem();
+}
+/* Read again every minute: the dashboard can change a container's memory
+   ceiling while it runs (ops-memory-set), and the guard has to follow. */
+let MEMORY_LIMIT_BYTES = memoryLimitBytes();
+setInterval(() => { MEMORY_LIMIT_BYTES = memoryLimitBytes(); }, 60000).unref?.();
+function memoryNearlyExhausted() {
+  const rss = process.memoryUsage.rss ? process.memoryUsage.rss() : process.memoryUsage().rss;
+  if (rss > MEMORY_LIMIT_BYTES * 0.75) return true;
+  return os.freemem() < 96 * 1024 * 1024 && rss > 256 * 1024 * 1024;
+}
+function filesNearlyExhausted() {
+  if (!fileGuard.limit) return false;
+  /* Between readings, each socket accepted since counts too (see
+     socketBudgetRefused); a fresh reading at most twice a second. */
+  if (Date.now() - fileGuard.checkedAt > 500) refreshFileGuard();
+  const reserve = Math.max(64, Math.floor(fileGuard.limit * 0.1));
+  return fileGuard.open >= fileGuard.limit - reserve;
+}
 function socketBudgetRefused(request, socket) {
   const address = socketAddress(request);
+  if (filesNearlyExhausted() || memoryNearlyExhausted()) {
+    noteRefusal(address, 'capacity');
+    rejectUpgrade(socket, 503, 'Service Unavailable');
+    return true;
+  }
   if (wsTotal >= WS_MAX_TOTAL) {
     noteRefusal(address, 'capacity');
     rejectUpgrade(socket, 503, 'Service Unavailable');
@@ -6304,6 +6445,10 @@ function socketBudgetRefused(request, socket) {
     rejectUpgrade(socket, 429, 'Too Many Requests');
     return true;
   }
+  /* Counted the moment it is let in: a burst of sockets between two readings
+     of /proc would otherwise all pass the guard on the same old number. The
+     next reading corrects for any that have closed. */
+  fileGuard.open += 1;
   return false;
 }
 
@@ -8111,6 +8256,11 @@ function isPublicIp(ip = '') {
 }
 
 function requestIp(req) {
+  /* Bans, the monitor's lists and every record's address read this. The
+     headers below are a CDN's to set, and without one in front a client can
+     write any of them: a banned address would come back under a made-up one.
+     So they count only where an operator says a CDN sets them. */
+  if (process.env.CHAT_TRUST_CDN_HEADERS !== '1') return String(securityKey(req) || '').slice(0, 80);
   const forwardedHeader = String(req?.headers?.['x-forwarded-for'] || '');
   const forwardedDirective = String(req?.headers?.forwarded || '')
     .split(',')
@@ -8531,6 +8681,10 @@ function snapshotPeers() {
   const now = Date.now();
   return Array.from(presence.values())
     .filter((client) => client.peerId)
+    /* Proven identities only, as in the broadcast table: this answer replaces
+       the client's copy of that table, so anybody listed here but never in
+       the broadcast would stay "online" there with no removal ever coming. */
+    .filter((client) => !IDENTITY_PROOF_REQUIRED || client.identityVerified)
     .filter((client) => client.ws?.readyState === WebSocket.OPEN)
     .filter((client) => now - (client.lastSeenAt || 0) <= PRESENCE_TTL_MS)
     .filter((client) => !getRestrictionForIdentity(client))
@@ -8564,51 +8718,131 @@ function snapshotPeers() {
 
 
 let broadcastTimer = null;
-function broadcastPeers() {
-  if (broadcastTimer) return;
-  broadcastTimer = setTimeout(() => {
-    broadcastTimer = null;
-    /* Stripped: the periodic presence table says who is here, not what they
-     look like. Avatars travel on profile-card; re-serializing 2MB photos
-     per peer per tick is a GC death spiral at scale. */
+/* What every delta-capable client was last told, one serialized record per
+   socket — so a change sends that change, not the whole room again. */
+let presenceSnapshot = new Map();
+function lightPeerRecord(r) {
   /* Whitelist, not blacklist: the spread (...) was copying `ws` (a WebSocket
      with a circular timer reference), `sentMail` (a Set), and friends — and
      JSON.stringify crashed the process on the circular reference. Only the
-     fields the peers table actually carries are listed here. */
-  const lightPeers = Array.from(presence.values()).map((r) => ({
+     fields the peers table actually carries are listed here.
+     Never the address. Every record went to every connected client with the
+     person's real public IP in it — anybody on the relay could collect the
+     addresses of everybody online. The app never used it; the monitor reads
+     addresses from its own, authenticated, endpoint.
+     Nor the clocks (connected, last seen, last active, away): the app reads
+     none of them — it keeps "last seen" itself — and they changed every
+     minute for everybody, so with thousands online the table was resent to
+     everyone, all the time, and that alone saturated the relay. */
+  return {
     clientId: r.clientId,
     username: r.username,
     peerId: r.peerId,
     deviceId: r.deviceId,
     fingerprint: r.fingerprint,
-    identityVerified: r.identityVerified,
     mood: r.mood,
-    avatarData: undefined,
-    connectedAt: r.connectedAt,
-    lastSeenAt: r.lastSeenAt,
-    lastActiveAt: r.lastActiveAt,
-    away: r.away,
-    ip: r.ip,
-    publicKeyData: undefined,
-    prekeyData: undefined,
-  }));
-  const payload = JSON.stringify({
-      type: 'peers',
-      peers: lightPeers,
-    })
-  /* Stripped: the periodic table says who is here, not what they look like.
-     Avatars travel on profile-card; re-serializing 2MB photos per peer per
-     tick is a GC death spiral. */;
-
+  };
+}
+function broadcastPeers(minDelayMs = 0) {
+  if (broadcastTimer) return;
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
+    /* Stripped: the periodic presence table says who is here, not what they
+       look like. Avatars travel on profile-card; re-serializing 2MB photos
+       per peer per tick is a GC death spiral at scale. */
+    const current = new Map();
+    /* Only a proven identity is announced. The table carried every socket
+       from its hello on, before any proof — so anybody holding a person's
+       public key (which is public) could make them appear online, under a
+       peer id of the claimant's choosing, to everyone on the relay. */
+    for (const record of presence.values()) {
+      if (IDENTITY_PROOF_REQUIRED && !record.identityVerified) continue;
+      current.set(record.clientId, JSON.stringify(lightPeerRecord(record)));
+    }
+    const upsert = [];
+    for (const [clientId, json] of current) if (presenceSnapshot.get(clientId) !== json) upsert.push(json);
+    const remove = [];
+    for (const clientId of presenceSnapshot.keys()) if (!current.has(clientId)) remove.push(clientId);
+    presenceSnapshot = current;
+    /* The whole table went to every client on every change: N records to N
+       sockets, which at 2,700 clients was 2.5 GB per tick and the ceiling of
+       the relay. A client that says it reads deltas (caps 'pd1') gets the
+       table once and then only what changed; an older build still gets the
+       whole table, as before. */
+    const delta = upsert.length || remove.length
+      ? `{"type":"peers-delta","upsert":[${upsert.join(',')}],"remove":${JSON.stringify(remove)}}`
+      : '';
+    let full = '';
+    let fullSent = 0;
+    let owed = false;
+    let waiting = false;
     /* The broadcast used the raw send, which is the one path in the file with
        no buffered-amount guard — so a client that opened a socket and read
        nothing accumulated the whole peer table, avatars included, in memory
        on the relay for as long as the socket stayed open. The guard costs a
-       readyState and a number; the same serialisation is still paid once. */
+       readyState and a number; the same serialisation is still paid once.
+       Presence is replaceable — only its latest state matters — so a client
+       still behind on what it was sent is not sent more: it is marked to get
+       one fresh table once it has caught up. And whole tables (a megabyte or
+       two each with thousands online) go out a bounded number per tick, so a
+       crowd connecting at once is served over a few ticks instead of piling
+       gigabytes into memory: that is what killed the relay at 7,000 sockets. */
     for (const client of presence.values()) {
-      safeSendText(client.ws, payload, false);
+      if (!client.ws || client.ws.readyState !== WebSocket.OPEN) continue;
+      const readsDeltas = Array.isArray(client.caps) && client.caps.includes('pd1');
+      /* An older build reads whole tables only: any change owes it one. */
+      if (delta && !readsDeltas) client.peersSynced = false;
+      if (client.ws.bufferedAmount > PRESENCE_BUFFER_LIMIT) {
+        /* A change it missed owes it the whole table once it catches up. */
+        if (delta) client.peersSynced = false;
+        if (!client.peersSynced) waiting = true;
+        continue;
+      }
+      if (client.peersSynced) {
+        if (delta) safeSendText(client.ws, delta, false);
+        continue;
+      }
+      if (fullSent >= PRESENCE_FULL_PER_TICK) { owed = true; continue; }
+      full = full || `{"type":"peers","peers":[${[...current.values()].join(',')}]}`;
+      safeSendText(client.ws, full, false);
+      fullSent += 1;
+      client.peersSynced = true;
     }
-  }, 100);
+    /* Somebody is still owed a table: come round again — at the next tick
+       when the per-tick cap held it back, after a second when its socket is
+       still behind. Nobody owed anything, no further tick: an idle room
+       costs nothing. */
+    if (owed) broadcastPeers();
+    else if (waiting) broadcastPeers(1000);
+  }, Math.max(minDelayMs, presenceTickMs()));
+}
+const PRESENCE_BUFFER_LIMIT = 256 * 1024;
+/* get-peers: a burst of three answered at once, then one per ten seconds. */
+const PEERS_ASK_BURST = 3;
+const PEERS_ASK_EVERY_MS = 10000;
+/* How long until this socket may have the next table with keys: 0 for now. */
+function peersAskWait(record) {
+  const now = Date.now();
+  if (record.peersAskTokens === undefined) {
+    record.peersAskTokens = PEERS_ASK_BURST;
+    record.peersAskRefillAt = now;
+  }
+  const earned = Math.floor((now - record.peersAskRefillAt) / PEERS_ASK_EVERY_MS);
+  if (earned > 0) {
+    record.peersAskTokens = Math.min(PEERS_ASK_BURST, record.peersAskTokens + earned);
+    record.peersAskRefillAt += earned * PEERS_ASK_EVERY_MS;
+  }
+  if (record.peersAskTokens >= PEERS_ASK_BURST) record.peersAskRefillAt = now;
+  if (record.peersAskTokens >= 1) return 0;
+  return Math.max(1, PEERS_ASK_EVERY_MS - (now - record.peersAskRefillAt));
+}
+const PRESENCE_FULL_PER_TICK = Number(process.env.CHAT_PRESENCE_FULL_PER_TICK || 50);
+/* Changes are gathered for longer as the room grows: each tick is one frame
+   to every socket, so a crowd reconnecting at once (after a restart, say)
+   would otherwise cost tens of thousands of sends a second. A tenth of a
+   second while the room is small, up to a second at several thousand. */
+function presenceTickMs() {
+  return Math.max(100, Math.min(1000, Math.round(presence.size / 4)));
 }
 
 let totalMessagesReceived = 0;
@@ -9024,9 +9258,21 @@ wsServer.on('connection', (ws, req) => {
       record.rateCheckedAt = Date.now();
     }
     if (record.rateTokens < 1) {
-      safeSend(ws, { type: 'error', reason: 'slow-down' });
+      /* Answered once a second at most — answering every frame of a flood
+         made the relay send as much as it was sent — and a socket still
+         flooding after many thousands of refusals is closed. */
+      record.throttled = (record.throttled || 0) + 1;
+      const now = Date.now();
+      if (!record.slowDownSentAt || now - record.slowDownSentAt >= 1000) {
+        record.slowDownSentAt = now;
+        safeSend(ws, { type: 'error', reason: 'slow-down' });
+      }
+      if (record.throttled > WS_FLOOD_CLOSE_AFTER) {
+        try { ws.close(4429, 'flood'); } catch (_error) { /* gone */ }
+      }
       return;
     }
+    record.throttled = 0;
     record.rateTokens -= 1;
 
     let message;
@@ -9089,6 +9335,9 @@ wsServer.on('connection', (ws, req) => {
       /* What the client's build reads — short tokens, forwarded as they are.
          A contact's device reads 'ss1' to decide whether to seal the sender
          of what it queues here. */
+      /* A hello starts the conversation again: the next table it gets is the
+         whole one, then changes. */
+      record.peersSynced = false;
       record.caps = Array.isArray(message.caps)
         ? Array.from(new Set(message.caps.map((cap) => String(cap || '')).filter((cap) => /^[a-z0-9-]{1,16}$/.test(cap)))).slice(0, 8)
         : [];
@@ -9226,6 +9475,9 @@ wsServer.on('connection', (ws, req) => {
            that it has no roster yet, which is an answer too: the device that
            made the identity founds one on hearing it. */
         safeSend(ws, { type: 'roster', roster: roster || null });
+        /* Proven now, so announced now: the table carries only proven
+           identities (broadcastPeers). */
+        broadcastPeers();
       } else {
         /* Wrong answer: the nonce is spent so it cannot be guessed at again,
            and the socket stays with its degraded presence until a later
@@ -9476,6 +9728,12 @@ wsServer.on('connection', (ws, req) => {
        The conversation id is the sender's own; it identifies a thread, not a
        person, and the relay already sees the addressing of every envelope. */
     if (message.type === 'purge-space') {
+      /* It empties a conversation's mail out of everybody's mailbox: a proven
+         identity at the very least, never an anonymous socket. */
+      if (!record.identityVerified) {
+        safeSend(ws, { type: 'purged', removed: 0, scope: 'space', refused: 'identity-unverified' });
+        return;
+      }
       const conversationId = String(message.conversationId || '').slice(0, 200);
       let removed = 0;
       if (conversationId) {
@@ -9556,13 +9814,37 @@ for (const [box, queue] of offlineBoxes.entries()) {
       return;
     }
     if (message.type === 'get-peers') {
-      safeSend(ws, { type: 'peers', peers: snapshotPeers() });
+      /* The whole table with keys and prekeys — kilobytes per person. Asked
+         for when a contact is added: a few in a row are answered at once,
+         then one every ten seconds per socket, and never onto a socket still
+         behind, or a thousand requests in a row would be gigabytes in memory.
+         A request past the budget is not dropped: it waits for the next
+         answer, so every contact added in a burst still gets its keys. */
+      if (record.peersAskTimer) return;
+      const answer = () => {
+        record.peersAskTimer = null;
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const wait = peersAskWait(record);
+        if (wait > 0 || ws.bufferedAmount > PRESENCE_BUFFER_LIMIT) {
+          record.peersAskTimer = setTimeout(answer, wait > 0 ? wait : 2000);
+          return;
+        }
+        record.peersAskTokens -= 1;
+        safeSend(ws, { type: 'peers', peers: snapshotPeers() });
+        /* That answer replaced the client's copy of the table. The next tick
+           gives a delta-reading client the broadcast table again, so the
+           changes that follow it apply to the very set they were made from. */
+        record.peersSynced = false;
+        broadcastPeers();
+      };
+      answer();
       return;
     }
   });
 
   ws.on('close', (code, reason) => {
     clearIdentityChallenge(record);
+    clearTimeout(record.peersAskTimer);
     console.log(`[Presence] Connection closed for ${clientId} (${record.username}). Code: ${code}, Reason: ${reason}`);
     presence.delete(clientId);
     unindexVerified(record);

@@ -184,6 +184,7 @@ console.log('\nWhat may be routed on');
 /* Sharing somebody else's card must not launder a hint into one. */
 {
   const share = new Function('routableHomeRelay', 'utf8_to_b64', `
+    ${extract(contacts, 'shareableHomeRelay')}
     ${extract(contacts, 'contactShareText')}
     return contactShareText;
   `)(routableHomeRelay, (text) => Buffer.from(text, 'utf8').toString('base64'));

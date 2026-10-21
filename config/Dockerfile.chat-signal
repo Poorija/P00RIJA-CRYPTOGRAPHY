@@ -1,4 +1,5 @@
-FROM node:20-alpine
+# Node 22: Node 20 left support on 2026-04-30 and gets no security fixes.
+FROM node:22-alpine
 WORKDIR /app
 # Versions are pinned here rather than read from package.json, so this line is
 # the ONLY thing that decides what the relay actually runs. An audit found the

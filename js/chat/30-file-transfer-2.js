@@ -435,6 +435,23 @@ else broadcastHello();
 hydrateRelayTurnConfig({ force: true }).catch(() => {});
 return;
 }
+/* The relay's presence table, kept here: the whole of it arrives once per
+   connection, then only what changed (peers-delta) — the whole table to
+   every client on every change was what capped how many a relay could hold.
+   A change is applied to the copy and the result handled exactly as a whole
+   table always was, so nothing downstream knows the difference. */
+if (message.type === 'peers') {
+chatState.presenceTable = new Map((message.peers || []).filter((peer) => peer?.clientId).map((peer) => [peer.clientId, peer]));
+}
+if (message.type === 'peers-delta') {
+const table = chatState.presenceTable instanceof Map ? chatState.presenceTable : new Map();
+for (const clientId of Array.isArray(message.remove) ? message.remove : []) table.delete(clientId);
+for (const peer of Array.isArray(message.upsert) ? message.upsert : []) {
+if (peer?.clientId) table.set(peer.clientId, { ...(table.get(peer.clientId) || {}), ...peer });
+}
+chatState.presenceTable = table;
+message = { type: 'peers', peers: [...table.values()] };
+}
 if (message.type === 'peers') {
 /* Everyone this relay did not mention goes offline -- EXCEPT somebody whose
    presence is not this relay's business.

@@ -60,10 +60,11 @@ SOURCE_DIR="${POORIJA_SOURCE_DIR:-$HOME/work/pkg}"
 # versions than asked for.
 #
 # KEEP_VERSIONS is how many versions OLDER than the current one stay
-# restorable. KEEP_MIN is the floor in snapshots, so a server that has only
-# ever served one version still keeps a few points to go back to.
-KEEP_VERSIONS="${POORIJA_BACKUP_KEEP_VERSIONS:-2}"
-KEEP_MIN="${POORIJA_BACKUP_KEEP_MIN:-3}"
+# restorable: one, so the snapshots of the last two versions are what is
+# kept. KEEP_MIN is the floor in snapshots, so a server that has only ever
+# served one version still keeps a point to go back to.
+KEEP_VERSIONS="${POORIJA_BACKUP_KEEP_VERSIONS:-1}"
+KEEP_MIN="${POORIJA_BACKUP_KEEP_MIN:-2}"
 
 # Walks the history newest first and prints the commit that should become the
 # new root — the oldest one worth keeping — or nothing when there is nothing to
@@ -255,18 +256,30 @@ fi
 
 log "Copying the install"
 # node_modules and build output are reproducible and enormous; everything else
-# goes in, secrets included.
+# goes in, secrets included. Not backups/: those are the dashboard's archives
+# of this same tree, tens of megabytes each, and kept here they were copied
+# into every snapshot's history.
+#
+# --ignore-errors: the root-owned files below make rsync report I/O errors,
+# and on any I/O error rsync quietly skips --delete altogether. Nothing was
+# ever removed from a snapshot again — a mailbox delivered and gone weeks ago
+# was still in it, ready to be restored. What rsync cannot read is fetched
+# through a container right after, so deleting cannot lose it.
 RSYNC_LOG="$(mktemp)"
-rsync -a --delete \
+rsync -a --delete --ignore-errors \
     --exclude '.git' \
     --exclude 'node_modules' \
     --exclude 'src-tauri/target' \
+    --exclude '/backups' \
     --exclude '*.log' \
     --exclude '.DS_Store' \
     "$SOURCE_DIR/" "$BACKUP_ROOT/" \
     --filter 'protect BACKUP-NOTES.md' >"$RSYNC_LOG" 2>&1
 RSYNC_STATUS=$?
 tail -3 "$RSYNC_LOG" | sed 's/^/    /'
+# An excluded path is also protected from --delete; the copy earlier
+# snapshots took goes now.
+rm -rf "${BACKUP_ROOT:?}/backups"
 
 # ---------------------------------------------------------- the unreadable
 #
@@ -306,11 +319,14 @@ if [ -n "$UNREADABLE" ]; then
             # single 0600 file and a whole root-owned state directory. The
             # trailing /. copies the CONTENTS of a directory into an existing
             # destination of the same name instead of nesting it one deeper.
+            # A directory is emptied first: rsync could not list it, so what
+            # the last snapshot held there would otherwise stay — files the
+            # relay has long since deleted.
             if docker run --rm \
                  -v "$SOURCE_DIR:/src:ro" \
                  -v "$BACKUP_ROOT:/dst" \
                  alpine:latest \
-                 sh -c "if [ -d '/src/$rel' ]; then mkdir -p '/dst/$rel' && cp -a '/src/$rel/.' '/dst/$rel/'; else cp -p '/src/$rel' '/dst/$rel'; fi && chown -R $(id -u):$(id -g) '/dst/$rel'" >/dev/null 2>&1
+                 sh -c "if [ -d '/src/$rel' ]; then rm -rf '/dst/$rel' && mkdir -p '/dst/$rel' && cp -a '/src/$rel/.' '/dst/$rel/'; else cp -p '/src/$rel' '/dst/$rel'; fi && chown -R $(id -u):$(id -g) '/dst/$rel'" >/dev/null 2>&1
             then
                 printf "    rescued %s\n" "$rel"
                 RESCUED="$RESCUED $rel"
@@ -337,7 +353,12 @@ rm -f "$RSYNC_LOG"
 GAPS=""
 [ -n "$MISSED" ] && GAPS="NOT BACKED UP:$MISSED"
 
-git -C "$BACKUP_ROOT" add -A >/dev/null 2>&1
+# --force: the install's own .gitignore comes across with everything else, and
+# it ignores data/, .env and certs/ — exactly what this repository exists to
+# keep. Every snapshot was committed without the relay's keys, its mailboxes,
+# its rosters, the TLS key and the monitor password, while the rescue above
+# fetched them and the commit message said they were in.
+git -C "$BACKUP_ROOT" add --all --force -- . >/dev/null 2>&1
 
 if git -C "$BACKUP_ROOT" diff --cached --quiet 2>/dev/null; then
     ok "Nothing has changed since the last snapshot."

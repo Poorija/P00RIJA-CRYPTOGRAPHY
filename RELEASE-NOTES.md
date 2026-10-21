@@ -1,10 +1,225 @@
-# P00RIJA Cryptography 2.98.70
+# P00RIJA Cryptography 2.98.73
 
-Version 2.98.70 · build chat-v163
+Version 2.98.73 · build chat-v166
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پشتیبان‌های پیش از استقرار، کامل · Pre-deployment snapshots, complete
+
+- **کلیدها و داده‌های رله در پشتیبان نبودند**: پشتیبانی که پیش از هر استقرار روی سرور گرفته می‌شود،
+  قاعدهٔ `.gitignore` خود برنامه را رعایت می‌کرد و آن قاعده `data/`، `.env` و `certs/` را کنار
+  می‌گذارد؛ یعنی دقیقاً همان چیزهایی که پشتیبان برای نگه داشتنشان وجود دارد: کلید Web Push، هویت
+  رله، صندوق‌های پیام، فهرست دستگاه‌ها، کلید TLS و رمز پنل. پیام پشتیبان می‌گفت این‌ها را «نجات
+  داده»، اما هیچ‌وقت ثبت نمی‌شدند. حالا همه ثبت می‌شوند.
+- **چیزی از پشتیبان حذف نمی‌شد**: چون چند فایل رله فقط برای root خواندنی است، rsync خطا می‌گرفت و در
+  این حالت بی‌صدا هیچ فایلی را حذف نمی‌کرد؛ صندوق پیامی که هفته‌ها پیش تحویل و پاک شده بود هنوز در
+  پشتیبان بود و با بازگردانی برمی‌گشت. حالا پشتیبان همان چیزی است که روی سرور هست.
+- **آرشیوهای پنل** دیگر در تاریخچهٔ پشتیبان‌ها کپی نمی‌شوند.
+- بازگردانی پیش‌فرض مثل قبل فقط کد را برمی‌گرداند؛ داده فقط وقتی برمی‌گردد که مسیرش صریحاً خواسته
+  شود.
+
+- **The relay's keys and data were not in the snapshots**: the snapshot taken on the
+  server before every deployment followed the program's own `.gitignore`, which leaves
+  out `data/`, `.env`, and `certs/`: exactly what the snapshot exists to keep, namely the
+  Web Push key, the relay's identity, the mailboxes, the device lists, the TLS key, and
+  the dashboard password. The snapshot's message said they had been rescued; they were
+  never committed. They all are now.
+- **Nothing was ever removed from a snapshot**: a few of the relay's files are readable
+  by root only, so rsync reported errors and, on errors, silently deleted nothing; a
+  mailbox delivered and gone weeks ago was still in the snapshot, ready to be restored.
+  A snapshot is now what is on the server.
+- **The dashboard's archives** are no longer copied into the snapshots' history.
+- A default restore still brings back the code only; data comes back only when its path
+  is asked for by name.
+
+---
+
+# P00RIJA Cryptography 2.98.72
+
+Version 2.98.72 · build chat-v165
+
+---
+
+## پنل مدیریت سرور: پشتیبان‌ها و پاکسازی دیسک · The server dashboard: backups and disk cleanup
+
+- **دکمهٔ «لایه‌های بی‌نام»** در کارت دیسک، به‌جای لایه‌های بی‌نام، همهٔ ایمیج‌هایی را پاک می‌کرد که
+  کانتینری از آن‌ها استفاده نمی‌کرد: ایمیج‌های پایه‌ای که ساخت بعدی لازم دارد (که روی سرور ایران
+  دانلود دوباره‌شان ساعت‌ها طول می‌کشد یا اصلاً ممکن نیست) و ایمیج‌های سرویس‌های دیگر همان سرور.
+  حالا فقط لایه‌های بی‌نام و بی‌استفاده را پاک می‌کند.
+- **ایمیج در حال استفاده**: پنل ایمیجی را که کانتینری از آن ساخته شده بود هم برای حذف پیشنهاد می‌داد
+  و با تیک زدن پاکش می‌کرد. دیگر هرگز.
+- **دانلود پشتیبان و بستهٔ تمیز**: فایل در پوشه‌ای گذاشته می‌شد که رله از آن نمی‌خواند؛ دانلود خالی
+  می‌آمد و خود رله از کار می‌افتاد تا دوباره راه بیفتد. نصب‌کنندهٔ یک‌خطی سرور تازه هم به همین دلیل
+  بستهٔ خالی می‌گرفت. حالا هر دو کامل دانلود می‌شوند، و خطای یک دانلود فقط همان دانلود را قطع می‌کند.
+- **بازگشت بدون انتخاب نسخه** همیشه جواب می‌داد «پشتیبانی نیست». حالا آخرین پشتیبان را برمی‌گرداند.
+- **فقط دو پشتیبان آخر، از هر راهی**: پشتیبان ایمنی که پیش از هر بازگردانی، به‌روزرسانی و بازگشت
+  گرفته می‌شود، بی‌حد روی هم جمع می‌شد. حالا قاعدهٔ «دو پشتیبان آخر» برای همه اعمال می‌شود و
+  پشتیبانی که از آن بازگردانی شده نگه داشته می‌شود.
+- دو دانلود هم‌زمان دیگر فایل یکدیگر را خراب نمی‌کنند، و سقف حافظه‌ای که از پنل برای کانتینر رله
+  تعیین شود، بدون ری‌استارت در نگهبان حافظهٔ رله اعمال می‌شود.
+- تست تازهٔ `tests/e2e/opspanel.mjs` همهٔ این‌ها را با یک Docker ساختگی می‌سنجد که دستورهای پنل را
+  واقعاً اجرا می‌کند.
+
+- **The "dangling layers" button** on the disk card removed, instead of dangling layers,
+  every image no container was using: the base images the next build needs (which take
+  hours to fetch again on the server in Iran, if they can be fetched at all) and the
+  images of the machine's other services. It now removes untagged layers nothing uses,
+  and only those.
+- **Images in use**: the dashboard offered an image a container is made from for removal,
+  and removed it when ticked. Never again.
+- **Downloading a backup and the clean bundle**: the file was handed over in a directory
+  the relay does not read, so the download came out empty and the relay itself went down
+  until it restarted. The one-line installer for a new server got an empty bundle for the
+  same reason. Both download whole now, and a failed download ends only that download.
+- **Rolling back without choosing a backup** always answered "no backup". It now restores
+  the newest one.
+- **The last two backups, whichever way they were made**: the safety copy taken before
+  every restore, update, and rollback piled up without limit. The same "last two" rule
+  now applies to all of them, and the backup a restore came from is kept.
+- Two downloads at once no longer spoil each other's file, and a memory ceiling set for
+  the relay's container from the dashboard reaches the relay's memory guard without a
+  restart.
+- A new test, `tests/e2e/opspanel.mjs`, checks all of it against a stand-in Docker that
+  really runs the dashboard's commands.
+
+---
+
+# P00RIJA Cryptography 2.98.71
+
+Version 2.98.71 · build chat-v164
+
+---
+
+## آمادگی تولید: امنیت، حریم خصوصی و ظرفیت · Production readiness: security, privacy, and capacity
+
+یک تست تازه (`tests/e2e/prodready.mjs`) رله را از همان Dockerfile تولید و با محدودیت‌های
+واقعی هر دو سرور اجرا کرد: ظرفیت با بار معمولی و با بار انفجاری، هجوم اتصال، ماندگاری بعد از
+قطع ناگهانی، نشت، و حمله. همهٔ مواردی که پیدا شد بسته شدند:
+
+- **نشت آدرس IP**: فهرست حضوری که برای همهٔ کاربران متصل فرستاده می‌شد، IP واقعی هر کاربر را
+  هم داشت؛ هر کسی که به رله وصل می‌شد می‌توانست IP همهٔ کاربران آنلاین را جمع کند. IP از آن فهرست
+  حذف شد. پنل مدیریت IP کاربران را مثل قبل از مسیر محافظت‌شدهٔ خودش می‌بیند و مسدود کردن IP دست
+  نخورده است.
+- **دور زدن سقف اتصال با هدر جعلی**: مسیر وب‌سوکت آدرس را از بخشی از `X-Forwarded-For` می‌خواند
+  که کاربر می‌نویسد، پس یک سیستم می‌توانست هر تعداد اتصال باز کند و رله را از کار بیندازد. حالا
+  همان قاعدهٔ مسیر HTTP به کار می‌رود: آدرسی که nginx خودش دیده. آدرس‌های پنل و مسدود کردن هم دیگر
+  با هدر جعلی دور زده نمی‌شوند.
+- **جعل حضور**: فهرست حضور اتصال‌هایی را هم پخش می‌کرد که هنوز هویتشان را ثابت نکرده بودند؛ یعنی
+  کسی که فقط کلید عمومی یک کاربر را داشت می‌توانست او را برای همه «آنلاین» نشان دهد. حالا فقط
+  هویت‌های ثابت‌شده در فهرست می‌آیند.
+- **پاک کردن پیام‌های گروه بدون هویت**: درخواست پاک کردن پیام‌های صف‌شدهٔ یک گروه منحل‌شده حالا
+  اثبات هویت می‌خواهد.
+- **سقف ۱۰۲۴ فایل باز**: رله، nginx و رلهٔ مستقل با سقف پیش‌فرض Docker اجرا می‌شدند و هر سرور حدود ۱۰۰۰ اتصال،
+  یعنی حدود ۵۰۰ کاربر، را تحمل می‌کرد. سقف به ۶۵۵۳۶ و `worker_connections` nginx به ۱۶۳۸۴ رسید.
+  رله حالا خودش تعداد فایل‌های باز را می‌پاید و پیش از رسیدن به سقف، اتصال تازه را با پاسخ «پر است»
+  رد می‌کند، تا پاسخ سلامت، نوشتن صندوق پیام و پنل همیشه کار کنند.
+- **کشته شدن رله به‌خاطر حافظه**: در آزمون، رله در حدود ۷۰۰۰ اتصال به‌خاطر کمبود حافظه کشته شد.
+  هر اتصال تازه کل فهرست حضور را می‌گرفت (چند مگابایت) و هجوم اتصال‌ها، مثلاً بعد از هر ری‌استارت،
+  گیگابایت‌ها در حافظه انباشته می‌کرد. حالا فهرست حضور برای کلاینت کُند روی هم انباشته نمی‌شود،
+  فهرست‌های کامل در هر نوبت محدودند، درخواست فهرست کامل حداکثر هر ده ثانیه یک بار پاسخ می‌گیرد، و
+  رله نزدیک سقف حافظه اتصال تازه را با پاسخ «پر است» رد می‌کند. هیچ‌وقت به‌خاطر حافظه کشته نمی‌شود.
+- **فهرست حضور، فقط تغییرات**: با هر وصل یا قطع شدن هر کاربر، فهرست همهٔ کاربران برای همه فرستاده
+  می‌شد؛ با ۲۷۰۰ اتصال، هر بار ۲٫۵ گیگابایت. حالا برنامه فهرست را یک بار کامل و بعد فقط تغییرات را
+  می‌گیرد، و زمان‌هایی که هر دقیقه برای همه عوض می‌شدند و برنامه از آن‌ها استفاده نمی‌کرد از فهرست
+  حذف شدند. این هم ظرفیت رله را بالا می‌برد و هم مصرف اینترنت و باتری گوشی را کم می‌کند. نسخه‌های
+  قدیمی برنامه مثل قبل فهرست کامل می‌گیرند.
+- **صف پذیرش اتصال** از ۵۱۱ به ۴۰۹۶ رسید، تا هجوم اتصال‌های هم‌زمان جا نماند.
+- **Node.js 22**: پشتیبانی Node 20 در آوریل 2026 تمام شده بود. رله و کارهای پنل حالا روی Node 22‌اند.
+- **سقف اتصال هر IP**: برای کاربرانی که پشت NAT مشترک اپراتور موبایل‌اند (رایج در ایران)، بالاتر
+  رفت (رلهٔ خارج از ایران حدود ۳۰۰، رلهٔ ایران حدود ۱۶۰). جلوی سوءاستفاده را سقف کل، نگهبان فایل
+  و حافظه، و محدودیت نرخ می‌گیرند.
+- **سیل درخواست**: رله دیگر به هر فریم اضافی جواب نمی‌دهد (حداکثر یک جواب در ثانیه) و اتصالی را که
+  بعد از هزاران تخطی ادامه بدهد می‌بندد.
+- **حافظهٔ کانتینر**: برای کانتینر رله سقف حافظه تعریف شد تا نتواند حافظهٔ بقیهٔ سرویس‌های سرور
+  را بگیرد.
+- **استقرار**: build ایمیج برنامه بدون شمارهٔ نسخه اجرا می‌شد و هر استقرار برنامه را دو بار
+  می‌ساخت. حالا یک بار ساخته می‌شود، و بعد از هر استقرار فقط ایمیج همین نسخه و نسخهٔ قبل نگه داشته
+  می‌شود و کش build قدیمی‌تر از یک هفته پاک می‌شود. روی سرورها چند ده گیگابایت از این‌ها جمع شده بود.
+- **پشتیبان‌ها**: هم snapshot‌های استقرار و هم پشتیبان‌های پنل، فقط دو نسخهٔ آخر را نگه می‌دارند.
+- **همگام‌سازی دستگاه‌ها**: اولین پیامی که بعد از وصل شدن دستگاه دوم حساب فرستاده می‌شد، گاهی هرگز
+  به آن دستگاه نمی‌رسید (و فایلش هم خودکار منتقل نمی‌شد)، چون برنامه آن را نقطهٔ شروع مقایسه حساب
+  می‌کرد. حالا از اولین پیام به بعد همه چیز به دستگاه‌های دیگر می‌رسد.
+- **ظرفیت اندازه‌گیری‌شده**، با بار معمولی (هر کاربر هر ده ثانیه یک پیام) و محدودیت‌های واقعی هر
+  سرور: رلهٔ خارج از ایران تا **۱۰٬۰۰۰ اتصال (حدود ۵۰۰۰ کاربر هم‌زمان)** با تأخیر p95 حدود ۱۰۰
+  میلی‌ثانیه و بدون حتی یک پیام گم‌شده؛ رلهٔ ایران تا سقف خودش، **حدود ۴۷۰۰ اتصال (حدود ۲۳۰۰
+  کاربر)**، با تأخیر p95 زیر ۲۰ میلی‌ثانیه، و اتصال‌های بیشتر از سقف با پاسخ «پر است» رد می‌شوند.
+  هزار اتصالی که یک‌باره قطع شوند در چند ثانیه همه برمی‌گردند. پیش از این اصلاحات، هر سرور حدود
+  ۵۰۰ کاربر را تحمل می‌کرد.
+
+A new test (`tests/e2e/prodready.mjs`) ran the relay from the production Dockerfile with
+both servers' real limits: capacity under ordinary and under burst load, reconnect
+storms, persistence after a hard kill, leaks, and abuse. Everything it found is closed:
+
+- **IP address leak**: the presence table sent to every connected client carried each
+  person's real IP address; anyone connected could collect the addresses of everyone
+  online. The address is gone from that table. The admin panel still sees addresses
+  through its own protected endpoint, and IP bans are untouched.
+- **Bypassing the connection cap with a forged header**: the WebSocket path took the
+  address from the part of `X-Forwarded-For` the client writes, so one machine could open
+  any number of sockets and take the relay down. It now uses the same rule as the HTTP
+  path: the address nginx itself saw. The panel's addresses and IP bans can no longer be
+  dodged with a forged header either.
+- **Faked presence**: the presence table announced sockets before they had proven their
+  identity, so anyone holding a person's public key could make them appear online to
+  everyone. Only proven identities are announced now.
+- **Emptying a group's mail without an identity**: the request to drop a dissolved
+  group's queued mail now needs a proven identity.
+- **The 1024 open-file limit**: the relay, nginx, and the standalone relay ran with Docker's default limit, so
+  each server held about 1,000 sockets, roughly 500 people. The limit is now 65536, and
+  nginx's `worker_connections` 16384. The relay also watches its open files and, before
+  the limit is reached, refuses new sockets with a "full" answer, so health checks,
+  mailbox writes, and the panel always keep working.
+- **The relay killed for memory**: in testing, the relay was killed for lack of memory at
+  about 7,000 sockets. Each new socket got the whole presence table (megabytes), and a
+  crowd connecting at once, after any restart for example, piled gigabytes into memory.
+  Now presence never piles up for a slow client, whole tables go out a bounded number at
+  a time, a request for the full table is answered at most once every ten seconds, and
+  near its memory limit the relay refuses new sockets with a "full" answer. It is never
+  killed for memory.
+- **Presence as changes only**: every time anyone connected or left, the whole table of
+  everyone went to everyone; at 2,700 sockets that was 2.5 GB each time. The app now gets
+  the table once and then only the changes, and the clocks that changed every minute for
+  everyone, which the app never read, are gone from it. That raises the relay's capacity
+  and saves phones data and battery. Older builds still get the whole table, as before.
+- **The queue of connections waiting to be accepted** grew from 511 to 4096, so a crowd
+  connecting at once is not dropped.
+- **Node.js 22**: Node 20 support ended in April 2026. The relay and the panel's jobs now
+  run on Node 22.
+- **The per-address cap** is higher, for people behind a mobile carrier's shared NAT
+  (common in Iran): about 300 on the relay outside Iran and 160 on the relay in Iran.
+  Abuse is held back by the total cap, the open-file and memory guards, and rate
+  limiting.
+- **Floods**: the relay no longer answers every excess frame (one answer a second at
+  most), and closes a socket that keeps going after thousands of refusals.
+- **Container memory**: the relay container has a memory ceiling, so it cannot take
+  memory from the server's other services.
+- **Deployment**: the app image was built without its version number, so every deploy
+  built the app twice. It is built once now, and after each deploy only this version's
+  image and the previous one are kept, and build cache older than a week is cleared.
+  Tens of gigabytes of this had piled up on the servers.
+- **Backups**: both the deployment snapshots and the panel's backups keep only the last
+  two versions.
+- **Device sync**: the first message sent after an account's second device came online
+  sometimes never reached it (nor did its file come over by itself), because the app
+  took it as the starting point to compare against. Everything from the first message
+  on now reaches the other devices.
+- **Measured capacity**, under ordinary use (each person sending a message every ten
+  seconds) and each server's real limits: the relay outside Iran up to **10,000 sockets
+  (about 5,000 people at once)** at about a 100 ms p95 and not one message lost; the
+  relay in Iran up to its own ceiling, **about 4,700 sockets (about 2,300 people)**, at
+  under a 20 ms p95, with sockets past the ceiling refused with a "full" answer. A
+  thousand sockets dropped at once all come back within seconds. Before these fixes,
+  each server held about 500 people.
+
+---
+
+# P00RIJA Cryptography 2.98.70
+
+Version 2.98.70 · build chat-v163
 
 ---
 

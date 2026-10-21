@@ -1,5 +1,11 @@
 FROM nginx:alpine
-RUN rm /etc/nginx/conf.d/default.conf
+# Room for many proxied sockets: nginx's stock 1024 connections per worker,
+# two per WebSocket, was a second ceiling near 500 people per server.
+RUN rm /etc/nginx/conf.d/default.conf \
+ && sed -i 's/worker_connections[[:space:]]*[0-9]*;/worker_connections 16384;/' /etc/nginx/nginx.conf \
+ && sed -i '/^worker_processes/a worker_rlimit_nofile 65536;' /etc/nginx/nginx.conf \
+ && grep -q 'worker_connections 16384;' /etc/nginx/nginx.conf \
+ && grep -q 'worker_rlimit_nofile 65536;' /etc/nginx/nginx.conf
 # A template, not a finished config. The official entrypoint runs envsubst over
 # /etc/nginx/templates and writes the result into conf.d before nginx starts,
 # so APP_DOMAIN, APP_ORIGIN and APP_ORIGIN_WS come from the environment of THIS

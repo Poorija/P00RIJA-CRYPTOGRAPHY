@@ -377,9 +377,14 @@ function scheduleSiblingJournal() {
 }
 async function runSiblingJournal() {
   if (siblingJournal.running) { scheduleSiblingJournal(); return; }
-  if (!accountHasSiblings()) { siblingJournal.baseline = false; return; }
   const now = journalSnapshot();
-  if (!siblingJournal.baseline) {
+  /* With no sibling to tell, the record still moves on — it is what the
+     first sibling to appear is compared with. It used to be dropped instead,
+     so the first run after a sibling appeared took everything since as its
+     starting point and sent none of it: the message that run was for never
+     reached the other device. (What a new device lacks from before it came
+     comes over in the delta sync when it arrives.) */
+  if (!siblingJournal.baseline || !accountHasSiblings()) {
     siblingJournal.signatures = now.signatures;
     siblingJournal.ids = now.ids;
     siblingJournal.baseline = true;
