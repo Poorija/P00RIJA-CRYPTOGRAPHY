@@ -737,6 +737,10 @@ SCP_PORT=""
 if printf '%s\n' "${SSH_OPTS[@]}" | grep -q '^-p$'; then
     SCP_PORT="$(printf '%s\n' "${SSH_OPTS[@]}" | awk 'prev=="-p"{print; exit} {prev=$0}')"
 fi
+# A server deployed to for the first time has no scripts/ yet: the tree is
+# copied after the snapshot, and scp does not make the directory it writes
+# into, so the very first deploy of a new server stopped right here.
+remote "mkdir -p '$REMOTE_DIR/scripts'" >/dev/null 2>&1
 scp -P "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
     $( [ -n "$KEY" ] && [ -f "$KEY" ] && printf -- '-i %s -o IdentitiesOnly=yes ' "$KEY" ) \

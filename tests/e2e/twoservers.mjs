@@ -178,8 +178,12 @@ try {
     JSON.stringify(healthA.transit));
   check('so does the second', healthB.transit?.enabled === true && healthB.transit?.up >= 1,
     JSON.stringify(healthB.transit));
-  check('each allows exactly the other', healthA.transit?.allowed === 1 && healthB.transit?.allowed === 1,
-    `${healthA.transit?.allowed} / ${healthB.transit?.allowed}`);
+  /* Each names the other among the relays it carries for. Not "exactly": a
+     relay in a mesh of four carries for three. */
+  const peersOf = async (base) => ((await fetch(`${base}/transit-peers`).then((r) => r.json()).catch(() => ({})))?.peers || []).map((peer) => peer.id);
+  const [peersA, peersB] = await Promise.all([peersOf(A_RELAY), peersOf(B_RELAY)]);
+  check('each allows the other', peersA.includes(healthB.relayId) && peersB.includes(healthA.relayId),
+    `${peersA.length} / ${peersB.length} allowed, the other ${peersA.includes(healthB.relayId) ? 'in' : 'NOT in'} / ${peersB.includes(healthA.relayId) ? 'in' : 'NOT in'}`);
 
   section('a client on each');
   const a = await openApp('north', { origin: A_APP, relay: A_RELAY });
