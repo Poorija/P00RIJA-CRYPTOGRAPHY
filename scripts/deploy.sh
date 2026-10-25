@@ -327,10 +327,10 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
     for entry in $SERVED; do
         n="${entry%%|*}"; rest="${entry#*|}"; r="${rest%%|*}"; rest="${rest#*|}"; c="${rest%%|*}"; u="${rest#*|}"
         if [ "$r" = "relay" ]; then
-            live="$(curl -sk --max-time 20 "$u/chat-health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+            live="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 "$u/chat-health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
             want="$TREE_VERSION"
         else
-            live="$(curl -sk --max-time 20 "$u/index.html" \
+            live="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 "$u/index.html" \
                 | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
             want="$TREE_TAG"
         fi
@@ -447,19 +447,22 @@ relay_check() {
 }
 
 live_check() {
+    # Every request here gets one retry: a dropped connection is the network,
+    # and this check is about what the server serves. Chat parts retry on
+    # their own below and say so, which keeps a flaky link visible.
     [ "$ROLE" = "relay" ] && { relay_check; return $?; }
     local tag dialogs sealing health status=0
-    tag="$(curl -sk --max-time 20 "$PUBLIC_URL/index.html" | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
+    tag="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 "$PUBLIC_URL/index.html" | grep -oE '\?v=[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9._-]+' | head -1 | sed 's/^?v=//')"
     printf "  %-34s %s\n" "asset tag being served" "${tag:-<unreachable>}"
     # Not reachable from this machine at all: the checks below would each wait
     # out their timeout for the same answer. The on-server verification above
     # is what decides; say so and stop.
-    if [ -z "$tag" ] && [ -z "$(curl -sk --max-time 10 "$PUBLIC_URL/chat-health")" ]; then
+    if [ -z "$tag" ] && [ -z "$(curl -sk --retry 1 --retry-delay 1 --max-time 10 "$PUBLIC_URL/chat-health")" ]; then
         warn "$PUBLIC_URL does not answer from this machine (TLS to it may be filtered on the way); the checks on the server itself are what count."
         return 2
     fi
 
-    dialogs="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/dialogs.js")"
+    dialogs="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/dialogs.js")"
     printf "  %-34s %s\n" "js/dialogs.js" "$dialogs"
     [ "$dialogs" = "200" ] || status=1
 
@@ -469,10 +472,18 @@ live_check() {
     # that loads without error and is missing whole features.
     local want got missing
     want="$(ls js/chat/*.js 2>/dev/null | wc -l | tr -d ' ')"
-    got=0; missing=""
+    got=0; missing=""; retried=""
     for part in js/chat/*.js; do
         [ -e "$part" ] || continue
-        if [ "$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/$part")" = "200" ]; then
+        code="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/$part")"
+        # No answer at all (000) is the network, not the file: one retry tells
+        # a dropped connection from a part that is not there, and the retry is
+        # reported, so a flaky link still shows.
+        if [ "$code" = "000" ]; then
+            code="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/$part")"
+            retried="$retried $(basename "$part")"
+        fi
+        if [ "$code" = "200" ]; then
             got=$((got + 1))
         else
             missing="$missing $(basename "$part")"
@@ -480,19 +491,20 @@ live_check() {
     done
     printf "  %-34s %s\n" "chat parts served" "$got/$want"
     [ -n "$missing" ] && printf "  %-34s %s\n" "missing" "$missing"
+    [ -n "$retried" ] && printf "  %-34s %s\n" "answered on a second try" "$retried"
     [ "$got" = "$want" ] && [ "$want" -gt 0 ] || status=1
 
-    sealing="$(curl -sk --max-time 40 "$PUBLIC_URL/js/chat/28-offline-envelopes.js" | grep -c 'sealSessionKeyFor')"
+    sealing="$(curl -sk --retry 1 --retry-delay 1 --max-time 40 "$PUBLIC_URL/js/chat/28-offline-envelopes.js" | grep -c 'sealSessionKeyFor')"
     printf "  %-34s %s\n" "offline sealing present" "$sealing"
     [ "${sealing:-0}" -gt 0 ] || status=1
 
     # Each is a distinct file, so a partial copy shows up here instead of at a
     # user's lock screen.
     local vault stego core link
-    vault="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/vault-profiles.js")"
-    stego="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/stego.js")"
-    core="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/crypto-core.js")"
-    link="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/local-link.js")"
+    vault="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/vault-profiles.js")"
+    stego="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/stego.js")"
+    core="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/crypto-core.js")"
+    link="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/local-link.js")"
     printf "  %-34s %s %s %s %s\n" "vault / stego / core / link" "$vault" "$stego" "$core" "$link"
     [ "$vault" = "200" ] && [ "$stego" = "200" ] && [ "$core" = "200" ] && [ "$link" = "200" ] || status=1
 
@@ -500,18 +512,18 @@ live_check() {
     # server is unreachable, so a deploy that silently dropped it would only be
     # discovered on the day it was needed.
     local offlinepane
-    offlinepane="$(curl -sk --max-time 40 "$PUBLIC_URL/index.html" | grep -c 'content-locallink')"
+    offlinepane="$(curl -sk --retry 1 --retry-delay 1 --max-time 40 "$PUBLIC_URL/index.html" | grep -c 'content-locallink')"
     printf "  %-34s %s\n" "local link pane present" "$offlinepane"
     [ "${offlinepane:-0}" -gt 0 ] || status=1
 
     # CryptoJS is gone from the tree; make sure it is gone from the server too.
     # rsync --delete should handle it, but "should" is what a check is for.
     local leftover
-    leftover="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/vendor/crypto-js/crypto-js.min.js")"
+    leftover="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/vendor/crypto-js/crypto-js.min.js")"
     printf "  %-34s %s\n" "crypto-js removed (want 404)" "$leftover"
     [ "$leftover" = "404" ] || status=1
 
-    health="$(curl -sk --max-time 15 "$PUBLIC_URL/chat-health")"
+    health="$(curl -sk --retry 1 --retry-delay 1 --max-time 15 "$PUBLIC_URL/chat-health")"
     if echo "$health" | grep -q '"ok":true'; then
         printf "  %-34s %s\n" "relay /chat-health" "ok"
     else
@@ -524,7 +536,7 @@ live_check() {
     # the client can derive from the key has a name it cannot lie about, and
     # every transit envelope is sealed to that key.
     local identity relay_id relay_key derived
-    identity="$(curl -sk --max-time 15 "$PUBLIC_URL/relay-identity")"
+    identity="$(curl -sk --retry 1 --retry-delay 1 --max-time 15 "$PUBLIC_URL/relay-identity")"
     relay_id="$(printf '%s' "$identity" | sed -n 's/.*"id":"\([a-f0-9]*\)".*/\1/p')"
     relay_key="$(printf '%s' "$identity" | sed -n 's/.*"publicKey":"\([^"]*\)".*/\1/p')"
     if [ -n "$relay_id" ] && [ -n "$relay_key" ]; then
@@ -561,7 +573,7 @@ live_check() {
         && printf '%s' "$transit" | grep -q '"up":0'; do
         sleep 5
         waited=$((waited + 5))
-        transit="$(curl -sk --max-time 20 "$PUBLIC_URL/chat-health" | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p')"
+        transit="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 "$PUBLIC_URL/chat-health" | sed -n 's/.*"transit":{\([^}]*\)}.*/\1/p')"
     done
     if [ -n "$transit" ]; then
         printf "  %-34s %s%s\n" "transit between relays" "$transit" \
@@ -581,7 +593,7 @@ live_check() {
     # The carrier flow's own file, which is the one thing a shutdown makes the
     # difference between a working app and a useless one.
     local carrier
-    carrier="$(curl -sk --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/chat/38-carrier.js")"
+    carrier="$(curl -sk --retry 1 --retry-delay 1 --max-time 20 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/js/chat/38-carrier.js")"
     printf "  %-34s %s\n" "carrier flow served" "$carrier"
     [ "$carrier" = "200" ] || status=1
 
