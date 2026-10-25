@@ -181,7 +181,12 @@ ${sources.length ? `grep -q "^CHAT_DIRECTORY_SOURCES=" "$E" || { printf 'CHAT_DI
 if [ "$changed" -eq 1 ]; then
   cd "${dirPath}"
   project="$(docker inspect Poorija-Cryptography_ChatSignal --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || echo config)"
-  docker compose -p "\${project:-config}" --env-file .env -f config/docker-compose.yaml up -d chat-signal >/dev/null 2>&1
+  # What the deploy hands the relay on the command line, not in .env: the
+  # host's install and backup paths (the dashboard's backups and jobs mount
+  # them) and the version. Recreated without them, the relay loses both.
+  version="$(sed -n 's/.*"version": *"\\([^"]*\\)".*/\\1/p' package.json 2>/dev/null | head -1)"
+  OPS_INSTALL_DIR="$PWD" OPS_BACKUP_DIR="$PWD/backups" APP_VERSION="$version" \\
+    docker compose -p "\${project:-config}" --env-file .env -f config/docker-compose.yaml up -d chat-signal >/dev/null 2>&1
   for _ in $(seq 1 30); do curl -s -m 3 http://127.0.0.1:9000/chat-health >/dev/null 2>&1 && break; sleep 1; done
   echo "relay restarted with the operator key"
 fi

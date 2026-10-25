@@ -25,6 +25,7 @@
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import os from 'node:os';
 import path from 'node:path';
@@ -163,6 +164,26 @@ try {
     const script = tool.deliveryScript('/srv/pkg', second, { sources: ['https://two.example:8585'] });
     check('the dashboard password never reaches a command line on the server',
       !/curl[^\n]*\s-u\s/.test(script) && script.includes('-K "$CFG"') && /chmod 600 "\$CFG"|umask 077/.test(script), script.split('\n').filter((line) => line.includes('curl')).join(' | ').slice(0, 200));
+    /* Run against a pretend server: docker and curl are stand-ins that write
+       down what they were given. The deploy starts the relay with the host's
+       install and backup paths and the version; a restart without them left
+       the dashboard's backups and jobs pointing nowhere. */
+    {
+      const server = fs.mkdtempSync(path.join(os.tmpdir(), 'directory-server-'));
+      const bin = path.join(server, 'bin');
+      const record = path.join(server, 'docker.log');
+      fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(server, '.env'), 'MONITOR_PASSWORD=x\n');
+      fs.writeFileSync(path.join(server, 'package.json'), '{\n  "name": "p",\n  "version": "9.8.7"\n}\n');
+      fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\n[ "$1" = inspect ] && { echo config; exit 0; }\necho "$* | OPS_INSTALL_DIR=\${OPS_INSTALL_DIR:-} OPS_BACKUP_DIR=\${OPS_BACKUP_DIR:-} APP_VERSION=\${APP_VERSION:-}" >> "${record}"\n`, { mode: 0o755 });
+      fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\necho \'{"ok":true}\'\n', { mode: 0o755 });
+      const run = spawnSync('bash', ['-s'], { input: tool.deliveryScript(server, second, { sources: ['https://two.example:8585'] }), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8', timeout: 30000 });
+      const up = (fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : '').split('\n').find((line) => line.includes('up -d chat-signal')) || '';
+      check('a relay the tool restarts keeps the install paths and version the deploy gave it',
+        up.includes(`OPS_INSTALL_DIR=${server} `) && up.includes(`OPS_BACKUP_DIR=${server}/backups `) && up.endsWith('APP_VERSION=9.8.7'),
+        up || `${run.stdout}${run.stderr}`.slice(0, 200));
+      fs.rmSync(server, { recursive: true, force: true });
+    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 
