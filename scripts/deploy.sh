@@ -325,6 +325,29 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         fail "the servers are not all serving the same build"
         OVERALL=1
     fi
+
+    # ---------------------------------------------------------- the family
+    #
+    # Two or more servers in one settings file are one operator's relays, and
+    # they link with each other by themselves once they share a signed
+    # directory (docs/RELAY-NETWORK.md, "Relay families"). The first time,
+    # this makes the operator key on this machine and says where it is; after
+    # that it adds any server the directory lacks, signs when the list
+    # changed, and hands the directory to every server. A failure here leaves
+    # the deployment itself as it was. POORIJA_DIRECTORY=0 turns it off.
+    set -- $SERVERS
+    if [ "${POORIJA_DIRECTORY:-1}" != "0" ] && [ "$#" -ge 2 ] && [ "$MODE" != "check" ] && [ "$MODE" != "dry-run" ]; then
+        echo
+        log "Relay family: the signed directory of these servers"
+        if ! command -v node >/dev/null 2>&1; then
+            warn "node is not installed here, so the directory was not updated"
+        elif POORIJA_CONFIG_DIR="$CONFIG_DIR" node "$(dirname "$0")/../tools/relay-directory.mjs" sync; then
+            ok "every server has the family's directory"
+        else
+            warn "the directory did not reach every server directly; the relays pass it on themselves"
+            echo "  To hand it over again: node tools/relay-directory.mjs publish"
+        fi
+    fi
     exit $OVERALL
 fi
 

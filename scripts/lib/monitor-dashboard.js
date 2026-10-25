@@ -275,6 +275,14 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
 
     <!-- ============ relays ============ -->
     <section class="tab" data-tab="relays">
+      <div class="card" id="tFamily" style="display:none">
+        <h3><i class="fas fa-sitemap"></i><span data-t="family">خانوادهٔ رله‌ها</span> <span class="tag mut" id="tFamilyStatus"></span></h3>
+        <div class="hint" style="margin-bottom:10px"><span data-t="familyHint">رله‌هایی که اپراتور این رله در فهرست امضاشده‌اش آورده؛ خودکار با هم لینک می‌شوند و فهرست تازه بدون ری‌استارت اعمال می‌شود.</span></div>
+        <div style="overflow:auto"><table id="tFamilyTable"><thead><tr>
+          <th data-t="colName">نام</th><th data-t="colId">شناسه</th><th data-t="colRegion">منطقه</th><th>Gateway</th><th data-t="colState">وضعیت</th>
+        </tr></thead><tbody></tbody></table></div>
+        <div class="hint mono" id="tFamilyRevoked" style="margin-top:8px"></div>
+      </div>
       <div class="card">
         <h3><i class="fas fa-diagram-project"></i><span data-t>رله‌های همکار (Transit)</span> <span class="tag mut" id="tStatus"></span></h3>
         <div class="hint" style="margin-bottom:10px">
@@ -469,6 +477,9 @@ const T = {
     peers:'کاربران متصل', cpu:'پردازنده', ram:'حافظه', disk:'دیسک', queue:'در صف', none:'—', online:'آنلاین', offline:'آفلاین',
     kick:'اخراج', suspend:'تعلیق', resume:'رفع تعلیق', unkick:'لغو اخراج', del:'حذف', restore:'ری‌استور', download:'دانلود',
     empty:'چیزی برای نمایش نیست', linked:'متصل', down:'قطع', dialer:'شماره‌گیر', answerer:'پاسخ‌گو', none2:'—',
+    family:'خانوادهٔ رله‌ها', familyHint:'رله‌هایی که اپراتور این رله در فهرست امضاشده‌اش آورده؛ خودکار با هم لینک می‌شوند و فهرست تازه بدون ری‌استارت اعمال می‌شود.',
+    colName:'نام', colId:'شناسه', colRegion:'منطقه', colState:'وضعیت', insideIran:'داخل ایران', outsideIran:'خارج از ایران',
+    thisRelay:'همین رله', revokedIds:'باطل‌شده', serial:'نسخه', operator:'اپراتور',
     msgsIn:'پیام دریافتی', msgsOut:'پیام ارسالی', bytesIn:'دریافتی', bytesOut:'ارسالی', ok:'انجام شد', fail:'ناموفق',
     confirmClear:'کل صف آفلاین پاک شود؟', confirmRestore:'این بکاپ روی درخت نصب باز شود؟ (ابتدا بکاپ ایمنی گرفته می‌شود)',
     confirmDelete:'حذف شود؟', confirmRestart:'کل استک ری‌استارت شود؟ همهٔ اتصال‌ها لحظه‌ای قطع می‌شوند.' },
@@ -476,6 +487,9 @@ const T = {
     peers:'Connected users', cpu:'CPU', ram:'Memory', disk:'Disk', queue:'Queued', none:'—', online:'online', offline:'offline',
     kick:'Kick', suspend:'Suspend', resume:'Resume', unkick:'Unkick', del:'Delete', restore:'Restore', download:'Download',
     empty:'Nothing to show', linked:'linked', down:'down', dialer:'dialer', answerer:'answerer', none2:'—',
+    family:'Relay family', familyHint:'The relays in the signed directory of this relay’s operator; they link with each other by themselves, and a new directory applies without a restart.',
+    colName:'Name', colId:'Id', colRegion:'Region', colState:'State', insideIran:'inside Iran', outsideIran:'outside Iran',
+    thisRelay:'this relay', revokedIds:'revoked', serial:'serial', operator:'operator',
     msgsIn:'Messages in', msgsOut:'Messages out', bytesIn:'Received', bytesOut:'Sent', ok:'Done', fail:'Failed',
     confirmClear:'Drop the ENTIRE offline queue?', confirmRestore:'Restore this backup over the install tree? (a safety snapshot is taken first)',
     confirmDelete:'Delete?', confirmRestart:'Restart the whole stack? Every connection drops for a moment.' },
@@ -966,8 +980,24 @@ $('clAllDangling').addEventListener('click', () => { $('clDanglingList').querySe
 $('clTemps').addEventListener('click', async () => { const result = await api('/Monitor_Server/ops-cleanup', { what: 'temps' }); toast(result.ok ? t('ok') : t('fail'), result.ok ? 'ok' : 'err'); });
 
 /* ---------- relays ---------- */
+/* The family, when the relay has a directory: who is in it, and whether each
+   member is linked right now. */
+function renderFamily(directory) {
+  $('tFamily').style.display = directory ? '' : 'none';
+  if (!directory) return;
+  $('tFamilyStatus').textContent = t('operator') + ': ' + (directory.operator?.name || '') + ' · ' + String(directory.operator?.id || '').slice(0, 16) + '… · ' + t('serial') + ' ' + directory.serial + (directory.issuedAt ? ' · ' + new Date(directory.issuedAt).toLocaleString() : '');
+  $('tFamilyTable').querySelector('tbody').innerHTML = (directory.relays || []).map((relay) =>
+    '<tr><td>' + esc(relay.name || '—') + '</td><td class="mono">' + esc(String(relay.id).slice(0, 16)) + '…</td>' +
+    '<td>' + esc(relay.region === 'inside-iran' ? t('insideIran') : relay.region === 'outside-iran' ? t('outsideIran') : (relay.region || '—')) + '</td>' +
+    '<td>' + (relay.gateway ? esc(String(relay.gateway)) : '—') + '</td>' +
+    '<td>' + (relay.self ? '<span class="tag mut">' + t('thisRelay') + '</span>' : relay.linked ? '<span class="tag good">' + t('linked') + '</span>' : '<span class="tag bad">' + t('down') + '</span>') + '</td></tr>'
+  ).join('');
+  $('tFamilyRevoked').textContent = (directory.revoked || []).length ? t('revokedIds') + ': ' + directory.revoked.map((id) => String(id).slice(0, 16) + '…').join(', ') : '';
+}
+
 async function loadTransit() {
   const data = await api('/Monitor_Server/transit');
+  renderFamily(data.directory || null);
   const status = data.status || {};
   $('tStatus').textContent = 'allowed: ' + (status.allowed ?? 0) + ' · up: ' + (status.up ?? 0);
   const rows = (data.peers || []).map((peer) =>

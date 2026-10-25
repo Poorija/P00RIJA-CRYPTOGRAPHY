@@ -1,10 +1,59 @@
-# P00RIJA Cryptography 2.98.75
+# P00RIJA Cryptography 2.98.76
 
-Version 2.98.75 · build chat-v168
+Version 2.98.76 · build chat-v169
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## خانوادهٔ رله‌ها · Relay families
+
+- **رله‌های یک اپراتور خودشان به هم وصل می‌شوند.** اپراتور فهرست رله‌هایش را با «کلید اپراتور»
+  امضا می‌کند و هر رلهٔ این فهرست خودکار با همهٔ بقیه لینک می‌شود. اضافه کردن یک سرور یعنی امضای
+  فهرست تازه؛ نه `.env` سرورهای دیگر ویرایش می‌شود و نه رله‌ای ری‌استارت می‌شود. سرور گم‌شده یا
+  نفوذشده هم با یک فرمان در همهٔ رله‌ها بسته و رد می‌شود.
+- **برای هر کسی که خودش میزبانی می‌کند، همین‌طور خودکار است.** کسی که دو سرور یا بیشتر را در
+  تنظیمات `scripts/deploy.sh` بنویسد، در اولین استقرار کلید اپراتورش روی کامپیوتر خودش ساخته
+  می‌شود، فهرست امضا و به همهٔ سرورها داده می‌شود، و سرورهایش یک خانواده می‌شوند. سرور تازه در
+  استقرار بعدی‌اش می‌پیوندد. ابزار دستی `tools/relay-directory.mjs` هم هست.
+- **امن:** هر رله فقط فهرستی را می‌پذیرد که کلید اپراتور خودش امضا کرده، شماره‌اش از هر فهرست
+  قبلی بالاتر است و نام خود رله در آن آمده؛ فهرست قدیمی را نمی‌شود دوباره فرستاد و رلهٔ باطل‌شده را
+  زنده کرد، حتی روی رله‌ای که فایل فهرستش از دست رفته. کلید اپراتور هرگز روی سرور نمی‌رود و رمز پنل
+  هنگام تحویل فهرست در فهرست پردازه‌های سرور دیده نمی‌شود.
+- **حتی رله‌ای که کسی به آن دسترسی ندارد** (سرور داخلی، از بیرون ایران) فهرست تازه را می‌گیرد: هر
+  رله هر پنج دقیقه از بقیه می‌پرسد و فهرست تازه را فوراً به همهٔ لینک‌هایش می‌دهد.
+- **پنل** در زبانهٔ رله‌ها خانواده را نشان می‌دهد: اپراتور، شمارهٔ فهرست، هر رله با منطقه و وضعیت
+  لینکش، و رله‌های باطل‌شده. هشدارهای هر عضو تازه هم خودکار به رلهٔ دارای تلگرام می‌رسد.
+
+- **An operator's relays link with each other by themselves.** The operator signs the
+  list of their relays with an "operator key", and every relay on the list links with
+  every other one on its own. Adding a server is signing a new list; nobody edits the
+  other servers' `.env` and no relay restarts. A lost or compromised server is closed and
+  refused on every relay with one command.
+- **The same, automatically, for anyone who self-hosts.** Someone who lists two or more
+  servers in `scripts/deploy.sh`'s settings gets an operator key made on their own machine
+  at the first deploy, the list signed and handed to every server, and their servers
+  become a family. A new server joins on its next deploy. The manual tool,
+  `tools/relay-directory.mjs`, is there too.
+- **Safe:** a relay takes only a list signed by its own operator's key, with a serial
+  higher than any before it, that names the relay itself; an old list cannot be replayed
+  to bring back a revoked relay, not even on a relay that lost its copy. The operator key
+  never goes to a server, and the dashboard password never shows in a server's process
+  list while the list is handed over.
+- **Even a relay nobody can reach** (the server inside Iran, seen from outside) gets the
+  new list: every relay asks the others every five minutes and passes a new list on over
+  its links at once.
+- **The dashboard** shows the family in its Relays tab: the operator, the list's serial,
+  each relay with its region and link state, and the revoked ones. A new member's alerts
+  reach the relay with Telegram without a line of its own.
+
+---
+
+# P00RIJA Cryptography 2.98.75
+
+Version 2.98.75 · build chat-v168
 
 ---
 

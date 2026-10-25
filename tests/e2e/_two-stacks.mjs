@@ -81,7 +81,7 @@ function proxyTo(staticPort, relayPort) {
    relay-front.js), as the relay outside Iran does for the one inside — at
    a.frontUrl, through a proxy standing in for nginx's 8586. `bNames` are extra
    origins B calls its own (a public-looking name a client may know B by). */
-export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = false, bNames = [], envA = {}, envB = {} } = {}) {
+export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = false, bNames = [], envA = {}, envB = {}, waitForLink = true } = {}) {
   const children = [];
   const logs = [];
   const run = (file, env, label) => {
@@ -136,6 +136,8 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = fals
       CHAT_BEACON_DIR: path.join(side.dir, 'beacons'),
       CHAT_SIBLING_DIR: path.join(side.dir, 'siblings'),
       CHAT_ROSTER_DIR: path.join(side.dir, 'rosters'),
+      CHAT_DIRECTORY_PATH: path.join(side.dir, 'relay-directory.json'),
+      CHAT_TRANSIT_PEERS_STORE: path.join(side.dir, 'transit-peers.json'),
       CHAT_PUSH_STORE_PATH: path.join(side.dir, 'push.json'),
       CHAT_VAPID_STORE_PATH: path.join(side.dir, 'vapid.json'),
       CHAT_POLICY_STORE_PATH: path.join(side.dir, 'policy.json'),
@@ -173,7 +175,9 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = fals
       try {
         const page = await fetch(`${url}/index.html`);
         const health = await fetch(`${url}/chat-health`).then((r) => r.json());
-        if (page.ok && health?.transit?.up >= 1) return health;
+        /* A suite that links the two itself (a relay directory) starts
+           them unlinked. */
+        if (page.ok && (!waitForLink || health?.transit?.up >= 1)) return health;
       } catch (_error) { /* not yet */ }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }

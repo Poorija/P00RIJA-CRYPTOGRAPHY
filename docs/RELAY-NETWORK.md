@@ -485,6 +485,51 @@ only in plain HTTP it says so instead of "nothing found".
 
 ---
 
+### Relay families (from 2.98.76)
+
+Everything above links two relays by naming each in the other's `.env`. For
+relays that one operator runs, there is a shorter way: the operator signs a
+list of their relays once, and every relay on the list links with every other
+by itself. Adding a server means signing a new list; nobody edits the other
+servers' `.env` files and no relay restarts.
+
+**The automatic way.** List your servers in `scripts/deploy.sh`'s settings
+(`SERVERS='a b c'`, as above) and deploy:
+
+```bash
+bash scripts/deploy.sh
+```
+
+With two or more servers, the deploy ends by making your operator key the
+first time (it says where: `~/.config/p00rija-cryptography/operator-key.json`,
+mode 600; back it up), adding every server it finds, signing the list, and
+handing it to every server. A server added to the settings later joins on its
+next deploy. `POORIJA_DIRECTORY=0` turns this off. Optional settings per
+server: `<NAME>_REGION='inside-iran'` or `'outside-iran'`, and
+`<NAME>_GATEWAY=1` (the order in which the servers will act as gateways to
+other operators' relays, in a later release).
+
+**By hand**, with `node tools/relay-directory.mjs`: `init --name "…"`,
+`add <server>`, `revoke <server>` (a lost or compromised server: it is closed
+and refused everywhere), `remove <server>`, `show`, `sign`, `publish`.
+
+**What each relay does.** A relay trusts one operator key, `CHAT_OPERATOR_KEY`
+in its `.env` (the deploy writes it). It takes a directory only when that key
+signed it, its serial is higher than any it has held, and it names this relay.
+It then links with every relay on the list and drops any a newer list leaves
+out or revokes; peers named in `CHAT_TRANSIT_PEERS` or added from the
+dashboard stay. It asks every family member for a newer list every five
+minutes and passes a new one on over its links at once, so a relay nobody can
+reach (one in Iran, seen from outside) still hears of it. The list is public at
+`/relay-directory`, and the dashboard's Relays tab shows the family.
+`CHAT_DIRECTORY_SOURCES` gives a brand-new relay somewhere to ask, and
+`CHAT_DIRECTORY_MIN_SERIAL` a floor below which nothing is taken.
+
+**Keep the operator key safe.** Whoever holds it can add a relay to your
+family; whoever loses it has to sign a new family with a new key.
+
+---
+
 ## 6. What each machine sees
 
 | | Sees | Does not see |
@@ -915,6 +960,48 @@ nginx رلهٔ در دسترس، در را روی 8586 با گواهی خودش 
 که روی پورت بی‌رمز ذخیره شده به محض جواب دادن https همان سرور به آن منتقل می‌شود.
 نسخهٔ native وقتی ببیند رله‌ای فقط بی‌رمز جواب می‌دهد، همین را می‌گوید نه «پیدا
 نشد».
+
+### خانوادهٔ رله‌ها (از نسخهٔ 2.98.76)
+
+روش‌های بالا دو رله را با نوشتن هر کدام در `.env` دیگری به هم وصل می‌کنند. برای
+رله‌هایی که یک اپراتور اداره می‌کند راه کوتاه‌تری هست: اپراتور فهرست رله‌هایش را
+یک بار امضا می‌کند و هر رلهٔ این فهرست، خودش با بقیه لینک می‌شود. اضافه کردن
+سرور یعنی امضای فهرست تازه؛ نه `.env` سرورهای دیگر عوض می‌شود و نه رله‌ای
+ری‌استارت می‌شود.
+
+**روش خودکار.** سرورهایتان را در تنظیمات `scripts/deploy.sh` بنویسید
+(`SERVERS='a b c'`، مثل بالا) و مستقر کنید:
+
+```bash
+bash scripts/deploy.sh
+```
+
+با دو سرور یا بیشتر، استقرار در پایان، بار اول کلید اپراتور را می‌سازد (و می‌گوید
+کجاست: `~/.config/p00rija-cryptography/operator-key.json` با دسترسی ۶۰۰؛ از آن
+پشتیبان بگیرید)، همهٔ سرورها را اضافه می‌کند، فهرست را امضا می‌کند و به همهٔ
+سرورها می‌دهد. سروری که بعداً به تنظیمات اضافه شود، در استقرار بعدی‌اش می‌پیوندد.
+`POORIJA_DIRECTORY=0` این کار را خاموش می‌کند. تنظیمات اختیاری هر سرور:
+`<NAME>_REGION='inside-iran'` یا `'outside-iran'`، و `<NAME>_GATEWAY=1` (ترتیب
+Gateway شدن سرورها برای اتصال به رله‌های اپراتورهای دیگر، در نسخه‌ای بعدی).
+
+**روش دستی** با `node tools/relay-directory.mjs`: `init --name "…"`،
+`add <server>`، `revoke <server>` (سرور گم‌شده یا نفوذشده: همه جا بسته و رد
+می‌شود)، `remove <server>`، `show`، `sign` و `publish`.
+
+**هر رله چه می‌کند.** رله به یک کلید اپراتور اعتماد می‌کند: `CHAT_OPERATOR_KEY`
+در `.env` (استقرار آن را می‌نویسد). فهرستی را می‌پذیرد که همان کلید امضایش کرده
+باشد، شماره‌اش از هر فهرستی که داشته بالاتر باشد و نام خود این رله در آن باشد.
+بعد با همهٔ رله‌های فهرست لینک می‌شود و هر رله‌ای را که فهرست تازه کنار بگذارد
+یا باطل کند، می‌بندد؛ رله‌هایی که در `CHAT_TRANSIT_PEERS` یا از پنل اضافه شده‌اند
+می‌مانند. هر پنج دقیقه از اعضای خانواده فهرست تازه‌تر را می‌پرسد و فهرست تازه را
+فوراً از لینک‌هایش به بقیه می‌دهد، پس رله‌ای که کسی به آن دسترسی ندارد (رله‌ای
+در ایران، از بیرون) هم خبردار می‌شود. فهرست در `/relay-directory` عمومی است و
+زبانهٔ رله‌های پنل خانواده را نشان می‌دهد. `CHAT_DIRECTORY_SOURCES` به رلهٔ تازه
+جایی برای پرسیدن می‌دهد و `CHAT_DIRECTORY_MIN_SERIAL` کفی که کمتر از آن پذیرفته
+نمی‌شود.
+
+**کلید اپراتور را امن نگه دارید.** هر کس آن را داشته باشد می‌تواند رله‌ای به
+خانوادهٔ شما اضافه کند؛ هر کس آن را گم کند باید با کلید تازه خانوادهٔ تازه امضا کند.
 
 ### ۶. هر ماشین چه می‌بیند
 

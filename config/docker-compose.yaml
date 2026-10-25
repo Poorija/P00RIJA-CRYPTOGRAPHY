@@ -105,6 +105,12 @@ services:
       # block never reaches the container at all. It was missing, so setting it
       # in .env looked right and did nothing.
       CHAT_TRANSIT_PEERS: ${CHAT_TRANSIT_PEERS:-}
+      # The relay family (docs/RELAY-NETWORK.md): the operator key this relay
+      # trusts, and where a relay that knows nobody yet asks for the family's
+      # signed directory.
+      CHAT_OPERATOR_KEY: ${CHAT_OPERATOR_KEY:-}
+      CHAT_DIRECTORY_SOURCES: ${CHAT_DIRECTORY_SOURCES:-}
+      CHAT_DIRECTORY_MIN_SERIAL: ${CHAT_DIRECTORY_MIN_SERIAL:-0}
       # Only for a link to a relay whose certificate this one cannot verify --
       # a self-signed staging box. Never on a real deployment: the link's own
       # handshake authenticates the far relay, but TLS is what stops the dial

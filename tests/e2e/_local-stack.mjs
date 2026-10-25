@@ -31,6 +31,7 @@ const env = { ...process.env, CHAT_SIGNAL_HOST:'127.0.0.1', CHAT_SIGNAL_PORT:Str
   CHAT_PUSH_STORE_PATH:path.join(dir,'push.json'), CHAT_VAPID_STORE_PATH:path.join(dir,'vapid.json'),
   CHAT_POLICY_STORE_PATH:path.join(dir,'policy.json'), CHAT_EXPIRY_LOG_PATH:path.join(dir,'expiry.json'),
   CHAT_SELF_DESTRUCT_STORE_PATH:path.join(dir,'self-destruct.json'),
+  CHAT_DIRECTORY_PATH:path.join(dir,'relay-directory.json'), CHAT_TRANSIT_PEERS_STORE:path.join(dir,'transit-peers.json'),
   MONITOR_PASSWORD:'Local-Test-Only-Password-36', TURN_PASSWORD:'Local-Test-Only-Turn-36',
   /* The push suites stand up a fake push service on localhost, and the relay
      refuses private push endpoints unless told otherwise (an SSRF guard). On

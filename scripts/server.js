@@ -30,6 +30,7 @@ const { linkPreview } = require('./lib/link-preview.js');
 const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
+const { verifyDirectory, planChanges } = require('./lib/relay-directory.js');
 const {
   alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram,
 } = require('./lib/relay-alerts.js');
@@ -189,7 +190,7 @@ const relayPeers = createRelayPeers({
     if (frontDoor?.onFrame(payload, link)) return;
     handleTransitFrame(payload, link);
   },
-  onLinkUp: (link) => frontDoor?.linkUp(link),
+  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); },
   /* Function declarations below are hoisted, so this resolves at call time. */
   onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); },
 });
@@ -4939,28 +4940,171 @@ app.post('/Monitor_Server/queue-flush', authMiddleware, (req, res) => {
 /* Runtime peer management, persisted beside the rest of the relay's state so
    a restart keeps the set the operator last chose. The env's peers are the
    seed; the file is the truth after the first change. */
-const TRANSIT_PEERS_STORE = path.join(defaultDataDir, 'transit-peers.json');
+const TRANSIT_PEERS_STORE = process.env.CHAT_TRANSIT_PEERS_STORE || path.join(defaultDataDir, 'transit-peers.json');
 function loadRuntimeTransitPeers() {
   try {
     const raw = JSON.parse(fs.readFileSync(TRANSIT_PEERS_STORE, 'utf8'));
     for (const entry of Array.isArray(raw?.peers) ? raw.peers : []) {
       if (!/^[a-f0-9]{64}$/.test(String(entry?.id || ''))) continue;
       relayPeers.allowPeer(entry.id, String(entry?.origin || ''));
+      directoryState.manualIds.add(entry.id);
     }
     if ((raw?.peers || []).length) console.log(`[Monitor] Restored ${raw.peers.length} runtime transit peer(s)`);
   } catch (_error) { /* first run: nothing to restore */ }
 }
 function saveRuntimeTransitPeers() {
-  const peers = relayPeers.peerEntries().map(({ id, origin }) => ({ id, origin }));
+  /* Not the family a directory brought in: copied here, a relay later left
+     out of the directory would come back at the next start as "manual". */
+  const peers = relayPeers.peerEntries()
+    .filter(({ id }) => !directoryState.addedIds.has(id))
+    .map(({ id, origin }) => ({ id, origin }));
   try {
     fs.writeFileSync(TRANSIT_PEERS_STORE, JSON.stringify({ peers, updatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
   } catch (error) { console.warn('[Monitor] transit peers not saved:', error.message); }
 }
 
+/* ---- the relay family (scripts/lib/relay-directory.js) ----------------------
+ *
+ * The relays this relay's operator runs, in a directory the operator signed
+ * (docs/RELAY-NETWORK.md, "Relay families"). The
+ * relay trusts one operator key, CHAT_OPERATOR_KEY; it links by itself with
+ * every relay the newest directory signed by that key names, and drops what
+ * a newer one leaves out or revokes. Peers named in CHAT_TRANSIT_PEERS or
+ * added from the dashboard stay as they are, unless revoked. A relay without
+ * the key behaves as it always has.
+ */
+const OPERATOR_KEY = String(process.env.CHAT_OPERATOR_KEY || '').trim();
+const DIRECTORY_PATH = process.env.CHAT_DIRECTORY_PATH || path.join(defaultDataDir, 'relay-directory.json');
+const DIRECTORY_SOURCES = String(process.env.CHAT_DIRECTORY_SOURCES || '').split(',').map((origin) => origin.trim()).filter((origin) => /^https?:\/\//.test(origin));
+const DIRECTORY_PULL_MS = Math.max(1000, Number(process.env.CHAT_DIRECTORY_PULL_MS || 300000));
+/* The lowest serial this relay will ever take, held or not. The serial guard
+   only knows what the relay holds: a new relay, or one whose file was lost,
+   would take any directory the operator ever signed, an old one naming a
+   relay revoked since. The operator's tool writes the current serial here. */
+const DIRECTORY_FLOOR_PATH = `${DIRECTORY_PATH}.serial`;
+/* Kept apart from the directory, so losing that file does not lower it. */
+const DIRECTORY_MIN_SERIAL = Math.max(
+  Math.floor(Number(process.env.CHAT_DIRECTORY_MIN_SERIAL || 0)) || 0,
+  (() => { try { return Math.floor(Number(fs.readFileSync(DIRECTORY_FLOOR_PATH, 'utf8').trim())) || 0; } catch (_error) { return 0; } })(),
+);
+/* addedIds: what the directory brought in, and so may take away again.
+   manualIds: what CHAT_TRANSIT_PEERS or the dashboard named. */
+const directoryState = { doc: null, addedIds: new Set(), manualIds: new Set(TRANSIT_PEERS.map((peer) => peer.id)) };
+const directoryMembers = () => (directoryState.doc?.body.relays || []).map((relay) => relay.id).filter((id) => id !== relayIdentity.id);
+
+function applyDirectory(doc) {
+  const plan = planChanges(doc.body, relayIdentity.id, directoryState.addedIds);
+  const revoked = new Set(doc.body.revoked);
+  for (const id of plan.drop) {
+    if (directoryState.manualIds.has(id) && !revoked.has(id)) continue;
+    relayPeers.disallowPeer(id);
+    directoryState.addedIds.delete(id);
+    directoryState.manualIds.delete(id);
+  }
+  for (const { id, origins } of plan.allow) {
+    relayPeers.allowPeer(id, origins);
+    if (!directoryState.manualIds.has(id)) directoryState.addedIds.add(id);
+  }
+  directoryState.doc = doc;
+}
+
+function offerDirectoryTo(link) {
+  if (!directoryState.doc || !link?.isOpen?.() || !directoryMembers().includes(link.peerId)) return;
+  try { link.send({ kind: 'directory', doc: directoryState.doc }); } catch (_error) { /* the link went */ }
+}
+
+/* Every way a directory arrives ends here, and every check happens here. */
+function acceptDirectory(doc, source) {
+  if (!OPERATOR_KEY) return { ok: false, reason: 'no-operator-key' };
+  const held = directoryState.doc?.body;
+  const floor = DIRECTORY_MIN_SERIAL > (held?.serial || 0);
+  const verdict = verifyDirectory(doc, {
+    operatorKey: OPERATOR_KEY,
+    selfId: relayIdentity.id,
+    heldSerial: floor ? DIRECTORY_MIN_SERIAL - 1 : (held?.serial || 0),
+    heldBody: floor ? null : (held || null),
+  });
+  if (!verdict.ok) {
+    /* The same directory heard again is the normal case for pull and push. */
+    if (verdict.reason !== 'stale' || source === 'dashboard') {
+      console.warn(`[Directory] refused a directory from ${source}: ${verdict.reason}`);
+    }
+    return verdict;
+  }
+  applyDirectory(doc);
+  if (source !== 'disk') {
+    try {
+      fs.writeFileSync(DIRECTORY_PATH, JSON.stringify(doc), { mode: 0o600 });
+      fs.writeFileSync(DIRECTORY_FLOOR_PATH, `${doc.body.serial}\n`, { mode: 0o600 });
+    } catch (error) {
+      console.warn('[Directory] could not keep the directory:', error.message);
+    }
+    for (const id of directoryMembers()) offerDirectoryTo(relayPeers.linkFor(id));
+    monitorLog(`Relay directory ${doc.body.serial} from ${source}: ${doc.body.relays.length} relay(s), ${doc.body.revoked.length} revoked`);
+  }
+  console.log(`[Directory] serial ${doc.body.serial} (${source}): linked with ${directoryMembers().length} family relay(s)`);
+  return { ok: true, serial: doc.body.serial };
+}
+
+/* Asked of every family member and every seed address; the newest valid
+   answer wins. This is how a relay nobody can reach (one in Iran, seen from
+   outside) still hears of a new directory. */
+async function pullDirectories() {
+  if (!OPERATOR_KEY) return;
+  const origins = new Set(DIRECTORY_SOURCES);
+  for (const relay of directoryState.doc?.body.relays || []) {
+    if (relay.id !== relayIdentity.id) for (const origin of relay.origins || []) origins.add(String(origin));
+  }
+  await Promise.allSettled(Array.from(origins, async (origin) => {
+    const response = await fetch(`${origin.replace(/\/+$/, '')}/relay-directory`, { signal: AbortSignal.timeout(15000) });
+    if (response.ok) acceptDirectory(await response.json(), 'pull');
+  }));
+}
+
+function startRelayDirectory() {
+  if (!OPERATOR_KEY) return;
+  try {
+    acceptDirectory(JSON.parse(fs.readFileSync(DIRECTORY_PATH, 'utf8')), 'disk');
+  } catch (_error) { /* none kept yet */ }
+  setTimeout(() => pullDirectories().catch(() => {}), Math.min(5000, DIRECTORY_PULL_MS)).unref?.();
+  setInterval(() => pullDirectories().catch(() => {}), DIRECTORY_PULL_MS).unref?.();
+}
+
+function directorySummary() {
+  const body = directoryState.doc?.body;
+  if (!body) return null;
+  return {
+    operator: { id: body.operator.id, name: String(body.operator.name || '') },
+    serial: body.serial,
+    issuedAt: body.issuedAt || '',
+    relays: body.relays.map((relay) => ({
+      id: relay.id,
+      name: String(relay.name || ''),
+      region: String(relay.region || ''),
+      gateway: Number(relay.gateway || 0),
+      self: relay.id === relayIdentity.id,
+      linked: relay.id === relayIdentity.id || Boolean(relayPeers.linkFor(relay.id)),
+    })),
+    revoked: body.revoked,
+  };
+}
+
+app.get('/relay-directory', (req, res) => {
+  setNoStoreHeaders(res);
+  if (!directoryState.doc) return res.status(404).json({ ok: false, reason: 'no-directory' });
+  res.json(directoryState.doc);
+});
+
+app.post('/Monitor_Server/directory', authMiddleware, (req, res) => {
+  const result = acceptDirectory(req.body, 'dashboard');
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
 app.post('/Monitor_Server/transit', authMiddleware, (req, res) => {
   res.json({
     ok: true,
     status: relayPeers.status(),
+    directory: directorySummary(),
     peers: relayPeers.peerEntries().map((entry) => ({
       id: entry.id.slice(0, 16),
       origin: entry.origin,
@@ -4983,6 +5127,8 @@ app.post('/Monitor_Server/transit-add', authMiddleware, (req, res) => {
   }
   const added = relayPeers.allowPeer(id, origin);
   if (!added) return res.status(400).json({ ok: false, reason: 'peer-refused' });
+  directoryState.manualIds.add(id);
+  directoryState.addedIds.delete(id);
   saveRuntimeTransitPeers();
   monitorLog(`Transit peer added: ${id.slice(0, 12)}${origin ? ` @ ${origin}` : ' (answer-only)'}`);
   res.json({ ok: true, status: relayPeers.status() });
@@ -5426,7 +5572,7 @@ async function imagesInUse() {
 /* Proves the whole way to the operator's phone: from a relay without
    Telegram, over the link to the one with it, and on. */
 app.post('/Monitor_Server/alert-test', authMiddleware, async (req, res) => {
-  const via = alertsByTelegram() ? 'telegram' : (Array.from(ALERT_PEERS).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none');
+  const via = alertsByTelegram() ? 'telegram' : (Array.from(alertPeers()).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none');
   queueAlert(`🔔 ${ALERT_LABEL}: پیام آزمایشی هشدار، از پنل مدیریت.`);
   await flushAlerts();
   res.json({ ok: via !== 'none', via, waiting: alertOutbox.length });
@@ -6464,7 +6610,10 @@ const alertState = createAlertState({ label: ALERT_LABEL, remindMs: Math.max(1, 
    "whoever is linked": an alert says how full this machine is and what it is
    called, and a transit link can be with another operator's relay, who has
    no business reading that — or writing into this operator's Telegram. */
-const ALERT_PEERS = new Set(String(process.env.CHAT_ALERT_PEERS || '').split(',').map((id) => id.trim().toLowerCase()).filter((id) => /^[a-f0-9]{64}$/.test(id)));
+const ALERT_PEERS_NAMED = new Set(String(process.env.CHAT_ALERT_PEERS || '').split(',').map((id) => id.trim().toLowerCase()).filter((id) => /^[a-f0-9]{64}$/.test(id)));
+/* None named: the relay's family (its operator's directory), so a new member
+   of the family needs no line of its own in anybody's .env. */
+const alertPeers = () => (ALERT_PEERS_NAMED.size ? ALERT_PEERS_NAMED : new Set(directoryMembers()));
 /* Waiting for Telegram, or for the link to the relay that has it: { id,
    text, fromPeer, sentAt }. Over a link one is in flight at a time and stays
    first until the far relay acknowledges it, so a link that drops mid-send
@@ -6507,7 +6656,7 @@ async function flushAlerts() {
       }
       /* Sent and not yet acknowledged: wait a minute before sending it again. */
       if (entry.sentAt && Date.now() - entry.sentAt < 60000) return;
-      const link = Array.from(ALERT_PEERS).map((id) => relayPeers.linkFor(id)).find((candidate) => candidate?.isOpen());
+      const link = Array.from(alertPeers()).map((id) => relayPeers.linkFor(id)).find((candidate) => candidate?.isOpen());
       if (!link) return;
       link.send({ kind: 'alert', id: entry.id, text: entry.text });
       entry.sentAt = Date.now();
@@ -6524,7 +6673,7 @@ async function flushAlerts() {
    its own it could claim to be any relay. Acknowledged even when already
    seen: the sender resends until it hears back. */
 function receiveRelayAlert(payload, link) {
-  if (!ALERT_PEERS.has(link.peerId) || !alertsByTelegram()) return;
+  if (!alertPeers().has(link.peerId) || !alertsByTelegram()) return;
   const id = /^[a-f0-9]{16}$/.test(String(payload.id || '')) ? payload.id : '';
   if (id) link.send({ kind: 'alert-ack', id });
   if (id && alertIdsSeen.has(id)) return;
@@ -6546,7 +6695,7 @@ function receiveRelayAlert(payload, link) {
 /* The far relay has it: the next one may go. */
 function receiveRelayAlertAck(payload, link) {
   const entry = alertOutbox[0];
-  if (!entry || entry.id !== payload.id || !ALERT_PEERS.has(link.peerId)) return;
+  if (!entry || entry.id !== payload.id || !alertPeers().has(link.peerId)) return;
   alertOutbox.shift();
   flushAlerts().catch(() => {});
 }
@@ -6588,7 +6737,7 @@ let alertsAnnounced = false;
 async function checkAlerts() {
   /* A relay with nowhere to send them (a development machine, a test) keeps
      quiet. */
-  if (alertsChecking || !(alertsByTelegram() || ALERT_PEERS.size)) return;
+  if (alertsChecking || !(alertsByTelegram() || alertPeers().size)) return;
   alertsChecking = true;
   /* A start is announced: after a crash and a restart, that is how the
      operator hears of it. */
@@ -6858,6 +7007,10 @@ function presenceQueryAllowed(link) {
 }
 
 function handleTransitFrame(payload, link) {
+  if (payload?.kind === 'directory') {
+    acceptDirectory(payload.doc, 'push');
+    return;
+  }
   if (payload?.kind === 'alert') {
     receiveRelayAlert(payload, link);
     return;
@@ -10079,6 +10232,7 @@ setInterval(() => {
 /* Whatever the monitor last decided about relay links, on top of the env's
    seed. Called last, at boot, once everything it touches exists. */
 loadRuntimeTransitPeers();
+startRelayDirectory();
 
 startFrontDoor();
 
