@@ -185,7 +185,12 @@ printf 'CHAT_TRANSIT_PEERS=%s\n' '$value' >> .env
 chmod 600 .env
 PROJECT="\$(docker inspect Poorija-Cryptography_ChatSignal \
     --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || echo config)"
-docker compose -p "\$PROJECT" --env-file .env -f config/docker-compose.yaml up -d chat-signal >/dev/null 2>&1
+# What the deploy hands the relay on the command line, not in .env: the host's
+# install and backup paths (the dashboard's backups and jobs mount them) and
+# the version. Recreated without them, the relay loses both.
+VERSION="\$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json 2>/dev/null | head -1)"
+OPS_INSTALL_DIR="\$PWD" OPS_BACKUP_DIR="\$PWD/backups" APP_VERSION="\$VERSION" \
+    docker compose -p "\$PROJECT" --env-file .env -f config/docker-compose.yaml up -d chat-signal >/dev/null 2>&1
 REMOTE
 }
 
