@@ -52,6 +52,10 @@ function wellFormed(doc) {
   if (typeof body.operator?.key !== 'string' || !HEX64.test(String(body.operator?.id || ''))) return false;
   if (!Array.isArray(body.relays) || !Array.isArray(body.revoked)) return false;
   if (!body.relays.every((relay) => relay && HEX64.test(String(relay.id || '')) && (relay.origins === undefined || Array.isArray(relay.origins)))) return false;
+  /* Admin keys, when listed: each id is the hash of its key. */
+  if (body.admins !== undefined && !(Array.isArray(body.admins) && body.admins.length <= 32 && body.admins.every((admin) => (
+    admin && typeof admin.key === 'string' && typeof admin.name === 'string' && admin.name.length <= 64 && relayIdFor(admin.key) === admin.id
+  )))) return false;
   return body.revoked.every((id) => HEX64.test(String(id || '')));
 }
 

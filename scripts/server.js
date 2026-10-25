@@ -33,6 +33,7 @@ const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { verifyDirectory, planChanges } = require('./lib/relay-directory.js');
 const partnerRules = require('./lib/relay-partners.js');
+const signatureRules = require('./lib/operator-signature.js');
 const {
   alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram,
 } = require('./lib/relay-alerts.js');
@@ -709,6 +710,52 @@ app.use('/self-destruct/records', express.json({ limit: JSON_BODY_LIMIT_RECORDS 
    never anywhere near the general limit. */
 app.use('/relay-join', express.json({ limit: '64kb' }));
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+/* ------------------------------------------------------------------
+ * Signed dangerous actions (scripts/lib/operator-signature.js)
+ *
+ * The dashboard actions that can do harm may carry a signature from the
+ * admin's own computer: the operator key, or an admin key the operator listed
+ * in the family directory. A relay with CHAT_REQUIRE_OPERATOR_SIGNATURE=1
+ * takes them only signed, so a dashboard password that leaks no longer
+ * reaches them from the web; reading is never refused for want of one. Both
+ * settings live in .env, which takes SSH to change, never in the dashboard.
+ * A request without the password goes on to its route, which answers 401 as
+ * it always has and says nothing about the lock.
+ * ------------------------------------------------------------------ */
+const REQUIRE_OPERATOR_SIGNATURE = process.env.CHAT_REQUIRE_OPERATOR_SIGNATURE === '1';
+const CENTRAL_CONTROL = process.env.CHAT_CENTRAL_CONTROL !== '0';
+const signedNonces = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [nonce, until] of signedNonces) if (until <= now) signedNonces.delete(nonce);
+}, 60000).unref?.();
+app.use((req, res, next) => {
+  if (req.method !== 'POST' || !signatureRules.isDangerous(req.path)) return next();
+  if (!isValidMonitorAuth(req)) return next();
+  const header = req.get('x-operator-signature');
+  if (!header) {
+    if (REQUIRE_OPERATOR_SIGNATURE) return res.status(403).json({ ok: false, reason: 'operator-signature-required' });
+    return next();
+  }
+  if (!CENTRAL_CONTROL) return res.status(403).json({ ok: false, reason: 'central-control-off' });
+  const verdict = signatureRules.verifyRequest(header, {
+    method: req.method,
+    path: req.path,
+    body: req.body,
+    relay: relayIdentity.id,
+    now: Date.now(),
+    keys: signatureRules.signingKeys(directoryState.doc?.body, OPERATOR_KEY),
+    nonceSeen: (nonce) => (signedNonces.get(nonce) || 0) > Date.now(),
+  });
+  if (!verdict.ok) return res.status(403).json({ ok: false, reason: 'bad-operator-signature', detail: verdict.reason });
+  signedNonces.set(verdict.nonce, Date.now() + 10 * 60 * 1000);
+  req.signedBy = verdict.name;
+  monitorLog(`Signed by ${verdict.name}: ${req.path}`);
+  queueAlert(`🔐 ${ALERT_LABEL}: کار حساس «${req.path}» با امضای «${verdict.name}» انجام شد.`);
+  flushAlerts().catch(() => {});
+  return next();
+});
 
 /* Express advertises itself in a header on every response, which tells an
    attacker which CVE list to read first. */
@@ -4168,6 +4215,8 @@ app.get('/chat-health', (req, res) => {
     /* How many other relays this one can actually hand traffic to right now,
        which is the only honest measure of transit being up. */
     transit: relayPeers.status(),
+    /* Whether dangerous dashboard actions here need an operator signature. */
+    locked: REQUIRE_OPERATOR_SIGNATURE,
     peerOrigin: publicUrls.relayOrigin,
     presenceUrl: publicUrls.presenceUrl,
     /* What this instance sized itself to, and how full it is. A load balancer
@@ -5300,11 +5349,7 @@ function changePartner(operatorId, patch, note = '') {
 
 function receivePartners(payload, link) {
   if (!isFamilyPeer(link?.peerId)) return;
-  const incoming = (Array.isArray(payload.entries) ? payload.entries : []).filter((entry) => {
-    if (!entry?.directory) return true;
-    const body = entry.directory.body;
-    return verifyDirectory(entry.directory, { operatorKey: String(entry.operatorKey || ''), selfId: body?.relays?.[0]?.id }).ok;
-  });
+  const incoming = (Array.isArray(payload.entries) ? payload.entries : []).filter((entry) => partnerRules.partnerEntryConsistent(entry));
   const merged = partnerRules.mergePartners(partnerState.entries, incoming);
   const override = wellFormedOverride(payload.override) && laterSetting(payload.override, partnerState.override) ? payload.override : null;
   const carry = wellFormedCarry(payload.carryBetween) && laterSetting(payload.carryBetween, partnerState.carryBetween) ? payload.carryBetween : null;
@@ -5775,9 +5820,8 @@ function cleanPartnerOrigin(value) {
    as far as its own operator's signature goes: it says who that family is,
    not that anybody here trusts it. */
 async function fetchFamilyDirectory(origin) {
-  const response = await fetch(`${origin}/relay-directory`, { signal: AbortSignal.timeout(15000) });
-  if (!response.ok) return { ok: false, reason: 'no-directory' };
-  const doc = await response.json();
+  const doc = await partnerFetchJson(origin, '/relay-directory');
+  if (!doc) return { ok: false, reason: 'no-directory' };
   const verdict = verifyDirectory(doc, { operatorKey: String(doc?.body?.operator?.key || ''), selfId: doc?.body?.relays?.[0]?.id });
   return verdict.ok ? { ok: true, doc } : { ok: false, reason: 'bad-directory' };
 }
@@ -5924,7 +5968,7 @@ app.post('/Monitor_Server/partners', authMiddleware, (req, res) => {
 });
 
 app.post('/Monitor_Server/partners/lookup', authMiddleware, async (req, res) => {
-  const origin = cleanPartnerOrigin(req.body?.origin);
+  const origin = partnerOrigin(req.body?.origin);
   if (!origin) return res.status(400).json({ ok: false, reason: 'bad-origin' });
   try {
     const found = await fetchFamilyDirectory(origin);
@@ -5952,9 +5996,10 @@ app.post('/Monitor_Server/partners/lookup', authMiddleware, async (req, res) => 
 app.post('/Monitor_Server/partners/request', authMiddleware, async (req, res) => {
   if (!OPERATOR_KEY || !directoryState.doc) return res.status(409).json({ ok: false, reason: 'no-family' });
   if (!ownGatewaySet().length) return res.status(409).json({ ok: false, reason: 'no-gateway' });
-  const origin = cleanPartnerOrigin(req.body?.origin);
+  const origin = partnerOrigin(req.body?.origin);
   const operatorId = String(req.body?.operatorId || '').toLowerCase();
-  if (!origin || !/^[a-f0-9]{64}$/.test(operatorId)) return res.status(400).json({ ok: false, reason: 'bad-request' });
+  if (!origin) return res.status(400).json({ ok: false, reason: 'bad-origin' });
+  if (!/^[a-f0-9]{64}$/.test(operatorId)) return res.status(400).json({ ok: false, reason: 'bad-request' });
   try {
     const found = await fetchFamilyDirectory(origin);
     if (!found.ok) return res.status(400).json(found);
@@ -5970,14 +6015,10 @@ app.post('/Monitor_Server/partners/request', authMiddleware, async (req, res) =>
       nonce: crypto.randomBytes(16).toString('hex'),
       contact: publicOriginForPeers(),
     }, relayPrivate);
-    const response = await fetch(`${origin}/relay-join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(15000),
-    });
-    const answer = await response.json().catch(() => ({}));
-    if (response.status !== 202) return res.status(502).json({ ok: false, reason: answer.reason || `answered-${response.status}` });
+    const sent = await partnerRequest(origin, '/relay-join', { method: 'POST', body: request });
+    if (!sent) return res.status(502).json({ ok: false, reason: 'unreachable' });
+    const answer = sent.json || {};
+    if (sent.status !== 202) return res.status(502).json({ ok: false, reason: answer.reason || `answered-${sent.status}` });
     const state = answer.state === 'approved' ? 'approved' : (answer.state === 'rejected' ? 'rejected' : 'requested');
     const body = found.doc.body;
     const current = partnerState.entries[operatorId];
@@ -6066,19 +6107,23 @@ async function pollPartnerRequests() {
   for (const entry of Object.values(partnerState.entries)) {
     if (entry.state !== 'requested' || entry.requestedBy !== relayIdentity.id || !entry.requestId || !entry.contact) continue;
     try {
-      const response = await fetch(`${entry.contact}/relay-join/${entry.requestId}`, { signal: AbortSignal.timeout(15000) });
-      const answer = await response.json().catch(() => ({}));
+      const answer = (await partnerFetchJson(entry.contact, `/relay-join/${entry.requestId}`)) || {};
       if (answer.state === 'rejected') changePartner(entry.operatorId, { state: 'rejected' }, 'they rejected');
       else if (answer.state === 'approved') changePartner(entry.operatorId, { state: 'approved' }, 'they approved');
     } catch (_error) { /* asked again next time */ }
   }
 }
 const PARTNER_FETCH_MAX_BYTES = 256 * 1024;
-/* One GET from a partner's relay: connected to exactly the address that was
-   checked (a name cannot answer the check with one address and the
-   connection with another), no redirect followed, and the connection cut
-   the moment the answer passes the cap rather than after reading it all. */
 async function partnerFetchJson(origin, route) {
+  const answer = await partnerRequest(origin, route);
+  return answer && answer.status === 200 ? answer.json : null;
+}
+/* One request to another family's relay: connected to exactly the address
+   that was checked (a name cannot answer the check with one address and the
+   connection with another), no redirect followed, and the connection cut
+   the moment the answer passes the cap rather than after reading it all.
+   Resolves to { status, json } or null. */
+async function partnerRequest(origin, route, { method = 'GET', body = null } = {}) {
   const safe = partnerOrigin(origin);
   if (!safe) return null;
   const url = new URL(`${safe}${route}`);
@@ -6089,23 +6134,28 @@ async function partnerFetchJson(origin, route) {
     if (!answers.length || (!PARTNER_ALLOW_PRIVATE && answers.some((answer) => partnerRules.privateHost(answer.address)))) return null;
     pinned = answers[0];
   }
-  const body = await new Promise((resolve) => {
+  const payload = body === null ? null : Buffer.from(JSON.stringify(body));
+  const answer = await new Promise((resolve) => {
     const transport = url.protocol === 'https:' ? https : http;
     const request = transport.request({
       protocol: url.protocol,
       hostname: host,
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
-      method: 'GET',
+      method,
       servername: net.isIP(host) ? undefined : host,
-      headers: { Accept: 'application/json', 'Accept-Encoding': 'identity' },
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'identity',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': String(payload.length) } : {}),
+      },
       lookup: (_hostname, options, callback) => {
         if (options && options.all) callback(null, [{ address: pinned.address, family: pinned.family }]);
         else callback(null, pinned.address, pinned.family);
       },
       timeout: 10000,
     }, (response) => {
-      if (response.statusCode !== 200 || Number(response.headers['content-length'] || 0) > PARTNER_FETCH_MAX_BYTES) {
+      if (Number(response.headers['content-length'] || 0) > PARTNER_FETCH_MAX_BYTES) {
         response.destroy();
         resolve(null);
         return;
@@ -6121,15 +6171,17 @@ async function partnerFetchJson(origin, route) {
         }
         chunks.push(chunk);
       });
-      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('end', () => resolve({ status: response.statusCode || 0, raw: Buffer.concat(chunks) }));
       response.on('error', () => resolve(null));
     });
     request.on('timeout', () => request.destroy());
     request.on('error', () => resolve(null));
-    request.end();
+    request.end(payload || undefined);
   });
-  if (!body) return null;
-  return JSON.parse(body.toString('utf8'));
+  if (!answer) return null;
+  let json = {};
+  try { json = JSON.parse(answer.raw.toString('utf8') || '{}'); } catch (_error) { json = {}; }
+  return { status: answer.status, json };
 }
 
 async function pullPartnerDirectories() {
@@ -6162,12 +6214,17 @@ async function pullPartnerDirectories() {
 function startPartners() {
   try {
     const kept = JSON.parse(fs.readFileSync(PARTNERS_PATH, 'utf8'));
-    partnerState.entries = partnerRules.mergePartners({}, Object.values(kept?.entries || {})).held;
+    partnerState.entries = partnerRules.prunePartners(partnerRules.mergePartners({}, Object.values(kept?.entries || {})).held);
     if (wellFormedOverride(kept?.override)) partnerState.override = kept.override;
     if (wellFormedCarry(kept?.carryBetween)) partnerState.carryBetween = kept.carryBetween;
   } catch (_error) { /* none kept yet */ }
   applyPartners();
   setInterval(() => pollPartnerRequests().catch(() => {}), JOIN_POLL_MS).unref?.();
+  setInterval(() => {
+    const before = JSON.stringify(partnerState.entries);
+    partnerState.entries = partnerRules.prunePartners(partnerState.entries);
+    if (JSON.stringify(partnerState.entries) !== before) savePartners();
+  }, 24 * 60 * 60 * 1000).unref?.();
   setInterval(() => {
     pullPartnerDirectories().catch(() => {});
     if (selfIsGateway()) announcePartnerList();

@@ -316,6 +316,31 @@ try {
         && through(carriesC, { operators: new Set() }) === false
         && through(carriesC, null) === false);
 
+    /* What one relay of a family hands another about a partner must be
+       about the operator whose directory it carries. */
+    const consistent = { operatorId: A.operatorId, operatorKey: A.operatorKey, directory: A.doc, state: 'approved' };
+    check('a shared partner entry about the operator its directory names is consistent', rules.partnerEntryConsistent(consistent) === true);
+    check('one filed under another operator’s id is not', rules.partnerEntryConsistent({ ...consistent, operatorId: B.operatorId }) === false);
+    check('nor one whose key is another operator’s', rules.partnerEntryConsistent({ ...consistent, operatorKey: B.operatorKey }) === false);
+    check('nor one whose directory does not verify', rules.partnerEntryConsistent({ ...consistent, directory: { ...A.doc, sig: B.doc.sig } }) === false);
+    check('an entry with no directory yet (a bare state change) passes on its id alone',
+      rules.partnerEntryConsistent({ operatorId: A.operatorId, state: 'removed' }) === true && rules.partnerEntryConsistent({ operatorId: 'zz', state: 'removed' }) === false);
+
+    const day = 24 * 60 * 60 * 1000;
+    const heavy = { directory: A.doc, contact: 'https://x.test', operatorKey: A.operatorKey, name: 'x' };
+    const pruned = rules.prunePartners({
+      [opA]: { operatorId: opA, state: 'removed', updatedAt: 1, updatedBy: 'r', ...heavy },
+      [opB]: { operatorId: opB, state: 'rejected', updatedAt: 1, updatedBy: 'r', mutedUntil: 2, ...heavy },
+      [opC]: { operatorId: opC, state: 'rejected', updatedAt: 1, updatedBy: 'r', mutedUntil: 100 * day, ...heavy },
+      ['d'.repeat(64)]: { operatorId: 'd'.repeat(64), state: 'approved', updatedAt: 1, updatedBy: 'r', ...heavy },
+    }, { now: 60 * day, keepMs: 30 * day });
+    check('disconnected and rejected partners shrink to a tombstone 30 days on, once their mute is over',
+      JSON.stringify(pruned[opA]) === JSON.stringify({ operatorId: opA, state: 'removed', updatedAt: 1, updatedBy: 'r' })
+        && pruned[opB].state === 'rejected' && !pruned[opB].directory
+        && Boolean(pruned[opC].directory) && Boolean(pruned['d'.repeat(64)].directory), JSON.stringify(pruned[opA]));
+    const revived = rules.mergePartners(pruned, [{ operatorId: opA, state: 'approved', updatedAt: 0, updatedBy: 'z', ...heavy }]);
+    check('and the tombstone still beats an older “approved” a relay brings back after a long time away', revived.held[opA].state === 'removed' && revived.changed.length === 0);
+
     const first = rules.retainGateways(null, ['x'], { now: 1000, handoffMs: 5000 });
     const second = rules.retainGateways(first, ['y'], { now: 4000, handoffMs: 5000 });
     check('a handoff window is never extended by a later change', first.until === 6000 && second.until === 6000 && second.ids.has('x') && second.ids.has('y'), JSON.stringify({ first: first.until, second: second.until }));
@@ -484,6 +509,12 @@ try {
       check('a partner directory does not take over a peer named by hand',
         quebecIn.status === 202 && manualPeer?.origin === 'http://manual.test' && manualPeer?.kind === 'manual' && c1Store.includes(quebec.relay.id),
         JSON.stringify({ quebecIn: quebecIn.status, manualPeer, stored: c1Store.includes(quebec.relay.id) }));
+
+      /* The dashboard's own lookup and request keep to the same rule. */
+      const lookPrivate = await fleet.post('c1', '/Monitor_Server/partners/lookup', { origin: b1.origin });
+      const askPrivate = await fleet.post('c1', '/Monitor_Server/partners/request', { origin: b1.origin, operatorId: B.id });
+      check('a relay that keeps off private addresses will not look one up or ask one either',
+        lookPrivate.status === 400 && lookPrivate.reason === 'bad-origin' && askPrivate.status === 400, JSON.stringify({ lookPrivate, askPrivate }));
 
       /* A partner whose gateway sits at a private address is never dialled
          there: c1 answers it and nothing more. */

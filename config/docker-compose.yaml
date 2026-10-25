@@ -118,6 +118,10 @@ services:
       CHAT_GATEWAY_HANDOFF_MS: ${CHAT_GATEWAY_HANDOFF_MS:-120000}
       CHAT_JOIN_PER_HOUR: ${CHAT_JOIN_PER_HOUR:-10}
       CHAT_JOIN_WAITING_MAX: ${CHAT_JOIN_WAITING_MAX:-20}
+      # Dangerous dashboard actions only with an operator or admin signature (1),
+      # and whether signed requests from the central panel are taken at all.
+      CHAT_REQUIRE_OPERATOR_SIGNATURE: ${CHAT_REQUIRE_OPERATOR_SIGNATURE:-0}
+      CHAT_CENTRAL_CONTROL: ${CHAT_CENTRAL_CONTROL:-1}
       # Only for a link to a relay whose certificate this one cannot verify --
       # a self-signed staging box. Never on a real deployment: the link's own
       # handshake authenticates the far relay, but TLS is what stops the dial

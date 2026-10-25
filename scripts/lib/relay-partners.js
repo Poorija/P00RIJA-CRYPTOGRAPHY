@@ -146,6 +146,36 @@ function mergePartners(held = {}, incoming = [], { now = Date.now() } = {}) {
   return { held: next, changed };
 }
 
+/* What one relay of the family hands another about a partner has to be about
+   the operator whose directory it carries: the id it is filed under and the
+   key are that directory's, and the directory verifies under that key. An
+   entry without a directory (a state change before any was held) is judged
+   by its id alone. */
+function partnerEntryConsistent(entry) {
+  if (!entry || !HEX64.test(String(entry.operatorId || ''))) return false;
+  if (!entry.directory) return true;
+  const operator = entry.directory.body?.operator;
+  if (!operator || operator.id !== entry.operatorId || (entry.operatorKey && entry.operatorKey !== operator.key)) return false;
+  return verifyDirectory(entry.directory, { operatorKey: String(operator.key || ''), selfId: entry.directory.body?.relays?.[0]?.id }).ok;
+}
+
+/* Partners disconnected or rejected long ago (a rejected one once its mute
+   is over) shrink to a tombstone: id, state and stamp, without the directory
+   and the rest. Not deleted: a relay of the family that was away for longer
+   may still hold an older "approved", and only the tombstone's later stamp
+   keeps that from bringing the partner back. */
+function prunePartners(held = {}, { now = Date.now(), keepMs = 30 * 24 * 60 * 60 * 1000 } = {}) {
+  const kept = {};
+  for (const [operatorId, entry] of Object.entries(held)) {
+    const old = now - (entry.updatedAt || 0) > keepMs;
+    const done = entry.state === 'removed' || (entry.state === 'rejected' && (entry.mutedUntil || 0) <= now);
+    kept[operatorId] = old && done
+      ? { operatorId, state: entry.state, updatedAt: entry.updatedAt, updatedBy: entry.updatedBy }
+      : entry;
+  }
+  return kept;
+}
+
 /* A gateway choice made in the dashboard, as the family shares it: null
    gateways mean "back to the directory". */
 function validOverride(override, { now = Date.now() } = {}) {
@@ -362,6 +392,8 @@ module.exports = {
   verifyPartnerList,
   commonPartnerOk,
   freshList,
+  partnerEntryConsistent,
+  prunePartners,
   signJoinRequest,
   verifyJoinRequest,
   mergePartners,

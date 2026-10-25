@@ -169,6 +169,26 @@ try {
       first.body.serial === 1 && second.body.serial === 2 && first.body.operator.name === 'Test Operator');
     check('and a relay it names accepts what it signs',
       dir.verifyDirectory(second, { operatorKey: key.publicKey, selfId: R1, heldSerial: 1, heldBody: first.body }).ok === true);
+    /* Admin keys: the computers allowed to sign dangerous dashboard actions. */
+    const laptopPair = newKey();
+    const laptopKey = spki(laptopPair.publicKey);
+    const withAdmin = tool.applyEdit(draft, { op: 'admin-add', admin: { name: 'laptop', key: laptopKey } });
+    const signedAdmin = tool.signDraft({ ...state, draft: withAdmin, signed: second });
+    check('admin-add puts the key in the draft, and the signed directory carries it',
+      withAdmin.admins?.length === 1 && withAdmin.admins[0].id === dir.operatorIdFor(laptopKey) && signedAdmin.body.admins?.[0]?.name === 'laptop'
+        && dir.verifyDirectory(signedAdmin, { operatorKey: key.publicKey, selfId: R1, heldSerial: 2 }).ok === true, JSON.stringify(signedAdmin.body.admins));
+    const keptAdmin = tool.applyEdit(withAdmin, { op: 'add', relay: { id: fakeId(14), name: 'r4' } });
+    check('editing the relays keeps the admins', keptAdmin.admins?.length === 1 && keptAdmin.relays.length === withAdmin.relays.length + 1);
+    const noAdmin = tool.applyEdit(withAdmin, { op: 'admin-remove', name: 'laptop' });
+    check('admin-remove takes it out', noAdmin.admins.length === 0 && !('admins' in tool.signDraft({ ...state, draft: noAdmin, signed: second }).body));
+    let badKey = '';
+    try { tool.applyEdit(draft, { op: 'admin-add', admin: { name: 'x', key: 'not-a-key' } }); } catch (error) { badKey = error.message; }
+    check('a key that is not a P-256 public key is refused', /public key/.test(badKey), badKey);
+    const operatorPair = crypto.createPrivateKey(key.privateKey);
+    const forgedAdmins = dir.signDirectory({ ...signedAdmin.body, serial: 9, admins: [{ id: 'f'.repeat(64), key: laptopKey, name: 'liar' }] }, operatorPair);
+    check('a directory naming an admin whose id is not its key’s hash is malformed',
+      dir.verifyDirectory(forgedAdmins, { operatorKey: key.publicKey, selfId: R1, heldSerial: 2 }).reason === 'malformed');
+
     const script = tool.deliveryScript('/srv/pkg', second, { sources: ['https://two.example:8585'] });
     check('the dashboard password never reaches a command line on the server',
       !/curl[^\n]*\s-u\s/.test(script) && script.includes('-K "$CFG"') && /chmod 600 "\$CFG"|umask 077/.test(script), script.split('\n').filter((line) => line.includes('curl')).join(' | ').slice(0, 200));

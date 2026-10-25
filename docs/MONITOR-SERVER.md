@@ -148,6 +148,82 @@ curl -sSL http://SERVER:9080/install | bash -s -- http://SERVER:9080 <token> ~/p
 - cleanup انتخابی: regex-validated + skip in-use
 - docker.sock پشت همان رمز مانیتور؛ حذف یک خط volume = غیرفعال
 
+## Managing all your servers from one place (from 2.98.78)
+
+`node tools/control-panel.mjs` runs on your own computer and nowhere else. It
+reads your servers from the same `deploy.conf` the deploy uses, opens an SSH
+tunnel to each server's dashboard (nothing on a server is opened for it),
+reads each dashboard password over SSH into memory, and opens a page on
+127.0.0.1: every server at a glance (state, version, load, memory, disk,
+people online, relay links, family, partners), actions for all of them at once
+(check for updates, update one server at a time, back up, test alerts), and
+each server's own dashboard one click away, without typing its password.
+
+**Signed dangerous actions.** The first run makes this computer's *admin key*
+and asks for a passphrase that seals it. It prints one line for the operator
+to run where the operator key is:
+
+```bash
+node tools/relay-directory.mjs admin-add "my-laptop" <public key>
+node tools/relay-directory.mjs sign && node tools/relay-directory.mjs publish
+```
+
+From then on, the panel signs the actions that can do harm (users, the
+dashboard password, partners, gateways, restarts, updates, backups) and every
+relay checks the signature. A lost laptop is dropped with `admin-remove`. On a
+computer that does not hold the operator key, the panel first asks you to
+confirm the family's operator id, which you compare with what the operator
+gives you (`node tools/relay-directory.mjs show` prints it): it never takes
+that from a server's word.
+
+**Locking a server.** `CHAT_REQUIRE_OPERATOR_SIGNATURE=1` in a server's
+`.env` (or the panel's Lock button, which sets it over SSH) makes that server
+take its dangerous actions only signed, so a dashboard password that leaks no
+longer reaches them from the web. Reading is never locked. `CHAT_CENTRAL_CONTROL=0`
+takes a server out of the panel's hands altogether.
+
+**What stays on your computer:** the admin key sealed under its passphrase
+(dropped from memory after 15 minutes idle), and `control-panel.log`, which
+records what was done and whether it was signed, never a password. The page
+opens only with the one-time link the panel prints, and only from this
+computer's browser.
+
+## پنل مرکزی برای همهٔ سرورها (از نسخهٔ 2.98.78)
+
+`node tools/control-panel.mjs` فقط روی کامپیوتر خود شما اجرا می‌شود. سرورها را از
+همان `deploy.conf` استقرار می‌خواند، به پنل هر سرور یک تونل SSH می‌زند (هیچ پورتی
+روی سرورها برایش باز نمی‌شود)، رمز پنل هر سرور را از راه SSH فقط در حافظه نگه
+می‌دارد و صفحه‌ای روی 127.0.0.1 باز می‌کند: همهٔ سرورها در یک نگاه (وضعیت، نسخه،
+بار، حافظه، دیسک، کاربران آنلاین، لینک رله‌ها، خانواده، شریک‌ها)، کارهای هم‌زمان
+برای همه (بررسی نسخهٔ تازه، به‌روزرسانی یکی‌یکی، پشتیبان‌گیری، آزمایش هشدار)، و پنل
+کامل هر سرور با یک کلیک و بدون وارد کردن رمز.
+
+**کارهای حساس با امضا.** اولین اجرا برای این کامپیوتر یک *کلید ادمین* می‌سازد و
+عبارت عبوری برای قفل کردن آن می‌پرسد، و یک خط چاپ می‌کند که اپراتور روی کامپیوتر
+دارای کلید اپراتور اجرا کند:
+
+```bash
+node tools/relay-directory.mjs admin-add "my-laptop" <public key>
+node tools/relay-directory.mjs sign && node tools/relay-directory.mjs publish
+```
+
+از آن پس پنل کارهایی را که می‌توانند آسیب بزنند (کاربران، رمز پنل، شریک‌ها،
+Gatewayها، ری‌استارت، به‌روزرسانی، پشتیبان) امضا می‌کند و هر رله امضا را بررسی
+می‌کند. لپ‌تاپ گم‌شده با `admin-remove` کنار گذاشته می‌شود. روی کامپیوتری که کلید
+اپراتور را ندارد، پنل اول از شما می‌خواهد شناسهٔ اپراتور خانواده را تأیید کنید و آن را
+با شناسه‌ای که اپراتور به شما می‌دهد مقایسه کنید (`node tools/relay-directory.mjs show`
+آن را چاپ می‌کند)؛ پنل این را هرگز به گفتهٔ یک سرور نمی‌پذیرد.
+
+**قفل کردن سرور.** `CHAT_REQUIRE_OPERATOR_SIGNATURE=1` در `.env` سرور (یا دکمهٔ قفل در
+پنل مرکزی که آن را از راه SSH می‌گذارد) باعث می‌شود کارهای حساس آن سرور فقط با
+امضا انجام شوند؛ پس اگر رمز پنل لو برود، از وب به آن‌ها نمی‌رسد. خواندن هرگز قفل
+نمی‌شود. `CHAT_CENTRAL_CONTROL=0` سرور را کاملاً از دسترس پنل مرکزی بیرون می‌برد.
+
+**چه چیزی روی کامپیوتر شما می‌ماند:** کلید ادمین قفل‌شده با عبارت عبور (که بعد از
+۱۵ دقیقه بی‌کاری از حافظه پاک می‌شود)، و `control-panel.log` که ثبت می‌کند چه کاری
+شد و با امضا بود یا نه، هرگز رمز. صفحه فقط با لینک یک‌بارمصرفی که پنل چاپ می‌کند و
+فقط از مرورگر همین کامپیوتر باز می‌شود.
+
 ## متغیرهای محیطی
 
 | متغیر | پیش‌فرض | توضیح |
@@ -170,6 +246,8 @@ curl -sSL http://SERVER:9080/install | bash -s -- http://SERVER:9080 <token> ~/p
 | `CHAT_GATEWAY_HANDOFF_MS` | 120000 | مدتی که Gateway کنارگذاشته‌شده لینک‌های شریک‌ها را تا بالا آمدن Gateway تازه نگه می‌دارد |
 | `CHAT_JOIN_PER_HOUR` | 10 | سقف درخواست اتصال از هر نشانی در ساعت |
 | `CHAT_JOIN_WAITING_MAX` | 20 | سقف درخواست‌های در انتظار تأیید |
+| `CHAT_REQUIRE_OPERATOR_SIGNATURE` | 0 | `1`: کارهای حساس پنل فقط با امضای کلید اپراتور یا کلید ادمین (قفل) |
+| `CHAT_CENTRAL_CONTROL` | 1 | `0`: درخواست‌های امضاشدهٔ پنل مرکزی پذیرفته نمی‌شوند |
 | `CHAT_ALERT_DISK_FREE_PCT` / `_GB` | 10 / 2 | هشدار دیسک زیر این درصد یا گیگابایت آزاد |
 | `CHAT_ALERT_MEMORY_FREE_PCT` | 10 | هشدار حافظهٔ سرور زیر این درصد آزاد |
 | `CHAT_ALERT_TURN_PCT` | 80 | هشدار وقتی این درصد از پورت‌های رلهٔ coturn گرفته شده باشد |

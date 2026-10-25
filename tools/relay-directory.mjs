@@ -21,6 +21,8 @@
  *   node tools/relay-directory.mjs add <server> [--region inside-iran|outside-iran] [--gateway N] [--origin URL]
  *   node tools/relay-directory.mjs revoke <server|id>       # never again
  *   node tools/relay-directory.mjs remove <server|id>       # out, not revoked
+ *   node tools/relay-directory.mjs admin-add <name> <public key>   # a computer that may sign dashboard actions
+ *   node tools/relay-directory.mjs admin-remove <name>
  *   node tools/relay-directory.mjs show
  *   node tools/relay-directory.mjs sign
  *   node tools/relay-directory.mjs publish [server…]
@@ -100,9 +102,28 @@ export function loadState(dir) {
   };
 }
 
-/* The draft is the list and the revoked ids; the signature adds the rest. */
+/* The draft is the list, the revoked ids and the admin keys; the signature
+   adds the rest. */
 export function applyEdit(draft, edit) {
-  const next = { relays: [...(draft?.relays || [])], revoked: [...(draft?.revoked || [])] };
+  const next = { relays: [...(draft?.relays || [])], revoked: [...(draft?.revoked || [])], admins: [...(draft?.admins || [])] };
+  /* A computer allowed to sign dangerous dashboard actions: its public key
+     and a name the admin will recognise. */
+  if (edit.op === 'admin-add') {
+    const key = String(edit.admin?.key || '').trim();
+    try {
+      crypto.createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' });
+    } catch (_error) {
+      throw new Error('an admin key is a P-256 public key, SPKI base64, as tools/control-panel.mjs prints it');
+    }
+    const entry = { id: operatorIdFor(key), key, name: String(edit.admin?.name || '').slice(0, 64) || operatorIdFor(key).slice(0, 12) };
+    next.admins = next.admins.filter((admin) => admin.id !== entry.id && admin.name !== entry.name);
+    next.admins.push(entry);
+    return next;
+  }
+  if (edit.op === 'admin-remove') {
+    next.admins = next.admins.filter((admin) => admin.name !== edit.name && admin.id !== edit.name);
+    return next;
+  }
   if (edit.op === 'add') {
     const relay = edit.relay;
     if (!HEX64.test(String(relay?.id || ''))) throw new Error('a relay id is 64 hex characters');
@@ -135,6 +156,9 @@ export function signDraft(state) {
     issuedAt: new Date().toISOString(),
     relays: state.draft?.relays || [],
     revoked: state.draft?.revoked || [],
+    /* Only when there are any, so a family without admin keys signs exactly
+       the directory it always did. */
+    ...((state.draft?.admins || []).length ? { admins: state.draft.admins } : {}),
   };
   return signDirectory(body, crypto.createPrivateKey(state.key.privateKey));
 }
@@ -316,11 +340,29 @@ function main(argv) {
       say(`${target}: ${command === 'revoke' ? 'revoked' : 'removed'} in the draft; sign and publish to apply it`);
       return 0;
     }
+    case 'admin-add': {
+      const state = loadState(dir);
+      const [name, key] = positional;
+      if (!name || !key) throw new Error('admin-add <name> <public key>, as tools/control-panel.mjs prints them');
+      const next = applyEdit(state.draft, { op: 'admin-add', admin: { name, key } });
+      saveDraft(dir, next);
+      say(`admin ${name} (${next.admins.find((admin) => admin.name === name).id.slice(0, 12)}…) is in the draft; sign and publish to apply it`);
+      return 0;
+    }
+    case 'admin-remove': {
+      const state = loadState(dir);
+      const name = positional[0];
+      if (!name || !(state.draft?.admins || []).some((admin) => admin.name === name || admin.id === name)) throw new Error(`no admin called ${name} in the draft`);
+      saveDraft(dir, applyEdit(state.draft, { op: 'admin-remove', name }));
+      say(`admin ${name} removed in the draft; sign and publish to apply it`);
+      return 0;
+    }
     case 'show': {
       const state = loadState(dir);
       say(`operator: ${state.key ? `${state.key.name} ${state.key.id.slice(0, 16)}…` : 'none yet (run init)'}`);
       say(`signed: ${state.signed ? `serial ${state.signed.body.serial}, ${state.signed.body.issuedAt}` : 'nothing yet'}`);
       for (const relay of state.draft?.relays || []) say(`  ${relay.name.padEnd(8)} ${relay.id.slice(0, 16)}…  ${relay.region || '-'}  gateway ${relay.gateway || '-'}  ${relay.origins.join(' ') || '(dials out)'}`);
+      for (const admin of state.draft?.admins || []) say(`  admin ${admin.name} ${admin.id.slice(0, 16)}…`);
       for (const id of state.draft?.revoked || []) say(`  revoked  ${id.slice(0, 16)}…`);
       if (state.signed && !sameList(state.draft, state.signed.body)) say('the draft differs from what is signed: run sign');
       return 0;

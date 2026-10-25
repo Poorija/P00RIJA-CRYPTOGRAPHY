@@ -1,0 +1,89 @@
+<!doctype html>
+<!--
+  P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
+  Copyright (C) 2026 Poorija <p00rija@tutamail.com>
+  https://github.com/Poorija/P00RIJA-Cryptography
+  Licensed under the GNU Affero General Public License, version 3 only.
+
+  The page of tools/control-panel.mjs: every server of deploy.conf at a
+  glance, actions for the whole fleet, and each server's own dashboard one
+  click away. Served by the panel on 127.0.0.1 only, behind its cookie.
+-->
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P00RIJA · Control panel</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --mut:#6b7385; --line:#e3e6ec; --good:#1f8a4c; --bad:#c23b3b; --warn:#b7791f; --acc:#2f6fdb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --card:#1b2029; --text:#e6e9ef; --mut:#9aa3b5; --line:#2a313d; --good:#3fbf74; --bad:#e06464; --warn:#e0a84a; --acc:#5b8ff0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.6 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); background:var(--card); flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  main { padding:16px; max-width:1400px; margin:0 auto; display:grid; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:7px; padding:6px 12px; cursor:pointer; }
+  button.acc { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.bad { border-color:var(--bad); color:var(--bad); }
+  input { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--text); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:start; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; font-size:12px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); }
+  .good { color:var(--good); border-color:var(--good); } .bad { color:var(--bad); border-color:var(--bad); } .warn { color:var(--warn); border-color:var(--warn); }
+  .mut { color:var(--mut); }
+  .mono { font-family: ui-monospace, Menlo, monospace; direction:ltr; }
+  pre { white-space:pre-wrap; margin:0; font-size:12px; direction:ltr; text-align:left; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-t="title">پنل مرکزی سرورها</h1>
+  <span id="keyState" class="tag"></span>
+  <button id="langToggle">EN</button>
+</header>
+<main>
+  <section class="card" id="unlockBox" style="display:none">
+    <div class="row">
+      <span data-t="unlockFirst">برای کارهای حساس، کلید این کامپیوتر را باز کنید.</span>
+      <input type="password" id="passphrase" autocomplete="current-password" data-ph="passphrase" placeholder="عبارت عبور">
+      <button class="acc" id="unlockButton" data-t="unlock">باز کردن کلید</button>
+    </div>
+  </section>
+
+  <section class="card" id="trustBox" style="display:none">
+    <div data-t="trustNeeded">پیش از هر کار حساس، شناسهٔ اپراتور خانواده را که اپراتور به شما داده تأیید کنید.</div>
+    <div class="mono mut" id="operatorCandidates" style="margin:6px 0"></div>
+    <div class="row">
+      <input type="text" id="operatorId" class="mono" size="70" data-ph="operatorIdLabel" placeholder="شناسهٔ اپراتور">
+      <button class="acc" id="trustButton" data-t="trust">تأیید اپراتور</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between">
+      <strong data-t="fleet">همهٔ سرورها با هم</strong>
+      <div class="row">
+        <button id="fleetCheck" data-t="check">بررسی نسخهٔ تازه</button>
+        <button id="fleetUpdate" data-t="update">به‌روزرسانی</button>
+        <button id="fleetBackup" data-t="backup">پشتیبان‌گیری</button>
+        <button id="fleetAlert" data-t="alertTest">آزمایش هشدار</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <strong data-t="servers">سرورها</strong>
+    <div style="overflow:auto"><table id="servers"><thead><tr>
+      <th data-t="name">نام</th><th data-t="state">وضعیت</th><th data-t="version">نسخه</th><th data-t="load">بار</th><th data-t="memory">حافظه</th>
+      <th data-t="disk">دیسک</th><th data-t="online">آنلاین</th><th data-t="links">لینک رله‌ها</th><th data-t="family">خانواده</th><th data-t="partners">شریک‌ها</th><th></th>
+    </tr></thead><tbody id="serverRows"></tbody></table></div>
+  </section>
+
+  <section class="card"><pre id="results"></pre></section>
+</main>
+<script src="/panel.js"></script>
+</body>
+</html>

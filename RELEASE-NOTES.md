@@ -1,10 +1,67 @@
-# P00RIJA Cryptography 2.98.77
+# P00RIJA Cryptography 2.98.78
 
-Version 2.98.77 · build chat-v170
+Version 2.98.78 · build chat-v171
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پنل مرکزی برای همهٔ سرورها · One panel for all your servers
+
+- **همهٔ سرورها در یک جا:** `node tools/control-panel.mjs` روی کامپیوتر خود ادمین اجرا
+  می‌شود و همهٔ سرورهای `deploy.conf` را در یک صفحه نشان می‌دهد: وضعیت، نسخه، بار،
+  حافظه، دیسک، کاربران آنلاین، لینک رله‌ها، خانواده و شریک‌ها. پنل کامل هر سرور با یک
+  کلیک و بدون وارد کردن رمز باز می‌شود و کارهایی مثل به‌روزرسانی (یکی‌یکی)، پشتیبان‌گیری
+  و آزمایش هشدار برای همه با هم انجام می‌شود.
+- **هیچ دری روی سرورها باز نمی‌شود:** پنل از راه SSH و با کلید استقرار به پنل هر سرور
+  می‌رسد، رمز پنل‌ها فقط در حافظه می‌ماند و صفحه فقط روی 127.0.0.1 و با یک لینک
+  یک‌بارمصرف باز می‌شود.
+- **کارهای حساس با امضا:** هر کامپیوتر کلید ادمین خودش را دارد که با عبارت عبور قفل
+  است و اپراتور نامش را در فهرست امضاشدهٔ خانواده می‌آورد. کارهایی که می‌توانند آسیب
+  بزنند (کاربران، رمز پنل، شریک‌ها، Gatewayها، ری‌استارت، به‌روزرسانی، پشتیبان) با این
+  کلید امضا می‌شوند و هر رله امضا را بررسی می‌کند. لپ‌تاپ گم‌شده تنها کنار گذاشته
+  می‌شود.
+- **قفل سرور:** با قفل، کارهای حساس یک سرور فقط با امضا انجام می‌شوند؛ پس اگر رمز پنل
+  لو برود، از وب به آن‌ها نمی‌رسد. قفل فقط از راه SSH تنظیم می‌شود و پیش‌فرض خاموش
+  است، پس تا روشنش نکنید هیچ چیزی عوض نمی‌شود.
+- **برای هر کسی که خودش میزبانی می‌کند:** با همان `deploy.conf`، یک سرور یا چند سرور.
+- **اصلاح‌های اتصال به اپراتورهای دیگر:** جست‌وجو و درخواست پنل هم به نشانی‌های شبکهٔ
+  خصوصی نمی‌روند، شریک‌های قدیمیِ قطع‌شده پس از ۳۰ روز کوچک ثبت می‌مانند تا هرگز
+  دوباره زنده نشوند، و داده‌ای که رله‌های یک خانواده دربارهٔ شریکی به هم می‌دهند باید
+  با فهرست امضاشدهٔ همان شریک بخواند.
+
+- **Every server in one place:** `node tools/control-panel.mjs` runs on the
+  admin's own computer and shows every server in `deploy.conf` on one page:
+  state, version, load, memory, disk, people online, relay links, family and
+  partners. Each server's full dashboard opens with one click and no password,
+  and updates (one server at a time), backups and alert tests run for all of
+  them at once.
+- **No door opened on any server:** the panel reaches each dashboard over SSH
+  with the deploy key, dashboard passwords live only in memory, and the page
+  opens only on 127.0.0.1, through a one-time link.
+- **Signed dangerous actions:** each computer has its own admin key, sealed
+  under a passphrase and listed by the operator in the family's signed
+  directory. The actions that can do harm (users, the dashboard password,
+  partners, gateways, restarts, updates, backups) are signed with it, and every
+  relay checks the signature. A lost laptop is dropped on its own.
+- **Locking a server:** a locked server takes its dangerous actions only
+  signed, so a dashboard password that leaks no longer reaches them from the
+  web. The lock is set only over SSH and is off by default, so nothing changes
+  until you turn it on.
+- **For anyone who self-hosts:** the same `deploy.conf`, one server or many.
+- **Linking with other operators, fixes:** the dashboard's lookup and request
+  keep off private addresses too, partners disconnected long ago shrink to a
+  small record after 30 days so they can never come back, and what one relay
+  of a family tells another about a partner has to match that partner's signed
+  directory.
+
+---
+
+# P00RIJA Cryptography 2.98.77
+
+Version 2.98.77 · build chat-v170
 
 ---
 
