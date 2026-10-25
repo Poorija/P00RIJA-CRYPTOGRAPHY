@@ -528,6 +528,52 @@ reach (one in Iran, seen from outside) still hears of it. The list is public at
 **Keep the operator key safe.** Whoever holds it can add a relay to your
 family; whoever loses it has to sign a new family with a new key.
 
+### Linking with other operators (from 2.98.77)
+
+A family can link with families that other operators run. The two meet only
+at their **gateways**: a few servers each family names, in priority order.
+Everybody else in a family reaches the other family through its own
+gateways, so a relay inside Iran that is not a gateway never holds a link
+outside its family.
+
+**Choosing gateways.** `<NAME>_GATEWAY=1` (then `2`, …) in `deploy.conf`
+signs them into the directory; the dashboard's family table can change them
+any time (Save gateways), and "Use the deploy settings" goes back. A single
+server is a family of one and its own gateway. Partners follow a change by
+themselves, without approving anything again; the old gateway keeps its
+links until the new one's stand (`CHAT_GATEWAY_HANDOFF_MS`, two minutes at
+most).
+
+**Asking.** Relays tab → Other operators: type the address of one of their
+relays (a gateway's is the safe choice), Look up, check who it is, Send link
+request. From then on your gateways accept theirs.
+
+**Being asked.** The request shows on every relay's dashboard, and Telegram
+says so if alerts are set up. Approve or Reject (a rejected operator's further
+requests are stored quietly for 30 days); Disconnect at any time. A button
+pressed on any relay holds on all of them.
+
+**What links.** Every gateway of one family with every gateway of the other,
+all at once. Traffic leaves through the best of them: one whose link has
+stood for `CHAT_GATEWAY_STABLE_MS` (a minute) before one that just came back,
+then the lower number. When a link drops, the next message already goes
+through the next gateway; when it comes back and stays up a minute, it takes
+over again. Messages stay sealed to the relay they are for all the way.
+
+**Through a common partner.** With "Carry traffic between my partners" on (off
+by default), two of your partners that approved each other may reach each
+other through you while their own link is not settled. You see what any
+carrier sees, sizes and times, never content. Each family's partner list is
+signed by its own relay, so nobody in between can claim a partnership it does
+not have.
+
+**Safety.** A join request is signed by the relay that sends it, meant for
+your operator alone, and fresh; at most `CHAT_JOIN_PER_HOUR` (10) from one
+address and `CHAT_JOIN_WAITING_MAX` (20) waiting. A partner's gateway may send
+only traffic and news about its own family; nothing it sends changes your
+family. A partner's directory is never followed to a private, loopback or
+link-local address.
+
 ---
 
 ## 6. What each machine sees
@@ -1002,6 +1048,49 @@ Gateway شدن سرورها برای اتصال به رله‌های اپرات�
 
 **کلید اپراتور را امن نگه دارید.** هر کس آن را داشته باشد می‌تواند رله‌ای به
 خانوادهٔ شما اضافه کند؛ هر کس آن را گم کند باید با کلید تازه خانوادهٔ تازه امضا کند.
+
+### اتصال به اپراتورهای دیگر (از نسخهٔ 2.98.77)
+
+یک خانواده می‌تواند با خانواده‌هایی که اپراتورهای دیگر اداره می‌کنند لینک
+شود. این دو فقط از راه **Gatewayها** به هم می‌رسند: چند سروری که هر خانواده به
+ترتیب اولویت نام می‌برد. بقیهٔ رله‌های هر خانواده از راه Gatewayهای خودشان به
+خانوادهٔ دیگر می‌رسند؛ پس رله‌ای داخل ایران که Gateway نیست هرگز لینکی بیرون از
+خانواده‌اش نمی‌گیرد.
+
+**انتخاب Gatewayها.** `<NAME>_GATEWAY=1` (و بعد `2`، …) در `deploy.conf` آن‌ها را
+در فهرست امضا می‌کند؛ جدول خانواده در پنل هر وقت بخواهید عوضشان می‌کند («ذخیرهٔ
+Gatewayها») و «تنظیمات استقرار» برمی‌گرداند. یک سرور تنها، خانوادهٔ یک‌نفره و
+Gateway خودش است. شریک‌ها خودشان با تغییر هماهنگ می‌شوند و تأیید دوباره لازم
+نیست؛ Gateway قدیمی تا بالا آمدن لینک‌های Gateway تازه باز می‌ماند
+(`CHAT_GATEWAY_HANDOFF_MS`، حداکثر دو دقیقه).
+
+**درخواست دادن.** زبانهٔ رله‌ها ← اپراتورهای دیگر: نشانی یکی از رله‌های آن‌ها را
+بنویسید (نشانی یک Gateway مطمئن‌تر است)، جست‌وجو کنید، ببینید کیست و درخواست
+اتصال بفرستید. از همین لحظه Gatewayهای شما Gatewayهای آن‌ها را می‌پذیرند.
+
+**درخواست گرفتن.** درخواست در پنل همهٔ رله‌ها دیده می‌شود و اگر هشدارها راه افتاده
+باشد، تلگرام هم خبر می‌دهد. تأیید یا رد کنید (درخواست‌های بعدی اپراتور ردشده تا
+۳۰ روز بی‌صدا ثبت می‌شوند)؛ «قطع ارتباط» هم هر وقت بخواهید. دکمه‌ای که در پنل هر
+رله بزنید، روی همهٔ رله‌های خانواده اعمال می‌شود.
+
+**چه چیزی لینک می‌شود.** همهٔ Gatewayهای یک خانواده با همهٔ Gatewayهای دیگری،
+هم‌زمان. ترافیک از بهترینشان می‌رود: اول آن‌که لینکش `CHAT_GATEWAY_STABLE_MS`
+(یک دقیقه) پایدار مانده، بعد شمارهٔ کوچک‌تر. اگر لینکی قطع شود، پیام بعدی بی‌درنگ
+از Gateway بعدی می‌رود و وقتی برگشت و یک دقیقه پایدار ماند، دوباره نقش را
+می‌گیرد. پیام تا رلهٔ مقصد مهروموم می‌ماند.
+
+**از طریق شریک مشترک.** اگر «حمل ترافیک بین شریک‌هایم» روشن باشد (پیش‌فرض
+خاموش)، دو شریک شما که هم‌دیگر را تأیید کرده‌اند، وقتی لینک خودشان پایدار نیست،
+می‌توانند از راه شما به هم برسند. شما همان را می‌بینید که هر حامل دیگری می‌بیند:
+اندازه و زمان، نه محتوا. فهرست شریک‌های هر خانواده را رلهٔ خود آن خانواده امضا
+می‌کند، پس هیچ واسطه‌ای نمی‌تواند شراکتی را که ندارد ادعا کند.
+
+**امنیت.** درخواست اتصال را رلهٔ فرستنده امضا می‌کند، فقط برای اپراتور شماست و
+تازه است؛ از هر نشانی حداکثر `CHAT_JOIN_PER_HOUR` (۱۰) در ساعت و حداکثر
+`CHAT_JOIN_WAITING_MAX` (۲۰) درخواست در انتظار. Gateway شریک فقط ترافیک و خبر
+خانوادهٔ خودش را می‌تواند بفرستد و هیچ‌چیزی که بفرستد خانوادهٔ شما را تغییر
+نمی‌دهد. نشانی‌های شبکهٔ خصوصی، loopback یا link-local در فهرست یک شریک هرگز دنبال
+نمی‌شوند.
 
 ### ۶. هر ماشین چه می‌بیند
 

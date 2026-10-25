@@ -282,6 +282,28 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
           <th data-t="colName">نام</th><th data-t="colId">شناسه</th><th data-t="colRegion">منطقه</th><th>Gateway</th><th data-t="colState">وضعیت</th>
         </tr></thead><tbody></tbody></table></div>
         <div class="hint mono" id="tFamilyRevoked" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:10px;gap:8px;align-items:center">
+          <button class="btn acc" id="tGatewaysSave"><i class="fas fa-route"></i><span data-t="gwSave">ذخیرهٔ Gatewayها</span></button>
+          <button class="btn" id="tGatewaysReset"><i class="fas fa-rotate-left"></i><span data-t="gwReset">تنظیمات استقرار</span></button>
+          <span class="hint" id="tGatewaysHint"></span>
+        </div>
+      </div>
+      <div class="card" id="tPartners">
+        <h3><i class="fas fa-handshake"></i><span data-t="partners">اپراتورهای دیگر</span> <span class="tag mut" id="tPartnersStatus"></span></h3>
+        <div class="hint" style="margin-bottom:10px"><span data-t="partnersHint">خانواده‌های رلهٔ اپراتورهای دیگر که با تأیید ادمین، فقط از راه Gatewayها با این خانواده لینک می‌شوند. هر دکمه روی همهٔ رله‌های خانواده اعمال می‌شود.</span></div>
+        <div class="hint" id="tPartnersMissing" style="display:none;margin-bottom:10px"></div>
+        <div class="row" style="margin-bottom:10px">
+          <input type="text" id="tPartnerOrigin" placeholder="https://relay.example.com:8585" style="direction:ltr;min-width:280px">
+          <button class="btn" id="tPartnerLookup"><i class="fas fa-magnifying-glass"></i><span data-t="lookup">جست‌وجو</span></button>
+        </div>
+        <div class="row" style="margin-bottom:10px;gap:8px;align-items:center">
+          <span class="hint" id="tPartnerFound" style="display:none"></span>
+          <button class="btn acc" id="tPartnerSend" style="display:none"><i class="fas fa-paper-plane"></i><span data-t="sendRequest">ارسال درخواست اتصال</span></button>
+        </div>
+        <label class="row" style="gap:8px;margin:0 0 10px"><input type="checkbox" id="tCarryBetween"><span data-t="carryBetween">حمل ترافیک بین شریک‌هایم (برای دو شریکی که هم‌دیگر را تأیید کرده‌اند)</span></label>
+        <div style="overflow:auto"><table id="tPartnersTable"><thead><tr>
+          <th data-t="colName">نام</th><th data-t="colId">شناسه</th><th data-t="colState">وضعیت</th><th data-t="colLinks">لینک Gatewayها</th><th data-t="colPath">مسیر</th><th></th>
+        </tr></thead><tbody></tbody></table></div>
       </div>
       <div class="card">
         <h3><i class="fas fa-diagram-project"></i><span data-t>رله‌های همکار (Transit)</span> <span class="tag mut" id="tStatus"></span></h3>
@@ -480,6 +502,23 @@ const T = {
     family:'خانوادهٔ رله‌ها', familyHint:'رله‌هایی که اپراتور این رله در فهرست امضاشده‌اش آورده؛ خودکار با هم لینک می‌شوند و فهرست تازه بدون ری‌استارت اعمال می‌شود.',
     colName:'نام', colId:'شناسه', colRegion:'منطقه', colState:'وضعیت', insideIran:'داخل ایران', outsideIran:'خارج از ایران',
     thisRelay:'همین رله', revokedIds:'باطل‌شده', serial:'نسخه', operator:'اپراتور',
+    partners:'اپراتورهای دیگر', partnersHint:'خانواده‌های رلهٔ اپراتورهای دیگر که با تأیید ادمین، فقط از راه Gatewayها با این خانواده لینک می‌شوند. هر دکمه روی همهٔ رله‌های خانواده اعمال می‌شود.',
+    partnersNoFamily:'این رله کلید اپراتور یا فهرست خانواده ندارد؛ با scripts/deploy.sh مستقر کنید تا خانواده ساخته شود.',
+    partnersNoGateway:'خانواده هیچ Gatewayی ندارد. در جدول خانواده یک رله را Gateway کنید، یا در deploy.conf مقدار <NAME>_GATEWAY را بگذارید و دوباره مستقر کنید.',
+    lookup:'جست‌وجو', sendRequest:'ارسال درخواست اتصال', carryBetween:'حمل ترافیک بین شریک‌هایم (برای دو شریکی که هم‌دیگر را تأیید کرده‌اند)',
+    colLinks:'لینک Gatewayها', colPath:'مسیر',
+    stRequested:'منتظر تأیید آن‌ها', stIncoming:'درخواست اتصال', stLinked:'متصل', stApproved:'تأییدشده', stRejected:'ردشده', stRemoved:'قطع‌شده',
+    approve:'تأیید', reject:'رد', cancelReq:'لغو درخواست', disconnect:'قطع ارتباط',
+    confirmApprove:'این اپراتور تأیید شود؟ Gatewayهای دو خانواده به هم وصل می‌شوند.',
+    confirmReject:'درخواست رد شود؟ درخواست‌های بعدی این اپراتور تا ۳۰ روز بی‌صدا رد می‌شوند.',
+    confirmDisconnect:'ارتباط با این اپراتور قطع شود؟ همهٔ لینک‌ها با آن بسته می‌شوند.',
+    confirmSend:'درخواست اتصال برای این اپراتور فرستاده شود؟ از همین حالا Gatewayهای ما Gatewayهای آن را می‌پذیرند.',
+    confirmCarryOn:'حمل ترافیک بین شریک‌ها روشن شود؟ پهنای باند این خانواده برای آن‌ها مصرف می‌شود.',
+    pathDirect:'مستقیم', pathVia:'از طریق', noPartners:'هنوز شریکی نیست', foundRelays:'رله',
+    gwSave:'ذخیرهٔ Gatewayها', gwReset:'تنظیمات استقرار', gwFromDashboard:'Gatewayها از پنل انتخاب شده‌اند', gwFromDeploy:'Gatewayها از تنظیمات استقرار',
+    gwInsideIran:'رله‌ای داخل ایران Gateway می‌شود؛ رله‌های خارج از ایران معمولاً به آن دسترسی ندارند. ادامه؟',
+    gwNoneLeft:'هیچ Gatewayی نمی‌ماند و شریک‌ها راه ورود را از دست می‌دهند. ادامه؟',
+    confirmGwReset:'Gatewayها به تنظیمات استقرار برگردند؟',
     msgsIn:'پیام دریافتی', msgsOut:'پیام ارسالی', bytesIn:'دریافتی', bytesOut:'ارسالی', ok:'انجام شد', fail:'ناموفق',
     confirmClear:'کل صف آفلاین پاک شود؟', confirmRestore:'این بکاپ روی درخت نصب باز شود؟ (ابتدا بکاپ ایمنی گرفته می‌شود)',
     confirmDelete:'حذف شود؟', confirmRestart:'کل استک ری‌استارت شود؟ همهٔ اتصال‌ها لحظه‌ای قطع می‌شوند.' },
@@ -490,6 +529,23 @@ const T = {
     family:'Relay family', familyHint:'The relays in the signed directory of this relay’s operator; they link with each other by themselves, and a new directory applies without a restart.',
     colName:'Name', colId:'Id', colRegion:'Region', colState:'State', insideIran:'inside Iran', outsideIran:'outside Iran',
     thisRelay:'this relay', revokedIds:'revoked', serial:'serial', operator:'operator',
+    partners:'Other operators', partnersHint:'Other operators’ relay families, linked with this family only through gateways and only once an admin approves. Every button here holds on every relay of the family.',
+    partnersNoFamily:'This relay has no operator key or family directory; deploy with scripts/deploy.sh to make one.',
+    partnersNoGateway:'The family has no gateway. Make a relay a gateway in the family table above, or set <NAME>_GATEWAY in deploy.conf and deploy again.',
+    lookup:'Look up', sendRequest:'Send link request', carryBetween:'Carry traffic between my partners (for two partners that approved each other)',
+    colLinks:'Gateway links', colPath:'Path',
+    stRequested:'waiting for them', stIncoming:'asks to link', stLinked:'linked', stApproved:'approved', stRejected:'rejected', stRemoved:'disconnected',
+    approve:'Approve', reject:'Reject', cancelReq:'Cancel', disconnect:'Disconnect',
+    confirmApprove:'Approve this operator? The two families’ gateways will link.',
+    confirmReject:'Reject the request? Further requests from this operator are refused quietly for 30 days.',
+    confirmDisconnect:'Disconnect from this operator? Every link with it closes.',
+    confirmSend:'Send a link request to this operator? From now on our gateways accept theirs.',
+    confirmCarryOn:'Carry traffic between partners? This family’s bandwidth will be used for them.',
+    pathDirect:'direct', pathVia:'through', noPartners:'No partners yet', foundRelays:'relays',
+    gwSave:'Save gateways', gwReset:'Use the deploy settings', gwFromDashboard:'Gateways chosen in the dashboard', gwFromDeploy:'Gateways from the deploy settings',
+    gwInsideIran:'A relay inside Iran becomes a gateway; relays outside Iran usually cannot reach it. Continue?',
+    gwNoneLeft:'No gateway is left and partners lose their way in. Continue?',
+    confirmGwReset:'Go back to the gateways in the deploy settings?',
     msgsIn:'Messages in', msgsOut:'Messages out', bytesIn:'Received', bytesOut:'Sent', ok:'Done', fail:'Failed',
     confirmClear:'Drop the ENTIRE offline queue?', confirmRestore:'Restore this backup over the install tree? (a safety snapshot is taken first)',
     confirmDelete:'Delete?', confirmRestart:'Restart the whole stack? Every connection drops for a moment.' },
@@ -982,22 +1038,63 @@ $('clTemps').addEventListener('click', async () => { const result = await api('/
 /* ---------- relays ---------- */
 /* The family, when the relay has a directory: who is in it, and whether each
    member is linked right now. */
-function renderFamily(directory) {
+function renderFamily(directory, self) {
   $('tFamily').style.display = directory ? '' : 'none';
   if (!directory) return;
+  /* The gateways in force: the dashboard's choice when there is one, the
+     directory's otherwise. */
+  const chosen = {};
+  for (const gateway of (self && self.gateways) || []) chosen[gateway.id] = gateway.priority;
+  const priorityOf = (relay) => (self ? (chosen[String(relay.id).slice(0, 16)] || 0) : (relay.gateway || 0));
+  const gatewaySelect = (relay) => '<select data-gw-id="' + esc(relay.id) + '" data-gw-region="' + esc(relay.region || '') + '">' +
+    [0, 1, 2, 3, 4, 5].map((n) => '<option value="' + n + '"' + (n === priorityOf(relay) ? ' selected' : '') + '>' + (n ? n : '—') + '</option>').join('') + '</select>';
   $('tFamilyStatus').textContent = t('operator') + ': ' + (directory.operator?.name || '') + ' · ' + String(directory.operator?.id || '').slice(0, 16) + '… · ' + t('serial') + ' ' + directory.serial + (directory.issuedAt ? ' · ' + new Date(directory.issuedAt).toLocaleString() : '');
   $('tFamilyTable').querySelector('tbody').innerHTML = (directory.relays || []).map((relay) =>
     '<tr><td>' + esc(relay.name || '—') + '</td><td class="mono">' + esc(String(relay.id).slice(0, 16)) + '…</td>' +
     '<td>' + esc(relay.region === 'inside-iran' ? t('insideIran') : relay.region === 'outside-iran' ? t('outsideIran') : (relay.region || '—')) + '</td>' +
-    '<td>' + (relay.gateway ? esc(String(relay.gateway)) : '—') + '</td>' +
+    '<td>' + gatewaySelect(relay) + '</td>' +
     '<td>' + (relay.self ? '<span class="tag mut">' + t('thisRelay') + '</span>' : relay.linked ? '<span class="tag good">' + t('linked') + '</span>' : '<span class="tag bad">' + t('down') + '</span>') + '</td></tr>'
   ).join('');
   $('tFamilyRevoked').textContent = (directory.revoked || []).length ? t('revokedIds') + ': ' + directory.revoked.map((id) => String(id).slice(0, 16) + '…').join(', ') : '';
 }
 
+let partnersInfo = { self: {}, partners: [] };
+let partnerFound = null;
+const PARTNER_STATE = { requested: 'stRequested', incoming: 'stIncoming', approved: 'stApproved', rejected: 'stRejected', removed: 'stRemoved' };
+function renderPartners(info) {
+  partnersInfo = info || { self: {}, partners: [] };
+  const self = partnersInfo.self || {};
+  const list = partnersInfo.partners || [];
+  $('tPartnersStatus').textContent = self.operatorId ? (self.name || '') + ' · ' + self.operatorId.slice(0, 16) + '…' : '';
+  const missing = !self.operatorId ? t('partnersNoFamily') : (!(self.gateways || []).length ? t('partnersNoGateway') : '');
+  $('tPartnersMissing').textContent = missing;
+  $('tPartnersMissing').style.display = missing ? '' : 'none';
+  $('tCarryBetween').checked = Boolean(self.carryBetween);
+  $('tGatewaysHint').textContent = self.chosenInDashboard ? t('gwFromDashboard') : t('gwFromDeploy');
+  const nameOf = (prefix) => (list.find((entry) => entry.operatorId.slice(0, 16) === prefix) || {}).name || prefix;
+  const button = (act, op, cls, icon, key) => '<button class="btn ' + cls + '" data-p-act="' + act + '" data-p-op="' + esc(op) + '"><i class="fas ' + icon + '"></i><span>' + t(key) + '</span></button>';
+  const rows = list.map((entry) => {
+    const linkedNow = (entry.gateways || []).some((gateway) => gateway.linked) || Boolean(entry.carrying);
+    const stateKey = entry.state === 'approved' && linkedNow ? 'stLinked' : (PARTNER_STATE[entry.state] || entry.state);
+    const links = (entry.gateways || []).map((gateway) => esc((gateway.name || gateway.id) + ' #' + gateway.priority) + ' ' +
+      (gateway.linked ? '<span class="tag good">' + t('linked') + '</span>' : '<span class="tag bad">' + t('down') + '</span>')).join('<br>') || '—';
+    const path = entry.path === 'direct' ? t('pathDirect') : (String(entry.path || '').indexOf('via:') === 0 ? t('pathVia') + ' ' + esc(nameOf(entry.path.slice(4))) : '—');
+    const actions = entry.state === 'incoming' ? button('approve', entry.operatorId, 'acc', 'fa-check', 'approve') + ' ' + button('reject', entry.operatorId, 'bad', 'fa-xmark', 'reject')
+      : entry.state === 'requested' ? button('remove', entry.operatorId, '', 'fa-ban', 'cancelReq')
+      : entry.state === 'approved' ? button('remove', entry.operatorId, 'bad', 'fa-unlink', 'disconnect')
+      : entry.state === 'rejected' ? button('approve', entry.operatorId, '', 'fa-check', 'approve') : '';
+    return '<tr><td>' + esc(entry.name || '—') + '</td><td class="mono">' + esc(entry.operatorId.slice(0, 16)) + '…</td>' +
+      '<td><span class="tag ' + (stateKey === 'stLinked' ? 'good' : stateKey === 'stIncoming' ? 'warn' : 'mut') + '">' + t(stateKey) + '</span></td>' +
+      '<td>' + links + '</td><td>' + path + '</td><td>' + actions + '</td></tr>';
+  });
+  $('tPartnersTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">' + t('noPartners') + '</td></tr>';
+}
+
 async function loadTransit() {
   const data = await api('/Monitor_Server/transit');
-  renderFamily(data.directory || null);
+  const info = await api('/Monitor_Server/partners').catch(() => null);
+  renderFamily(data.directory || null, info && info.self && info.self.operatorId ? info.self : null);
+  renderPartners(info);
   const status = data.status || {};
   $('tStatus').textContent = 'allowed: ' + (status.allowed ?? 0) + ' · up: ' + (status.up ?? 0);
   const rows = (data.peers || []).map((peer) =>
@@ -1019,6 +1116,68 @@ $('tTable').addEventListener('click', async (event) => {
   const remove = event.target.closest('[data-t-remove]');
   if (!remove || !confirmKey('confirmDelete')) return;
   await api('/Monitor_Server/transit-remove', { id: remove.getAttribute('data-t-remove') });
+  loadTransit();
+});
+$('tGatewaysSave').addEventListener('click', async () => {
+  const picks = Array.from(document.querySelectorAll('[data-gw-id]'))
+    .map((select) => ({ id: select.getAttribute('data-gw-id'), priority: Number(select.value), region: select.getAttribute('data-gw-region') }))
+    .filter((pick) => pick.priority > 0);
+  if (picks.some((pick) => pick.region === 'inside-iran') && !confirmKey('gwInsideIran')) return;
+  const partnered = (partnersInfo.partners || []).some((entry) => entry.state === 'approved' || entry.state === 'requested');
+  if (!picks.length && partnered && !confirmKey('gwNoneLeft')) return;
+  const result = await api('/Monitor_Server/gateways', { gateways: picks.map((pick) => ({ id: pick.id, priority: pick.priority })) });
+  toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
+  loadTransit();
+});
+$('tGatewaysReset').addEventListener('click', async () => {
+  if (!confirmKey('confirmGwReset')) return;
+  const result = await api('/Monitor_Server/gateways', { reset: true });
+  toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
+  loadTransit();
+});
+$('tPartnerLookup').addEventListener('click', async () => {
+  const origin = $('tPartnerOrigin').value.trim();
+  const found = await api('/Monitor_Server/partners/lookup', { origin });
+  if (!found.ok) {
+    partnerFound = null;
+    $('tPartnerFound').style.display = 'none';
+    $('tPartnerSend').style.display = 'none';
+    toast(t('fail') + ' ' + (found.reason || ''), 'err');
+    return;
+  }
+  partnerFound = { origin, id: found.operator.id };
+  $('tPartnerFound').textContent = (found.operator.name || '—') + ' · ' + found.operator.id.slice(0, 16) + '… · ' + t('serial') + ' ' + found.serial +
+    ' · ' + found.relays + ' ' + t('foundRelays') + ' · Gateway: ' + ((found.gateways || []).map((gateway) => (gateway.name || gateway.id.slice(0, 8)) + ' #' + gateway.priority).join(', ') || '—');
+  $('tPartnerFound').style.display = '';
+  $('tPartnerSend').style.display = found.state === 'approved' || found.state === 'requested' ? 'none' : '';
+});
+$('tPartnerSend').addEventListener('click', async () => {
+  if (!partnerFound || !confirmKey('confirmSend')) return;
+  const result = await api('/Monitor_Server/partners/request', { origin: partnerFound.origin, operatorId: partnerFound.id });
+  toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
+  if (result.ok) {
+    partnerFound = null;
+    $('tPartnerOrigin').value = '';
+    $('tPartnerFound').style.display = 'none';
+    $('tPartnerSend').style.display = 'none';
+  }
+  loadTransit();
+});
+$('tCarryBetween').addEventListener('change', async () => {
+  const on = $('tCarryBetween').checked;
+  if (on && !confirmKey('confirmCarryOn')) { $('tCarryBetween').checked = false; return; }
+  const result = await api('/Monitor_Server/partners/carry', { on });
+  toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
+  loadTransit();
+});
+$('tPartnersTable').addEventListener('click', async (event) => {
+  const action = event.target.closest('[data-p-act]');
+  if (!action) return;
+  const act = action.getAttribute('data-p-act');
+  const confirmFor = { approve: 'confirmApprove', reject: 'confirmReject', remove: 'confirmDisconnect' };
+  if (!confirmFor[act] || !confirmKey(confirmFor[act])) return;
+  const result = await api('/Monitor_Server/partners/' + act, { operatorId: action.getAttribute('data-p-op') });
+  toast(result.ok ? t('ok') : t('fail') + ' ' + (result.reason || ''), result.ok ? 'ok' : 'err');
   loadTransit();
 });
 

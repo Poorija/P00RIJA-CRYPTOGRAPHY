@@ -111,6 +111,13 @@ services:
       CHAT_OPERATOR_KEY: ${CHAT_OPERATOR_KEY:-}
       CHAT_DIRECTORY_SOURCES: ${CHAT_DIRECTORY_SOURCES:-}
       CHAT_DIRECTORY_MIN_SERIAL: ${CHAT_DIRECTORY_MIN_SERIAL:-0}
+      # Partners (other operators' families): how long a gateway's link must
+      # stand before it carries again, and how long a gateway taken off keeps
+      # its partner links while the new one comes up.
+      CHAT_GATEWAY_STABLE_MS: ${CHAT_GATEWAY_STABLE_MS:-60000}
+      CHAT_GATEWAY_HANDOFF_MS: ${CHAT_GATEWAY_HANDOFF_MS:-120000}
+      CHAT_JOIN_PER_HOUR: ${CHAT_JOIN_PER_HOUR:-10}
+      CHAT_JOIN_WAITING_MAX: ${CHAT_JOIN_WAITING_MAX:-20}
       # Only for a link to a relay whose certificate this one cannot verify --
       # a self-signed staging box. Never on a real deployment: the link's own
       # handshake authenticates the far relay, but TLS is what stops the dial

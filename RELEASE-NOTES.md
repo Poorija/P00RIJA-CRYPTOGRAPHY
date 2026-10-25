@@ -1,10 +1,68 @@
-# P00RIJA Cryptography 2.98.76
+# P00RIJA Cryptography 2.98.77
 
-Version 2.98.76 · build chat-v169
+Version 2.98.77 · build chat-v170
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## اتصال به اپراتورهای دیگر · Linking with other operators
+
+- **خانواده‌های رلهٔ اپراتورهای مختلف با تأیید ادمین به هم وصل می‌شوند.** ادمین در پنل
+  نشانی رلهٔ اپراتور دیگر را می‌زند، می‌بیند کیست و درخواست اتصال می‌فرستد. درخواست در
+  پنل همهٔ رله‌های طرف مقابل دیده می‌شود و تلگرام هم خبر می‌دهد؛ ادمین آن طرف در پنل
+  تأیید یا رد می‌کند و هر وقت بخواهد ارتباط را قطع می‌کند.
+- **فقط Gatewayها به هم وصل می‌شوند.** هر خانواده چند سرور را با اولویت Gateway می‌کند؛
+  بقیهٔ سرورها، از جمله سرور داخلی، از راه همین Gatewayها به خانوادهٔ دیگر می‌رسند و
+  هرگز لینک بیرونی نمی‌گیرند. همهٔ Gatewayها هم‌زمان وصل‌اند: اگر یکی قطع شود، پیام بعدی
+  بی‌درنگ از بعدی می‌رود و وقتی برگشت و یک دقیقه پایدار ماند، دوباره نقش را می‌گیرد.
+- **Gatewayها از پنل هم انتخاب می‌شوند**، هر وقت بخواهید؛ خانوادهٔ مقابل خودش و بدون
+  تأیید دوباره با Gateway تازه هماهنگ می‌شود و Gateway قدیمی تا وصل شدن تازه باز می‌ماند.
+- **از طریق شریک مشترک:** اگر روشن کنید، دو شریک شما که هم‌دیگر را تأیید کرده‌اند،
+  وقتی لینک خودشان پایدار نیست، از راه خانوادهٔ شما به هم می‌رسند؛ محتوا همیشه مهروموم
+  می‌ماند.
+- **امن:** درخواست‌ها امضا، تاریخ‌دار و فقط برای یک اپراتورند، سقف تعداد دارند و تکرار
+  نمی‌شوند؛ شریک فقط ترافیک و خبر خانوادهٔ خودش را می‌فرستد و هیچ‌چیزی در خانوادهٔ شما
+  تغییر نمی‌دهد؛ نشانی‌های شبکهٔ خصوصی در فهرست شریک هرگز دنبال نمی‌شوند.
+- **برای هر کسی که خودش میزبانی می‌کند:** حتی یک سرور تنها با `scripts/deploy.sh` یک
+  خانوادهٔ یک‌نفره و Gateway خودش می‌شود تا بتواند با دیگران وصل شود.
+- **اصلاح:** رله‌ای که ابزار اپراتور یا `scripts/link-relays.sh` ری‌استارت می‌کند، مسیر
+  نصب، مسیر پشتیبان و نسخه را نگه می‌دارد تا پشتیبان‌گیری و کارهای پنل از کار نیفتد.
+
+- **Relay families run by different operators link once an admin approves.**
+  The admin types the address of another operator's relay in the dashboard,
+  sees who it is, and sends a link request. The request shows on every relay
+  of the other family, Telegram says so, and their admin approves or rejects
+  it in the dashboard and can disconnect at any time.
+- **Only gateways link.** Each family names a few servers as gateways, in
+  order; every other server, the server inside Iran included, reaches the
+  other family through them and never holds a link outside its own. All
+  gateways are linked at once: when one drops, the next message already goes
+  through the next one, and a gateway that comes back takes over again once
+  it has stayed up for a minute.
+- **Gateways can be chosen in the dashboard** at any time; the other family
+  follows by itself, without approving again, and the old gateway stays up
+  until the new one has linked.
+- **Through a common partner:** when you turn it on, two of your partners that
+  approved each other reach each other through your family while their own
+  link is not settled; content stays sealed throughout.
+- **Safe:** requests are signed, dated, meant for one operator, limited, and
+  cannot be replayed; a partner sends only traffic and news about its own
+  family and changes nothing in yours; a partner's directory is never followed
+  to a private address.
+- **For anyone who self-hosts:** even a single server becomes a family of one,
+  and its own gateway, through `scripts/deploy.sh`, so it can link with others.
+- **Fix:** a relay restarted by the operator tool or `scripts/link-relays.sh`
+  keeps its install and backup paths and version, so backups and dashboard
+  jobs keep working.
+
+---
+
+# P00RIJA Cryptography 2.98.76
+
+Version 2.98.76 · build chat-v169
 
 ---
 

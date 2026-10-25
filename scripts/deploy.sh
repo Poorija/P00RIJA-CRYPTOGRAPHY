@@ -224,6 +224,32 @@ SSH_HOST=""; SSH_USER=""; SSH_PORT=""; SSH_KEY=""; REMOTE_DIR=""; PUBLIC_URL=""
 SERVERS=""
 load_config
 
+# ---------------------------------------------------------------- the family
+#
+# The servers in one settings file are one operator's relays, and they link
+# with each other by themselves once they share a signed directory
+# (docs/RELAY-NETWORK.md, "Relay families"). The first time, this makes the
+# operator key on this machine and says where it is; after that it adds any
+# server the directory lacks, signs when the list changed, and hands the
+# directory to every server. A single server is a family of one and its own
+# gateway, which is what lets it link with other operators' relays later. A
+# failure here leaves the deployment itself as it was. POORIJA_DIRECTORY=0
+# turns it off.
+family_sync() {
+    [ "${POORIJA_DIRECTORY:-1}" != "0" ] || return 0
+    [ "$MODE" != "check" ] && [ "$MODE" != "dry-run" ] || return 0
+    echo
+    log "Relay family: the signed directory of these servers"
+    if ! command -v node >/dev/null 2>&1; then
+        warn "node is not installed here, so the directory was not updated"
+    elif POORIJA_CONFIG_DIR="$CONFIG_DIR" node "$(dirname "$0")/../tools/relay-directory.mjs" sync; then
+        ok "every server has the family's directory"
+    else
+        warn "the directory did not reach every server directly; the relays pass it on themselves"
+        echo "  To hand it over again: node tools/relay-directory.mjs publish"
+    fi
+}
+
 # --------------------------------------------------------------- more than one
 #
 # Two servers that are meant to stay in step have to be deployed from one tree
@@ -326,28 +352,7 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         OVERALL=1
     fi
 
-    # ---------------------------------------------------------- the family
-    #
-    # Two or more servers in one settings file are one operator's relays, and
-    # they link with each other by themselves once they share a signed
-    # directory (docs/RELAY-NETWORK.md, "Relay families"). The first time,
-    # this makes the operator key on this machine and says where it is; after
-    # that it adds any server the directory lacks, signs when the list
-    # changed, and hands the directory to every server. A failure here leaves
-    # the deployment itself as it was. POORIJA_DIRECTORY=0 turns it off.
-    set -- $SERVERS
-    if [ "${POORIJA_DIRECTORY:-1}" != "0" ] && [ "$#" -ge 2 ] && [ "$MODE" != "check" ] && [ "$MODE" != "dry-run" ]; then
-        echo
-        log "Relay family: the signed directory of these servers"
-        if ! command -v node >/dev/null 2>&1; then
-            warn "node is not installed here, so the directory was not updated"
-        elif POORIJA_CONFIG_DIR="$CONFIG_DIR" node "$(dirname "$0")/../tools/relay-directory.mjs" sync; then
-            ok "every server has the family's directory"
-        else
-            warn "the directory did not reach every server directly; the relays pass it on themselves"
-            echo "  To hand it over again: node tools/relay-directory.mjs publish"
-        fi
-    fi
+    family_sync
     exit $OVERALL
 fi
 
@@ -850,14 +855,22 @@ echo
 log "Checking what $PUBLIC_URL serves now"
 live_check
 live_status=$?
+# A single server, deployed on its own (not as one of SERVERS): a family of
+# one. A standalone relay keeps its own compose file and is left out.
+single_family() {
+    [ -z "${POORIJA_SERVER_NAME:-}" ] && [ -z "${SERVERS:-}" ] && [ "$ROLE" != "relay" ] && family_sync
+    return 0
+}
 if [ "$live_status" -eq 0 ] && [ "$deploy_status" -eq 0 ]; then
     echo
     ok "Deployed. PWA users get offline delivery on their next load."
+    single_family
     exit 0
 fi
 if [ "$live_status" -eq 2 ] && [ "$deploy_status" -eq 0 ]; then
     echo
     ok "Deployed and verified on the server."
+    single_family
     exit 0
 fi
 echo

@@ -324,4 +324,4 @@ async function linkPreview(raw) {
   return result;
 }
 
-module.exports = { linkPreview, checkedLink, isPublicAddress, readPage, cleanText, MAX_IMAGE_BYTES };
+module.exports = { linkPreview, checkedLink, isPublicAddress, isLocalName, readPage, cleanText, MAX_IMAGE_BYTES };

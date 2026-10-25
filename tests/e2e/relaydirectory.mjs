@@ -128,6 +128,14 @@ try {
     check('reads the servers and their fields out of deploy.conf',
       conf.servers.join() === 'fl,ir' && conf.fields('fl', 'SSH_HOST') === 'fl.example' && conf.fields('ir', 'REGION') === 'inside-iran' && conf.fields('ir', 'SSH_HOST') === '',
       JSON.stringify(conf.servers));
+    const lone = tool.parseDeployConf("SERVERS='solo'\nSOLO_PUBLIC_URL='https://solo.example:8585'\n");
+    check('a lone server becomes its own gateway', tool.serverEntry(lone, 'solo', null, { id: 'a'.repeat(64) }).gateway === 1
+      && tool.serverEntry(conf, 'fl', null, { id: 'a'.repeat(64) }).gateway === 0, JSON.stringify(tool.serverEntry(lone, 'solo', null, { id: 'a'.repeat(64) })));
+    const old = tool.parseDeployConf("SSH_HOST='x.example'\nSSH_USER='me'\nPUBLIC_URL='https://x.example:8585'\n");
+    check('a deploy.conf with no SERVERS line is one server, named “server”, and its own gateway',
+      old.servers.join() === 'server' && old.fields('server', 'SSH_HOST') === 'x.example' && old.fields('server', 'PUBLIC_URL') === 'https://x.example:8585'
+        && tool.serverEntry(old, 'server', null, { id: 'b'.repeat(64) }).gateway === 1 && conf.fields('fl', 'PUBLIC_URL') === 'https://fl.example:8585' && conf.fields('ir', 'PUBLIC_URL') === '',
+      JSON.stringify(old.servers));
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'poorija-operator-'));
     const made = tool.initKey(home, 'Test Operator');

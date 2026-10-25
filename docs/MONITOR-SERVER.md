@@ -166,6 +166,10 @@ curl -sSL http://SERVER:9080/install | bash -s -- http://SERVER:9080 <token> ~/p
 | `CHAT_ALERT_TELEGRAM_CHAT_ID` | — | چت تلگرامی که هشدارها به آن می‌رود (با `TELEGRAM_BOT_TOKEN`)؛ رلهٔ بدون این دو، هشدار را از لینک transit به رلهٔ دیگر می‌دهد |
 | `CHAT_ALERT_PEERS` | — | شناسهٔ رله‌هایی که هشدار به آن‌ها فرستاده یا از آن‌ها پذیرفته می‌شود (با کاما)؛ خالی یعنی هیچ‌کدام |
 | `CHAT_ALERT_LABEL` | نام میزبان | نام این رله در پیام‌های هشدار |
+| `CHAT_GATEWAY_STABLE_MS` | 60000 | مدتی که لینک یک Gateway باید پایدار بماند تا دوباره ترافیک ببرد |
+| `CHAT_GATEWAY_HANDOFF_MS` | 120000 | مدتی که Gateway کنارگذاشته‌شده لینک‌های شریک‌ها را تا بالا آمدن Gateway تازه نگه می‌دارد |
+| `CHAT_JOIN_PER_HOUR` | 10 | سقف درخواست اتصال از هر نشانی در ساعت |
+| `CHAT_JOIN_WAITING_MAX` | 20 | سقف درخواست‌های در انتظار تأیید |
 | `CHAT_ALERT_DISK_FREE_PCT` / `_GB` | 10 / 2 | هشدار دیسک زیر این درصد یا گیگابایت آزاد |
 | `CHAT_ALERT_MEMORY_FREE_PCT` | 10 | هشدار حافظهٔ سرور زیر این درصد آزاد |
 | `CHAT_ALERT_TURN_PCT` | 80 | هشدار وقتی این درصد از پورت‌های رلهٔ coturn گرفته شده باشد |

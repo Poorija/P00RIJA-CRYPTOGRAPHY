@@ -58,9 +58,13 @@ export function parseDeployConf(text) {
     if (match) values[match[1]] = match[2] ?? match[3] ?? match[4] ?? '';
   }
   const upper = (name) => String(name).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  /* A deploy.conf without a SERVERS line is the one-server format the deploy
+     has always read: its keys carry no prefix. It is a family of one here,
+     called "server". */
+  const single = !values.SERVERS && Boolean(values.SSH_HOST);
   return {
-    servers: String(values.SERVERS || '').split(/\s+/).filter(Boolean),
-    fields: (name, key) => values[`${upper(name)}_${key}`] || '',
+    servers: single ? ['server'] : String(values.SERVERS || '').split(/\s+/).filter(Boolean),
+    fields: (name, key) => values[`${upper(name)}_${key}`] || (single ? values[key] || '' : ''),
   };
 }
 
@@ -217,13 +221,15 @@ const say = (line) => process.stdout.write(`${line}\n`);
 function saveDraft(dir, draft) { writePrivate(path.join(dir, DRAFT_FILE), draft); }
 function saveSigned(dir, doc) { writePrivate(path.join(dir, SIGNED_FILE), doc); }
 
-function serverEntry(conf, name, existing, flags = {}) {
+export function serverEntry(conf, name, existing, flags = {}) {
   return {
     id: flags.id,
     name,
     origins: [flags.origin || conf.fields(name, 'PUBLIC_URL')].filter(Boolean),
     region: flags.region || conf.fields(name, 'REGION') || existing?.region || '',
-    gateway: flags.gateway ?? (conf.fields(name, 'GATEWAY') || existing?.gateway || 0),
+    /* A lone server is its own gateway: without one it could never link
+       with another operator's family. */
+    gateway: flags.gateway ?? (conf.fields(name, 'GATEWAY') || existing?.gateway || (conf.servers.length === 1 ? 1 : 0)),
   };
 }
 

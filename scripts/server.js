@@ -9,6 +9,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const net = require('net');
 const crypto = require('crypto');
 const os = require('os');
@@ -20,7 +21,7 @@ const express = require('express');
 const { ExpressPeerServer } = require('peer');
 const webpush = require('web-push');
 const { pushKindFor, pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions } = require('./lib/push-wording.js');
-const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey } = require('./lib/relay-identity.js');
+const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey, relayIdFor } = require('./lib/relay-identity.js');
 const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
 const { openTransit, transitFacts } = require('./lib/relay-transit.js');
 /* The 3.34 dashboard sheet the relay serves at /Monitor_Server — HTML lives
@@ -31,6 +32,7 @@ const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
 const { verifyDirectory, planChanges } = require('./lib/relay-directory.js');
+const partnerRules = require('./lib/relay-partners.js');
 const {
   alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram,
 } = require('./lib/relay-alerts.js');
@@ -178,21 +180,36 @@ const relayPrivate = relayPrivateKey(relayIdentity);
 /* The front door (scripts/lib/relay-front.js), set up just below. Declared
    first because the link callbacks reach it. */
 let frontDoor = null;
+/* Hosts a partner's directory named, which relay links may dial only at an
+   address that is not private. Filled where partner gateways are allowed. */
+const partnerHosts = new Set();
+const relayLinkLookup = partnerRules.guardedLookup({
+  resolve: (hostname) => dns.lookup(hostname, { all: true, verbatim: true }),
+  isPartnerHost: (hostname) => partnerHosts.has(String(hostname || '').toLowerCase()),
+  allowPrivate: process.env.CHAT_PARTNER_ALLOW_PRIVATE === '1',
+});
+class RelayLinkSocket extends WebSocket {
+  constructor(address, protocols, options) {
+    const opts = protocols && typeof protocols === 'object' && !Array.isArray(protocols) ? protocols : (options || {});
+    super(address, Array.isArray(protocols) ? protocols : [], { ...opts, lookup: relayLinkLookup });
+  }
+}
 const relayPeers = createRelayPeers({
   identity: publicRelayIdentity(relayIdentity),
   privateKey: relayPrivate,
   pqPrivateKey: relayPqPrivateKey(relayIdentity),
   allowlist: TRANSIT_PEERS.map((peer) => peer.id),
-  WebSocketImpl: WebSocket,
+  WebSocketImpl: RelayLinkSocket,
   fetchIdentity: makeIdentityFetcher({ verifyTls: TRANSIT_VERIFY_TLS }),
   verifyTls: TRANSIT_VERIFY_TLS,
   onFrame: (payload, link) => {
+    if (partnerFrameRefused(payload, link)) return;
     if (frontDoor?.onFrame(payload, link)) return;
     handleTransitFrame(payload, link);
   },
-  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); },
+  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); partnersLinkUp(link); },
   /* Function declarations below are hoisted, so this resolves at call time. */
-  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); },
+  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); partnersLinkDown(link); },
 });
 /* CHAT_FRONTS on the relay people can reach: `<relay id>@<public origin>` for
    each relay it answers for (nginx hands that origin's connections to
@@ -688,6 +705,9 @@ app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 const JSON_BODY_LIMIT = process.env.CHAT_JSON_BODY_LIMIT || '256kb';
 const JSON_BODY_LIMIT_RECORDS = process.env.CHAT_JSON_RECORD_LIMIT || '8mb';
 app.use('/self-destruct/records', express.json({ limit: JSON_BODY_LIMIT_RECORDS }));
+/* A join request from another operator's relay: a directory and a signature,
+   never anywhere near the general limit. */
+app.use('/relay-join', express.json({ limit: '64kb' }));
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 /* Express advertises itself in a header on every response, which tells an
@@ -4393,6 +4413,13 @@ app.get('/transit-peers', (req, res) => {
     /* The first of a "|"-separated list: clients route by id and key, and an
        operator's alternates for the link are the link's business. */
     .map((entry) => ({ id: entry.id, key: entry.key, origin: String(entry.origin || '').split('|')[0] }));
+  /* Then the relays of partner families this relay's gateways reach, so the
+     app's route discovery asks them too. */
+  const listed = new Set(peers.map((peer) => peer.id));
+  for (const [id, info] of reachView()) {
+    if (listed.has(id) || id === relayIdentity.id || !info.key) continue;
+    peers.push({ id, key: info.key, origin: info.origin, via: 'gateway' });
+  }
   res.json({ ok: true, self: relayIdentity.id, peers });
 });
 
@@ -4956,7 +4983,7 @@ function saveRuntimeTransitPeers() {
   /* Not the family a directory brought in: copied here, a relay later left
      out of the directory would come back at the next start as "manual". */
   const peers = relayPeers.peerEntries()
-    .filter(({ id }) => !directoryState.addedIds.has(id))
+    .filter(({ id }) => directoryState.manualIds.has(id) || (!directoryState.addedIds.has(id) && !partnerAllowed.has(id)))
     .map(({ id, origin }) => ({ id, origin }));
   try {
     fs.writeFileSync(TRANSIT_PEERS_STORE, JSON.stringify({ peers, updatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
@@ -5032,6 +5059,7 @@ function acceptDirectory(doc, source) {
     return verdict;
   }
   applyDirectory(doc);
+  partnersOnFamilyDirectory();
   if (source !== 'disk') {
     try {
       fs.writeFileSync(DIRECTORY_PATH, JSON.stringify(doc), { mode: 0o600 });
@@ -5100,16 +5128,1064 @@ app.post('/Monitor_Server/directory', authMiddleware, (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 });
 
+/* ---- partners: other operators' families (scripts/lib/relay-partners.js) ----
+ *
+ * Families run by different operators link only through their gateways, and
+ * only after the admin of the family that was asked approved
+ * (docs/RELAY-NETWORK.md, "Linking with other operators"). What this relay
+ * knows about partners it shares with its own family over the family links,
+ * so a button pressed on any relay's dashboard holds on all of them; nothing
+ * from outside the family can change it. A gateway allows the gateways of
+ * every partner it asked or approved; a relay that is not a gateway allows
+ * no partner relay at all.
+ */
+const PARTNERS_PATH = process.env.CHAT_PARTNERS_PATH || path.join(defaultDataDir, 'relay-partners.json');
+const GATEWAY_STABLE_MS = Math.max(0, Number(process.env.CHAT_GATEWAY_STABLE_MS || 60000));
+const GATEWAY_HANDOFF_MS = Math.max(1000, Number(process.env.CHAT_GATEWAY_HANDOFF_MS || 120000));
+/* Only for relays on one machine or one private network, such as the test
+   suites: otherwise a partner's directory may not send this relay to a
+   private, loopback or link-local address. */
+const PARTNER_ALLOW_PRIVATE = process.env.CHAT_PARTNER_ALLOW_PRIVATE === '1';
+const partnerOrigin = (origin) => partnerRules.safePartnerOrigin(origin, { allowPrivate: PARTNER_ALLOW_PRIVATE });
+function dialOrigins(origins) {
+  const safe = (origins || []).map(partnerOrigin).filter(Boolean);
+  for (const origin of safe) partnerHosts.add(new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase());
+  return safe.join('|');
+}
+const PARTNER_PULL_MS = Math.max(1000, Number(process.env.CHAT_PARTNER_PULL_MS || 300000));
+const JOIN_POLL_MS = Math.max(1000, Number(process.env.CHAT_JOIN_POLL_MS || 60000));
+const JOIN_PER_HOUR = Math.max(1, Number(process.env.CHAT_JOIN_PER_HOUR || 10));
+const JOIN_WAITING_MAX = Math.max(1, Number(process.env.CHAT_JOIN_WAITING_MAX || 20));
+const JOIN_MUTE_MS = 30 * 24 * 60 * 60 * 1000;
+const PARTNER_NOTICES_PER_HOUR = 10;
+/* Gateway changes of one partner reach Telegram at most once an hour. */
+const GATEWAY_NOTICE_GAP_MS = 3600000;
+const gatewayNoticeAt = new Map();
+/* What a partner's gateway may send. Everything else it sends (this
+   family's directory, its partner list, alerts, front-door streams) is not
+   a partner's to send. */
+const PARTNER_FRAME_KINDS = new Set(['transit', 'transit-result', 'partner-directory', 'partner-keys', 'partner-gateways', 'partner-list', 'partner-list-relay']);
+
+const partnerState = { entries: {}, override: null, carryBetween: null };
+/* The partner gateways this relay allowed, so it can take back exactly those. */
+const partnerAllowed = new Set();
+/* Which partner each relay id belongs to, rebuilt on every change. */
+let partnerIndex = new Map();
+/* Keys of partner relays, from their gateways; kept only when the key hashes
+   to an id that partner's directory names. */
+const partnerKeys = new Map();
+/* When the link to a relay came up, for choosing a gateway that has stood. */
+const linkUpSince = new Map();
+const partnerNoticeTimes = [];
+
+const familyIds = () => new Set((directoryState.doc?.body.relays || []).map((relay) => relay.id));
+function isFamilyPeer(id) {
+  return Boolean(id) && id !== relayIdentity.id && familyIds().has(id);
+}
+const ownGatewaySet = () => (directoryState.doc ? partnerRules.gatewaySet(directoryState.doc.body, partnerState.override?.gateways ? partnerState.override : null) : []);
+function selfIsGateway() {
+  return ownGatewaySet().some((gateway) => gateway.id === relayIdentity.id);
+}
+const ACTIVE_PARTNER = new Set(['requested', 'approved']);
+const activePartners = () => Object.values(partnerState.entries)
+  .filter((entry) => ACTIVE_PARTNER.has(entry.state) && entry.directory?.body)
+  .sort((left, right) => (left.since || 0) - (right.since || 0) || (left.operatorId < right.operatorId ? -1 : 1));
+
+/* Earlier partners first, and never an id of this family or a peer the
+   admin named by hand: a partner's directory that names one of those, or
+   one an earlier partner owns, is not believed for it. */
+function rebuildPartnerIndex() {
+  const index = new Map();
+  const ours = familyIds();
+  for (const entry of activePartners()) {
+    for (const relay of entry.directory.body.relays) {
+      if (ours.has(relay.id) || directoryState.manualIds.has(relay.id) || index.has(relay.id)) continue;
+      index.set(relay.id, entry.operatorId);
+    }
+  }
+  partnerIndex = index;
+}
+function partnerOperatorOf(id) {
+  return partnerIndex.get(id) || '';
+}
+function partnerGatewaysOf(entry) {
+  if (!entry?.directory?.body) return [];
+  return partnerRules.gatewaySet(entry.directory.body, entry.gatewayNotice?.gateways ? entry.gatewayNotice : null)
+    .filter((gateway) => partnerIndex.get(gateway.id) === entry.operatorId);
+}
+function isPartnerGateway(id) {
+  const entry = partnerState.entries[partnerOperatorOf(id)];
+  return Boolean(entry) && ACTIVE_PARTNER.has(entry.state) && partnerGatewaysOf(entry).some((gateway) => gateway.id === id);
+}
+
+function savePartners() {
+  try {
+    const temporary = `${PARTNERS_PATH}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(partnerState), { mode: 0o600 });
+    fs.renameSync(temporary, PARTNERS_PATH);
+  } catch (error) {
+    console.warn('[Partners] could not keep the partners:', error.message);
+  }
+}
+
+/* Gateways allow every active partner's gateways and take back what no
+   longer qualifies; a relay that is not a gateway takes back everything. */
+function applyPartners() {
+  rebuildPartnerIndex();
+  for (const map of [partnerLists, relayedLists]) {
+    for (const operatorId of Array.from(map.keys())) {
+      if (!ACTIVE_PARTNER.has(partnerState.entries[operatorId]?.state)) map.delete(operatorId);
+    }
+  }
+  const want = new Map();
+  const gatewayNow = selfIsGateway();
+  if (wasGateway && !gatewayNow) {
+    handoffUntil = Date.now() + GATEWAY_HANDOFF_MS;
+    setTimeout(() => applyPartners(), GATEWAY_HANDOFF_MS + 100).unref?.();
+  }
+  if (gatewayNow) handoffUntil = 0;
+  wasGateway = gatewayNow;
+  if (gatewayNow) {
+    for (const entry of activePartners()) {
+      for (const gateway of [...partnerGatewaysOf(entry), ...retainedPartnerGateways(entry.operatorId)]) want.set(gateway.id, dialOrigins(gateway.origins));
+    }
+  }
+  const ours = familyIds();
+  for (const id of Array.from(partnerAllowed)) {
+    if (want.has(id)) continue;
+    const operatorId = partnerOperatorOf(id);
+    if (!gatewayNow && Date.now() < handoffUntil && operatorId && ACTIVE_PARTNER.has(partnerState.entries[operatorId]?.state) && !familyGatewayReaches(operatorId)) continue;
+    partnerAllowed.delete(id);
+    if (directoryState.manualIds.has(id) || ours.has(id)) continue;
+    relayPeers.disallowPeer(id);
+  }
+  for (const [id, origins] of want) {
+    if (ours.has(id)) continue;
+    relayPeers.allowPeer(id, origins);
+    partnerAllowed.add(id);
+  }
+  shareReach();
+}
+
+function sharePartners(entries) {
+  const frame = { kind: 'partners', entries, override: partnerState.override, carryBetween: partnerState.carryBetween };
+  for (const id of directoryMembers()) {
+    const link = relayPeers.linkFor(id);
+    if (link?.isOpen?.()) {
+      try { link.send(frame); } catch (_error) { /* the link went */ }
+    }
+  }
+}
+
+/* Every change, whoever makes it: stamped, kept, applied, and told to the
+   family. The stamp is always later than the one it replaces, so the change
+   wins everywhere even on a clock a little behind. */
+function changePartner(operatorId, patch, note = '') {
+  const current = partnerState.entries[operatorId] || null;
+  const entry = {
+    ...(current || {}),
+    ...patch,
+    operatorId,
+    updatedAt: Math.max(Date.now(), (current?.updatedAt || 0) + 1),
+    updatedBy: relayIdentity.id,
+  };
+  partnerState.entries = partnerRules.mergePartners(partnerState.entries, [entry]).held;
+  savePartners();
+  applyPartners();
+  sharePartners([entry]);
+  announcePartnerList();
+  if (note) monitorLog(`Partner ${entry.name || operatorId.slice(0, 12)} (${operatorId.slice(0, 12)}): ${note}`);
+  return entry;
+}
+
+function receivePartners(payload, link) {
+  if (!isFamilyPeer(link?.peerId)) return;
+  const incoming = (Array.isArray(payload.entries) ? payload.entries : []).filter((entry) => {
+    if (!entry?.directory) return true;
+    const body = entry.directory.body;
+    return verifyDirectory(entry.directory, { operatorKey: String(entry.operatorKey || ''), selfId: body?.relays?.[0]?.id }).ok;
+  });
+  const merged = partnerRules.mergePartners(partnerState.entries, incoming);
+  const override = wellFormedOverride(payload.override) && laterSetting(payload.override, partnerState.override) ? payload.override : null;
+  const carry = wellFormedCarry(payload.carryBetween) && laterSetting(payload.carryBetween, partnerState.carryBetween) ? payload.carryBetween : null;
+  if (!merged.changed.length && !override && !carry) return;
+  partnerState.entries = merged.held;
+  if (override) partnerState.override = override;
+  if (carry) partnerState.carryBetween = carry;
+  savePartners();
+  applyPartners();
+  if (override) announceGateways();
+  if (merged.changed.length || carry) announcePartnerList();
+}
+
+/* A family setting (the gateways the admin chose): the later change wins,
+   the relay that made it breaks a tie, as for partner entries. */
+function laterSetting(incoming, held) {
+  return !held || incoming.updatedAt > held.updatedAt
+    || (incoming.updatedAt === held.updatedAt && String(incoming.updatedBy) > String(held.updatedBy));
+}
+const wellFormedOverride = (override) => partnerRules.validOverride(override);
+
+/* The family's gateways as this relay says them, signed with its own key: a
+   partner believes it from any relay of the family's signed directory. */
+function currentGatewayNotice() {
+  return partnerRules.signGatewayNotice({
+    operatorId: ownOperatorId(),
+    gateways: ownGatewaySet().map((gateway) => ({ id: gateway.id, priority: gateway.priority })),
+    updatedAt: partnerState.override?.updatedAt || 0,
+  }, { id: relayIdentity.id, key: publicRelayIdentity(relayIdentity).publicKey }, relayPrivate);
+}
+/* Told by every relay holding a link with a partner's gateway, which during
+   a change is the old gateway as much as the new one. */
+function announceGateways() {
+  if (!directoryState.doc || !partnerState.override) return;
+  sendToPartnerGateways({ kind: 'partner-gateways', notice: currentGatewayNotice() });
+}
+
+/* A partner's gateways changed: the ones it dropped stay usable until one of
+   its new gateways has a link with us, or the handoff time runs out, so the
+   two families are never left without a way to each other. */
+const partnerRetained = new Map();
+function notePartnerGatewayChange(operatorId, beforeIds) {
+  const entry = partnerState.entries[operatorId];
+  const now = new Set(partnerGatewaysOf(entry).map((gateway) => gateway.id));
+  const dropped = beforeIds.filter((id) => !now.has(id));
+  const added = Array.from(now).some((id) => !beforeIds.includes(id));
+  if (!dropped.length && !added) return;
+  if (dropped.length) {
+    const retained = partnerRules.retainGateways(partnerRetained.get(operatorId) || null, dropped, { now: Date.now(), handoffMs: GATEWAY_HANDOFF_MS });
+    partnerRetained.set(operatorId, retained);
+    setTimeout(() => applyPartners(), Math.max(0, retained.until - Date.now()) + 100).unref?.();
+  }
+  applyPartners();
+  const last = gatewayNoticeAt.get(operatorId) || 0;
+  if (Date.now() - last >= GATEWAY_NOTICE_GAP_MS) {
+    gatewayNoticeAt.set(operatorId, Date.now());
+    partnerNotice(`🔀 ${ALERT_LABEL}: اپراتور «${entry?.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…) Gatewayهای خود را تغییر داد؛ اتصال خودکار با Gatewayهای تازه هماهنگ شد.`);
+  }
+}
+function retainedPartnerGateways(operatorId) {
+  const held = partnerRetained.get(operatorId);
+  if (!held) return [];
+  const entry = partnerState.entries[operatorId];
+  const current = partnerGatewaysOf(entry);
+  if (Date.now() > held.until || current.some((gateway) => relayPeers.linkFor(gateway.id))) {
+    partnerRetained.delete(operatorId);
+    return [];
+  }
+  const relays = new Map((entry?.directory?.body?.relays || []).map((relay) => [relay.id, relay]));
+  return Array.from(held.ids)
+    .filter((id) => relays.has(id) && partnerIndex.get(id) === operatorId && !directoryState.manualIds.has(id))
+    .map((id) => ({ id, priority: 99, origins: (relays.get(id).origins || []).map(String) }));
+}
+
+/* This relay stopped being a gateway: it keeps its partner links until a
+   gateway of the family has one with that partner, or the handoff time runs
+   out. */
+let wasGateway = false;
+let handoffUntil = 0;
+function familyGatewayReaches(operatorId) {
+  for (const [gatewayId, relays] of reachFrom) {
+    if (gatewayId === relayIdentity.id || !ownGatewaySet().some((gateway) => gateway.id === gatewayId)) continue;
+    for (const info of relays.values()) if (info.operatorId === operatorId) return true;
+  }
+  return false;
+}
+
+function partnerNotice(text) {
+  const now = Date.now();
+  while (partnerNoticeTimes.length && now - partnerNoticeTimes[0] > 3600000) partnerNoticeTimes.shift();
+  if (partnerNoticeTimes.length >= PARTNER_NOTICES_PER_HOUR) return;
+  partnerNoticeTimes.push(now);
+  queueAlert(text);
+  flushAlerts().catch(() => {});
+}
+/* The host people know a relay by, never a bare address: an IP goes to
+   nobody's Telegram. */
+function contactHost(contact) {
+  try {
+    const host = new URL(String(contact || '')).hostname;
+    if (!host || /^[\d.]+$/.test(host) || host.includes(':') || host.startsWith('[')) return '';
+    return host;
+  } catch (_error) { return ''; }
+}
+
+function sendToPartnerGateways(frame, operatorId = '') {
+  for (const id of partnerAllowed) {
+    if (operatorId && partnerOperatorOf(id) !== operatorId) continue;
+    const link = relayPeers.linkFor(id);
+    if (link?.isOpen?.()) {
+      try { link.send(frame); } catch (_error) { /* the link went */ }
+    }
+  }
+}
+function ownKnownKeys() {
+  const keys = { [relayIdentity.id]: publicRelayIdentity(relayIdentity).publicKey };
+  for (const entry of relayPeers.peerEntries()) {
+    if (entry.key && isFamilyPeer(entry.id)) keys[entry.id] = entry.key;
+  }
+  return keys;
+}
+
+function partnersLinkUp(link) {
+  const id = link?.peerId;
+  if (!id) return;
+  if (!linkUpSince.has(id)) linkUpSince.set(id, Date.now());
+  if (isFamilyPeer(id)) {
+    if (Object.keys(partnerState.entries).length || partnerState.override || partnerState.carryBetween) {
+      try { link.send({ kind: 'partners', entries: Object.values(partnerState.entries), override: partnerState.override, carryBetween: partnerState.carryBetween }); } catch (_error) { /* the link went */ }
+    }
+    if (selfIsGateway()) shareReach();
+    return;
+  }
+  if (!partnerAllowed.has(id)) return;
+  const operatorId = partnerOperatorOf(id);
+  const entry = partnerState.entries[operatorId];
+  if (!entry) return;
+  try {
+    if (directoryState.doc) link.send({ kind: 'partner-directory', doc: directoryState.doc });
+    link.send({ kind: 'partner-keys', keys: ownKnownKeys() });
+    if (partnerState.override && directoryState.doc) link.send({ kind: 'partner-gateways', notice: currentGatewayNotice() });
+    link.send({ kind: 'partner-list', list: ownPartnerList() });
+    relayListsTo(link, operatorId);
+  } catch (_error) { /* the link went */ }
+  if (partnerRetained.has(operatorId)) applyPartners();
+  shareReach();
+  /* A link with their gateway stands only if they allow ours: the proof
+     that they said yes. */
+  if (entry.state === 'requested') {
+    changePartner(operatorId, { state: 'approved' }, 'linked');
+    partnerNotice(`🔗 ${ALERT_LABEL}: اتصال با اپراتور «${entry.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…) برقرار شد.`);
+  }
+}
+function partnersLinkDown(link) {
+  const id = link?.peerId;
+  if (!id || relayPeers.linkFor(id)) return;
+  linkUpSince.delete(id);
+  reachFrom.delete(id);
+  if (partnerAllowed.has(id)) shareReach();
+}
+
+/* ---- which gateway, and what the family can reach ------------------------- */
+
+const upSinceOf = (id) => (relayPeers.linkFor(id) ? (linkUpSince.get(id) || Date.now()) : 0);
+function bestPartnerGateway(operatorId) {
+  const entry = partnerState.entries[operatorId];
+  if (!entry || !ACTIVE_PARTNER.has(entry.state)) return null;
+  const candidates = partnerGatewaysOf(entry).map((gateway) => ({ id: gateway.id, priority: gateway.priority, upSince: upSinceOf(gateway.id) }));
+  const chosen = partnerRules.chooseGateway(candidates, { now: Date.now(), stableMs: GATEWAY_STABLE_MS });
+  if (chosen) return chosen;
+  const retained = retainedPartnerGateways(operatorId).map((gateway) => ({ id: gateway.id, priority: gateway.priority, upSince: upSinceOf(gateway.id) }));
+  return partnerRules.chooseGateway(retained, { now: Date.now(), stableMs: GATEWAY_STABLE_MS });
+}
+/* The way to a partner's family: its own gateway when a link with one has
+   stood for the settle time; else, when allowed, through a common partner
+   that carries between its partners and names that family as its partner;
+   else whatever is up. */
+function routeToPartner(operatorId, { viaAllowed = true } = {}) {
+  const entry = partnerState.entries[operatorId];
+  if (!entry || !ACTIVE_PARTNER.has(entry.state)) return null;
+  const now = Date.now();
+  const direct = [...partnerGatewaysOf(entry), ...retainedPartnerGateways(operatorId)]
+    .map((gateway) => ({ id: gateway.id, priority: gateway.priority, upSince: upSinceOf(gateway.id) }));
+  const settledDirect = partnerRules.chooseGateway(direct.filter((candidate) => candidate.upSince && now - candidate.upSince >= GATEWAY_STABLE_MS), { now, stableMs: GATEWAY_STABLE_MS });
+  if (settledDirect) return { id: settledDirect, path: 'direct' };
+  const via = viaAllowed ? commonPartnerRoutes(operatorId) : [];
+  const settledVia = via.find((route) => route.upSince && now - route.upSince >= GATEWAY_STABLE_MS);
+  if (settledVia) return { id: settledVia.id, path: `via:${settledVia.operator}` };
+  const anyDirect = partnerRules.chooseGateway(direct, { now, stableMs: GATEWAY_STABLE_MS });
+  if (anyDirect) return { id: anyDirect, path: 'direct' };
+  const anyVia = via.find((route) => route.upSince);
+  return anyVia ? { id: anyVia.id, path: `via:${anyVia.operator}` } : null;
+}
+function commonPartnerRoutes(target) {
+  const routes = [];
+  const targetList = farListOf(target);
+  for (const entry of activePartners()) {
+    if (entry.operatorId === target) continue;
+    if (!partnerRules.commonPartnerOk({ through: entry.operatorId, target, throughList: heldList(partnerLists, entry.operatorId), targetList })) continue;
+    const id = bestPartnerGateway(entry.operatorId);
+    if (id) routes.push({ id, operator: entry.operatorId, upSince: upSinceOf(id) });
+  }
+  return routes.sort((left, right) => (left.upSince || Infinity) - (right.upSince || Infinity));
+}
+
+/* What each partner said about its own partners, from its gateways: which
+   operators it links with, and whether it carries between them. Each list is
+   signed by the relay that said it; `relayedLists` are the ones a common
+   partner passed on from a family this relay has no link with. */
+const partnerLists = new Map();
+const relayedLists = new Map();
+/* The newest list time accepted for each family by either way, kept even
+   when the list itself expires or the partner goes: nothing older is ever
+   taken again. */
+const listHighWater = new Map();
+/* Families say their lists again every pull interval; one not heard for
+   three of them is as good as missing. */
+const PARTNER_LIST_MAX_AGE_MS = 3 * PARTNER_PULL_MS;
+function heldList(map, operatorId) {
+  return partnerRules.freshList(map.get(operatorId), {
+    now: Date.now(),
+    maxAgeMs: PARTNER_LIST_MAX_AGE_MS,
+    directoryBody: partnerState.entries[operatorId]?.directory?.body,
+  });
+}
+function farListOf(operatorId) {
+  const direct = heldList(partnerLists, operatorId);
+  const relayed = heldList(relayedLists, operatorId);
+  if (!direct) return relayed || null;
+  if (!relayed) return direct;
+  return relayed.updatedAt > direct.updatedAt ? relayed : direct;
+}
+let partnerListStamp = 0;
+function ownPartnerList() {
+  partnerListStamp = Math.max(Date.now(), partnerListStamp + 1);
+  return partnerRules.signPartnerList({
+    operatorId: ownOperatorId(),
+    operators: activePartners().map((entry) => entry.operatorId),
+    carries: carriesBetween(),
+    updatedAt: partnerListStamp,
+  }, { id: relayIdentity.id, key: publicRelayIdentity(relayIdentity).publicKey }, relayPrivate);
+}
+/* A family that carries between its partners passes each partner's list on
+   to the partners that list names, and to nobody else: it says nothing
+   about one partner to a family that partner did not choose. */
+function relayListsTo(link, operatorId) {
+  if (!carriesBetween()) return;
+  for (const from of partnerLists.keys()) {
+    const held = heldList(partnerLists, from);
+    if (from === operatorId || !held?.doc || !held.operators.has(operatorId)) continue;
+    try { link.send({ kind: 'partner-list-relay', list: held.doc }); } catch (_error) { /* the link went */ }
+  }
+}
+const carriesBetween = () => Boolean(partnerState.carryBetween?.on);
+function wellFormedCarry(setting) {
+  return Boolean(setting) && typeof setting.on === 'boolean' && Number.isFinite(setting.updatedAt)
+    && setting.updatedAt <= Date.now() + 5 * 60 * 1000 && typeof setting.updatedBy === 'string';
+}
+let partnerListTimer = null;
+function announcePartnerList() {
+  if (partnerListTimer) return;
+  partnerListTimer = setTimeout(() => {
+    partnerListTimer = null;
+    if (!directoryState.doc) return;
+    sendToPartnerGateways({ kind: 'partner-list', list: ownPartnerList() });
+    for (const id of partnerAllowed) {
+      const link = relayPeers.linkFor(id);
+      if (link?.isOpen?.()) relayListsTo(link, partnerOperatorOf(id));
+    }
+  }, 200);
+  partnerListTimer.unref?.();
+}
+
+/* Among this family's gateways that said they reach a relay. */
+function bestOwnGateway(reporters) {
+  const candidates = ownGatewaySet()
+    .filter((gateway) => gateway.id !== relayIdentity.id && reporters.has(gateway.id))
+    .map((gateway) => ({ id: gateway.id, priority: gateway.priority, upSince: upSinceOf(gateway.id) }));
+  return partnerRules.chooseGateway(candidates, { now: Date.now(), stableMs: GATEWAY_STABLE_MS });
+}
+
+/* What a gateway reaches: the relays of every partner whose gateways it has
+   a link to, with a key that hashes to the id. Its members hear it as
+   `reach` frames; a member believes them only from a gateway of its own. */
+const reachFrom = new Map();
+function localReach() {
+  const reach = new Map();
+  if (!selfIsGateway()) return reach;
+  for (const entry of activePartners()) {
+    if (!routeToPartner(entry.operatorId)) continue;
+    for (const relay of entry.directory.body.relays) {
+      if (partnerIndex.get(relay.id) !== entry.operatorId) continue;
+      /* Without a key the app cannot seal to it, but this family can still
+         route what is sealed elsewhere. */
+      const key = relayPeers.linkFor(relay.id)?.peerKey || partnerKeys.get(relay.id) || '';
+      reach.set(relay.id, { key, origin: partnerOrigin(relay.origins?.[0]), operatorId: entry.operatorId, operatorName: String(entry.name || '') });
+    }
+  }
+  return reach;
+}
+function reachView() {
+  const view = new Map();
+  const add = (gatewayId, relayId, info) => {
+    const current = view.get(relayId) || { ...info, gateways: new Set() };
+    current.gateways.add(gatewayId);
+    view.set(relayId, current);
+  };
+  const gateways = new Set(ownGatewaySet().map((gateway) => gateway.id));
+  for (const [gatewayId, relays] of reachFrom) {
+    if (!gateways.has(gatewayId) || !relayPeers.linkFor(gatewayId)) continue;
+    for (const [relayId, info] of relays) add(gatewayId, relayId, info);
+  }
+  for (const [relayId, info] of localReach()) add(relayIdentity.id, relayId, info);
+  return view;
+}
+let reachTimer = null;
+function shareReach() {
+  if (reachTimer) return;
+  reachTimer = setTimeout(() => {
+    reachTimer = null;
+    const relays = Array.from(localReach(), ([id, info]) => ({ id, ...info }));
+    for (const id of directoryMembers()) {
+      const link = relayPeers.linkFor(id);
+      if (link?.isOpen?.()) {
+        try { link.send({ kind: 'reach', relays }); } catch (_error) { /* the link went */ }
+      }
+    }
+  }, 200);
+  reachTimer.unref?.();
+}
+function receiveReach(payload, link) {
+  const id = link?.peerId;
+  if (!isFamilyPeer(id) || !ownGatewaySet().some((gateway) => gateway.id === id)) return;
+  const ours = familyIds();
+  const relays = new Map();
+  for (const relay of (Array.isArray(payload.relays) ? payload.relays : []).slice(0, 2048)) {
+    const relayId = String(relay?.id || '');
+    if (!/^[a-f0-9]{64}$/.test(relayId) || ours.has(relayId) || (relay.key && relayIdFor(String(relay.key)) !== relayId)) continue;
+    relays.set(relayId, {
+      key: String(relay.key || ''),
+      origin: cleanPartnerOrigin(relay.origin),
+      operatorId: /^[a-f0-9]{64}$/.test(String(relay.operatorId || '')) ? relay.operatorId : '',
+      operatorName: String(relay.operatorName || '').slice(0, 80),
+    });
+  }
+  reachFrom.set(id, relays);
+  if (handoffUntil) applyPartners();
+}
+
+/* A frame not sealed to this relay. Carried on only as the rules in
+   relay-partners.js allow; everything else gets the one answer every refusal
+   already gets, so the sender learns nothing about why. */
+function forwardTransitFrame(payload, link, facts) {
+  const answer = (reply) => { try { link.send({ kind: 'transit-result', ref: payload.ref, answer: reply }); } catch (_error) { /* the link went */ } };
+  const peer = link?.peerId;
+  const from = isFamilyPeer(peer) ? 'family' : (isPartnerGateway(peer) ? 'partner' : 'other');
+  const targetOperator = partnerOperatorOf(facts.toRelay);
+  const target = familyIds().has(facts.toRelay)
+    ? { family: 'self' }
+    : (targetOperator ? { family: 'partner', operator: targetOperator } : { family: 'none' });
+  const hop = payload.hop === undefined ? 0 : payload.hop;
+  const verdict = partnerRules.forwardRule({
+    from,
+    fromOperator: from === 'partner' ? partnerOperatorOf(peer) : '',
+    selfGateway: selfIsGateway(),
+    target,
+    hop,
+    carryBetween: carriesBetween(),
+    partnerNames: (operatorId) => heldList(partnerLists, operatorId)?.operators || new Set(),
+  });
+  if (verdict.action === 'reject') return answer({ type: 'error', reason: 'transit-rejected' });
+  const clientId = `relay:${peer}`;
+  if ((transitWaitingByClient.get(clientId)?.size || 0) >= TRANSIT_WAIT_PER_CLIENT) return answer({ type: 'error', reason: 'transit-busy' });
+  /* What a partner hands on goes to the relay it is for over that family's
+     own gateways, never through yet another family. */
+  carryToward(payload.envelope, facts, { clientId, tag: undefined, reply: answer, hop: hop + 1, viaAllowed: from === 'family' });
+}
+
+function receivePartnerFrame(payload, link) {
+  const id = link?.peerId;
+  const operatorId = partnerOperatorOf(id);
+  const entry = partnerState.entries[operatorId];
+  if (!entry || !partnerAllowed.has(id)) return;
+  if (payload.kind === 'partner-directory') {
+    const held = entry.directory?.body;
+    const verdict = verifyDirectory(payload.doc, { operatorKey: entry.operatorKey, selfId: id, heldSerial: held?.serial || 0, heldBody: held || null });
+    if (verdict.ok) {
+      const before = partnerGatewaysOf(entry).map((gateway) => gateway.id);
+      changePartner(operatorId, { directory: payload.doc }, `directory ${payload.doc.body.serial}`);
+      notePartnerGatewayChange(operatorId, before);
+    }
+    return;
+  }
+  if (payload.kind === 'partner-gateways') {
+    takeGatewayNotice(operatorId, payload.notice);
+    return;
+  }
+  if (payload.kind === 'partner-list') {
+    const verdict = partnerRules.verifyPartnerList(payload.list, { directoryBody: entry.directory?.body, heldAt: listHighWater.get(operatorId) || 0, maxAgeMs: PARTNER_LIST_MAX_AGE_MS });
+    if (!verdict.ok) return;
+    listHighWater.set(operatorId, verdict.list.updatedAt);
+    partnerLists.set(operatorId, { ...verdict.list, doc: payload.list, by: payload.list.by, receivedAt: Date.now() });
+    /* Passed on at once to the partners it names, if this family carries. */
+    if (carriesBetween()) {
+      for (const named of verdict.list.operators) {
+        if (named !== operatorId && partnerState.entries[named]) sendToPartnerGateways({ kind: 'partner-list-relay', list: payload.list }, named);
+      }
+    }
+    shareReach();
+    return;
+  }
+  if (payload.kind === 'partner-list-relay') {
+    const far = String(payload.list?.operatorId || '');
+    const farEntry = partnerState.entries[far];
+    if (!farEntry || far === operatorId || !ACTIVE_PARTNER.has(farEntry.state)) return;
+    const verdict = partnerRules.verifyPartnerList(payload.list, { directoryBody: farEntry.directory?.body, heldAt: listHighWater.get(far) || 0, maxAgeMs: PARTNER_LIST_MAX_AGE_MS });
+    if (verdict.ok) {
+      listHighWater.set(far, verdict.list.updatedAt);
+      relayedLists.set(far, { ...verdict.list, by: payload.list.by, receivedAt: Date.now() });
+      shareReach();
+    }
+  }
+  if (payload.kind === 'partner-keys') {
+    for (const [relayId, key] of Object.entries(payload.keys || {}).slice(0, 256)) {
+      if (partnerOperatorOf(relayId) === operatorId && relayIdFor(String(key || '')) === relayId) partnerKeys.set(relayId, String(key));
+    }
+    shareReach();
+  }
+}
+
+function takeGatewayNotice(operatorId, notice) {
+  const entry = partnerState.entries[operatorId];
+  if (!entry?.directory?.body) return false;
+  const verdict = partnerRules.verifyGatewayNotice(notice, { directoryBody: entry.directory.body, heldAt: entry.gatewayNotice?.updatedAt || 0 });
+  if (!verdict.ok) return false;
+  const before = partnerGatewaysOf(entry).map((gateway) => gateway.id);
+  changePartner(operatorId, { gatewayNotice: verdict.set }, 'gateways changed');
+  notePartnerGatewayChange(operatorId, before);
+  return true;
+}
+
+/* Only a partner's gateway is held to the short list; a peer named by hand
+   or a member of this family is not a partner, whatever a partner's
+   directory claims. */
+function partnerFrameRefused(payload, link) {
+  const id = link?.peerId;
+  if (!id || !partnerAllowed.has(id) || isFamilyPeer(id) || directoryState.manualIds.has(id)) return false;
+  return !PARTNER_FRAME_KINDS.has(payload?.kind);
+}
+
+/* Our own directory changed: gateways may have changed, and the partners'
+   gateways hear the new one. */
+function partnersOnFamilyDirectory() {
+  applyPartners();
+  if (directoryState.doc) sendToPartnerGateways({ kind: 'partner-directory', doc: directoryState.doc });
+}
+
+/* ---- asking, and being asked -------------------------------------------- */
+
+function cleanPartnerOrigin(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) return '';
+    return url.origin;
+  } catch (_error) { return ''; }
+}
+/* Another family's directory, read from any of its relays. Believed only
+   as far as its own operator's signature goes: it says who that family is,
+   not that anybody here trusts it. */
+async function fetchFamilyDirectory(origin) {
+  const response = await fetch(`${origin}/relay-directory`, { signal: AbortSignal.timeout(15000) });
+  if (!response.ok) return { ok: false, reason: 'no-directory' };
+  const doc = await response.json();
+  const verdict = verifyDirectory(doc, { operatorKey: String(doc?.body?.operator?.key || ''), selfId: doc?.body?.relays?.[0]?.id });
+  return verdict.ok ? { ok: true, doc } : { ok: false, reason: 'bad-directory' };
+}
+const ownOperatorId = () => directoryState.doc?.body.operator.id || '';
+
+const joinNonces = new Map();
+const joinCounts = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [nonce, until] of joinNonces) if (until <= now) joinNonces.delete(nonce);
+  for (const [key, entry] of joinCounts) if (entry.resetAt <= now) joinCounts.delete(key);
+}, 60000).unref?.();
+
+app.post('/relay-join', (req, res) => {
+  setNoStoreHeaders(res);
+  const now = Date.now();
+  const key = securityKey(req);
+  let count = joinCounts.get(key);
+  if (!count || count.resetAt <= now) {
+    count = { count: 0, resetAt: now + 3600000 };
+    joinCounts.set(key, count);
+  }
+  count.count += 1;
+  if (count.count > JOIN_PER_HOUR) return res.status(429).json({ ok: false, reason: 'rate-limited' });
+  if (!OPERATOR_KEY || !directoryState.doc || !ownGatewaySet().length) return res.status(409).json({ ok: false, reason: 'not-accepting' });
+  const verdict = partnerRules.verifyJoinRequest(req.body, {
+    selfOperatorId: ownOperatorId(),
+    now,
+    nonceSeen: (nonce) => (joinNonces.get(nonce) || 0) > now,
+  });
+  if (!verdict.ok) return res.status(400).json({ ok: false, reason: verdict.reason });
+  joinNonces.set(req.body.nonce, now + 3600000);
+  const operatorId = verdict.operatorId;
+  if (operatorId === ownOperatorId()) return res.status(400).json({ ok: false, reason: 'own-family' });
+  const requestId = crypto.randomBytes(16).toString('hex');
+  const contact = cleanPartnerOrigin(req.body.contact);
+  const current = partnerState.entries[operatorId];
+  /* A directory this relay already holds for that family is never rolled
+     back by a request carrying an older one, and a relay the newer one no
+     longer names (revoked, or dropped) cannot ask with the old. */
+  let directory = verdict.directory;
+  const held = current?.directory?.body;
+  if (held) {
+    if (current.operatorKey && current.operatorKey !== verdict.operatorKey) return res.status(400).json({ ok: false, reason: 'wrong-operator' });
+    if (directory.body.serial <= held.serial) {
+      const stillMember = held.relays.some((relay) => relay.id === req.body.from) && !(held.revoked || []).includes(req.body.from);
+      if (!stillMember) return res.status(400).json({ ok: false, reason: 'not-a-member' });
+      directory = current.directory;
+    }
+  }
+  const about = { operatorKey: verdict.operatorKey, name: verdict.name, directory, contact, requestId };
+  if (current?.state === 'rejected' && (current.mutedUntil || 0) > now) {
+    changePartner(operatorId, { requestId, contact });
+    return res.status(202).json({ ok: true, requestId, state: 'rejected' });
+  }
+  if (current?.state === 'approved') {
+    changePartner(operatorId, about);
+    return res.status(202).json({ ok: true, requestId, state: 'approved' });
+  }
+  /* Both admins asked: both already said yes. */
+  if (current?.state === 'requested') {
+    changePartner(operatorId, { ...about, state: 'approved' }, 'approved: both asked');
+    return res.status(202).json({ ok: true, requestId, state: 'approved' });
+  }
+  if (current?.state === 'incoming') {
+    changePartner(operatorId, about);
+    return res.status(202).json({ ok: true, requestId, state: 'incoming' });
+  }
+  const waiting = Object.values(partnerState.entries).filter((entry) => entry.state === 'incoming').length;
+  if (waiting >= JOIN_WAITING_MAX) return res.status(409).json({ ok: false, reason: 'too-many-waiting' });
+  changePartner(operatorId, { ...about, state: 'incoming', since: now, mutedUntil: 0 }, 'asks to link');
+  const host = contactHost(contact);
+  partnerNotice(`🔗 ${ALERT_LABEL}: درخواست اتصال از اپراتور «${verdict.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…)${host ? ` از ${host}` : ''}. در پنل مدیریت، «رله‌ها ← اپراتورهای دیگر»، تأیید یا رد کنید.`);
+  return res.status(202).json({ ok: true, requestId, state: 'incoming' });
+});
+
+/* All the asker learns: waiting, approved or rejected. */
+app.get('/relay-join/:requestId', (req, res) => {
+  setNoStoreHeaders(res);
+  const requestId = String(req.params.requestId || '');
+  const entry = /^[a-f0-9]{32}$/.test(requestId) ? Object.values(partnerState.entries).find((candidate) => candidate.requestId === requestId) : null;
+  if (!entry) return res.status(404).json({ ok: false });
+  const state = entry.state === 'incoming' ? 'waiting' : (entry.state === 'approved' ? 'approved' : 'rejected');
+  res.json({ ok: true, state });
+});
+
+function partnerSummary() {
+  return Object.values(partnerState.entries).map((entry) => {
+    const owned = (entry.directory?.body?.relays || []).filter((relay) => partnerIndex.get(relay.id) === entry.operatorId);
+    return {
+      operatorId: entry.operatorId,
+      name: String(entry.name || ''),
+      state: entry.state,
+      contact: entry.contact || '',
+      serial: entry.directory?.body?.serial || 0,
+      relays: owned.length,
+      relayIds: owned.map((relay) => relay.id.slice(0, 16)),
+      gateways: partnerGatewaysOf(entry).map((gateway) => ({
+        id: gateway.id.slice(0, 16),
+        name: String(owned.find((relay) => relay.id === gateway.id)?.name || ''),
+        priority: gateway.priority,
+        linked: Boolean(relayPeers.linkFor(gateway.id)),
+      })),
+      carrying: carryingFor(entry.operatorId).slice(0, 16),
+      path: pathFor(entry.operatorId),
+      since: entry.since || 0,
+      updatedAt: entry.updatedAt || 0,
+    };
+  });
+}
+/* The next relay traffic for that partner leaves by: one of their gateways
+   on a gateway, one of ours elsewhere. */
+function pathFor(operatorId) {
+  if (!selfIsGateway()) return '';
+  const route = routeToPartner(operatorId);
+  if (!route) return '';
+  return route.path === 'direct' ? 'direct' : `via:${route.path.slice(4, 20)}`;
+}
+function carryingFor(operatorId) {
+  if (selfIsGateway()) return routeToPartner(operatorId)?.id || '';
+  const reporters = new Set();
+  for (const info of reachView().values()) if (info.operatorId === operatorId) for (const id of info.gateways) reporters.add(id);
+  return bestOwnGateway(reporters) || '';
+}
+
+app.post('/Monitor_Server/partners', authMiddleware, (req, res) => {
+  const body = directoryState.doc?.body;
+  res.json({
+    ok: true,
+    self: {
+      operatorId: body?.operator.id || '',
+      name: String(body?.operator.name || ''),
+      gateway: selfIsGateway(),
+      chosenInDashboard: Array.isArray(partnerState.override?.gateways),
+      carryBetween: carriesBetween(),
+      gateways: ownGatewaySet().map((gateway) => ({
+        id: gateway.id.slice(0, 16),
+        name: String(body?.relays.find((relay) => relay.id === gateway.id)?.name || ''),
+        priority: gateway.priority,
+      })),
+    },
+    partners: partnerSummary(),
+  });
+});
+
+app.post('/Monitor_Server/partners/lookup', authMiddleware, async (req, res) => {
+  const origin = cleanPartnerOrigin(req.body?.origin);
+  if (!origin) return res.status(400).json({ ok: false, reason: 'bad-origin' });
+  try {
+    const found = await fetchFamilyDirectory(origin);
+    if (!found.ok) return res.status(400).json(found);
+    const body = found.doc.body;
+    if (body.operator.id === ownOperatorId()) return res.status(400).json({ ok: false, reason: 'own-family' });
+    res.json({
+      ok: true,
+      operator: { id: body.operator.id, name: String(body.operator.name || '') },
+      serial: body.serial,
+      relays: body.relays.length,
+      gateways: partnerRules.gatewaySet(body, null).map((gateway) => ({
+        id: gateway.id,
+        name: String(body.relays.find((relay) => relay.id === gateway.id)?.name || ''),
+        priority: gateway.priority,
+        origins: gateway.origins,
+      })),
+      state: partnerState.entries[body.operator.id]?.state || '',
+    });
+  } catch (error) {
+    res.status(502).json({ ok: false, reason: 'unreachable', detail: String(error?.message || error).slice(0, 120) });
+  }
+});
+
+app.post('/Monitor_Server/partners/request', authMiddleware, async (req, res) => {
+  if (!OPERATOR_KEY || !directoryState.doc) return res.status(409).json({ ok: false, reason: 'no-family' });
+  if (!ownGatewaySet().length) return res.status(409).json({ ok: false, reason: 'no-gateway' });
+  const origin = cleanPartnerOrigin(req.body?.origin);
+  const operatorId = String(req.body?.operatorId || '').toLowerCase();
+  if (!origin || !/^[a-f0-9]{64}$/.test(operatorId)) return res.status(400).json({ ok: false, reason: 'bad-request' });
+  try {
+    const found = await fetchFamilyDirectory(origin);
+    if (!found.ok) return res.status(400).json(found);
+    /* The admin confirmed this operator; a different one answering now is
+       not who they agreed to. */
+    if (found.doc.body.operator.id !== operatorId) return res.status(409).json({ ok: false, reason: 'operator-changed' });
+    const request = partnerRules.signJoinRequest({
+      directory: directoryState.doc,
+      from: relayIdentity.id,
+      key: publicRelayIdentity(relayIdentity).publicKey,
+      to: operatorId,
+      at: Date.now(),
+      nonce: crypto.randomBytes(16).toString('hex'),
+      contact: publicOriginForPeers(),
+    }, relayPrivate);
+    const response = await fetch(`${origin}/relay-join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(15000),
+    });
+    const answer = await response.json().catch(() => ({}));
+    if (response.status !== 202) return res.status(502).json({ ok: false, reason: answer.reason || `answered-${response.status}` });
+    const state = answer.state === 'approved' ? 'approved' : (answer.state === 'rejected' ? 'rejected' : 'requested');
+    const body = found.doc.body;
+    const current = partnerState.entries[operatorId];
+    changePartner(operatorId, {
+      operatorKey: body.operator.key,
+      name: String(body.operator.name || ''),
+      state,
+      directory: found.doc,
+      contact: origin,
+      requestId: String(answer.requestId || ''),
+      requestedBy: relayIdentity.id,
+      since: current?.since || Date.now(),
+    }, `asked to link (${state})`);
+    res.json({ ok: true, state, requestId: answer.requestId || '' });
+  } catch (error) {
+    res.status(502).json({ ok: false, reason: 'unreachable', detail: String(error?.message || error).slice(0, 120) });
+  }
+});
+
+app.get('/relay-gateways', (req, res) => {
+  setNoStoreHeaders(res);
+  if (!directoryState.doc) return res.status(404).json({ ok: false, reason: 'no-directory' });
+  res.json(currentGatewayNotice());
+});
+
+app.post('/Monitor_Server/partners/carry', authMiddleware, (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ ok: false, reason: 'bad-request' });
+  partnerState.carryBetween = {
+    on: req.body.on,
+    updatedAt: Math.max(Date.now(), (partnerState.carryBetween?.updatedAt || 0) + 1),
+    updatedBy: relayIdentity.id,
+  };
+  savePartners();
+  sharePartners([]);
+  announcePartnerList();
+  monitorLog(`Carrying between partners turned ${req.body.on ? 'on' : 'off'}`);
+  res.json({ ok: true, on: carriesBetween() });
+});
+
+app.post('/Monitor_Server/gateways', authMiddleware, (req, res) => {
+  if (!OPERATOR_KEY || !directoryState.doc) return res.status(409).json({ ok: false, reason: 'no-family' });
+  const members = familyIds();
+  let gateways = null;
+  if (!req.body?.reset) {
+    const list = Array.isArray(req.body?.gateways) ? req.body.gateways : null;
+    if (!list || list.length > 64) return res.status(400).json({ ok: false, reason: 'bad-gateways' });
+    const seen = new Set();
+    gateways = [];
+    for (const item of list) {
+      const id = String(item?.id || '').toLowerCase();
+      const priority = Number(item?.priority);
+      if (!members.has(id) || seen.has(id) || !Number.isInteger(priority) || priority < 1 || priority > 99) return res.status(400).json({ ok: false, reason: 'bad-gateways' });
+      seen.add(id);
+      gateways.push({ id, priority });
+    }
+  }
+  partnerState.override = {
+    gateways,
+    updatedAt: Math.max(Date.now(), (partnerState.override?.updatedAt || 0) + 1),
+    updatedBy: relayIdentity.id,
+  };
+  savePartners();
+  applyPartners();
+  sharePartners([]);
+  announceGateways();
+  monitorLog(gateways ? `Gateways set from the dashboard: ${gateways.map((gateway) => `${gateway.id.slice(0, 12)}:${gateway.priority}`).join(', ') || 'none'}` : 'Gateways back to the deploy settings');
+  res.json({ ok: true, gateways: ownGatewaySet().map((gateway) => ({ id: gateway.id.slice(0, 16), priority: gateway.priority })) });
+});
+
+function partnerAction(from, to, note, extra = () => ({})) {
+  return (req, res) => {
+    const operatorId = String(req.body?.operatorId || '').toLowerCase();
+    const entry = partnerState.entries[operatorId];
+    if (!entry || !from.includes(entry.state)) return res.status(409).json({ ok: false, reason: 'not-possible', state: entry?.state || '' });
+    const changed = changePartner(operatorId, { state: to, ...extra(entry) }, note);
+    res.json({ ok: true, state: changed.state });
+  };
+}
+app.post('/Monitor_Server/partners/approve', authMiddleware, partnerAction(['incoming', 'rejected'], 'approved', 'approved', (entry) => ({ since: entry.since || Date.now(), mutedUntil: 0 })));
+app.post('/Monitor_Server/partners/reject', authMiddleware, partnerAction(['incoming'], 'rejected', 'rejected', () => ({ mutedUntil: Date.now() + JOIN_MUTE_MS })));
+app.post('/Monitor_Server/partners/remove', authMiddleware, partnerAction(['incoming', 'requested', 'approved'], 'removed', 'disconnected'));
+
+/* The relay that asked follows the answer; a gateway refreshes what it
+   knows of each partner's directory from that partner's gateways. */
+async function pollPartnerRequests() {
+  for (const entry of Object.values(partnerState.entries)) {
+    if (entry.state !== 'requested' || entry.requestedBy !== relayIdentity.id || !entry.requestId || !entry.contact) continue;
+    try {
+      const response = await fetch(`${entry.contact}/relay-join/${entry.requestId}`, { signal: AbortSignal.timeout(15000) });
+      const answer = await response.json().catch(() => ({}));
+      if (answer.state === 'rejected') changePartner(entry.operatorId, { state: 'rejected' }, 'they rejected');
+      else if (answer.state === 'approved') changePartner(entry.operatorId, { state: 'approved' }, 'they approved');
+    } catch (_error) { /* asked again next time */ }
+  }
+}
+const PARTNER_FETCH_MAX_BYTES = 256 * 1024;
+/* One GET from a partner's relay: connected to exactly the address that was
+   checked (a name cannot answer the check with one address and the
+   connection with another), no redirect followed, and the connection cut
+   the moment the answer passes the cap rather than after reading it all. */
+async function partnerFetchJson(origin, route) {
+  const safe = partnerOrigin(origin);
+  if (!safe) return null;
+  const url = new URL(`${safe}${route}`);
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  let pinned = net.isIP(host) ? { address: host, family: net.isIP(host) } : null;
+  if (!pinned) {
+    const answers = await dns.lookup(host, { all: true, verbatim: true });
+    if (!answers.length || (!PARTNER_ALLOW_PRIVATE && answers.some((answer) => partnerRules.privateHost(answer.address)))) return null;
+    pinned = answers[0];
+  }
+  const body = await new Promise((resolve) => {
+    const transport = url.protocol === 'https:' ? https : http;
+    const request = transport.request({
+      protocol: url.protocol,
+      hostname: host,
+      port: url.port || undefined,
+      path: `${url.pathname}${url.search}`,
+      method: 'GET',
+      servername: net.isIP(host) ? undefined : host,
+      headers: { Accept: 'application/json', 'Accept-Encoding': 'identity' },
+      lookup: (_hostname, options, callback) => {
+        if (options && options.all) callback(null, [{ address: pinned.address, family: pinned.family }]);
+        else callback(null, pinned.address, pinned.family);
+      },
+      timeout: 10000,
+    }, (response) => {
+      if (response.statusCode !== 200 || Number(response.headers['content-length'] || 0) > PARTNER_FETCH_MAX_BYTES) {
+        response.destroy();
+        resolve(null);
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > PARTNER_FETCH_MAX_BYTES) {
+          request.destroy();
+          resolve(null);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', () => resolve(null));
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(null));
+    request.end();
+  });
+  if (!body) return null;
+  return JSON.parse(body.toString('utf8'));
+}
+
+async function pullPartnerDirectories() {
+  if (!selfIsGateway()) return;
+  for (const entry of activePartners()) {
+    /* Any relay of theirs may say which gateways they have now: the way to
+       hear of a change when none of their old gateways is up. A handful of
+       origins, asked at once, each with its own deadline. */
+    const everyOrigin = Array.from(new Set(entry.directory.body.relays.flatMap((relay) => (relay.origins || []).slice(0, 2)))).slice(0, 8);
+    const notices = await Promise.allSettled(everyOrigin.map((origin) => partnerFetchJson(origin, '/relay-gateways')));
+    for (const result of notices) {
+      if (result.status === 'fulfilled' && result.value) takeGatewayNotice(entry.operatorId, result.value);
+    }
+    const gatewayOrigins = Array.from(new Set(partnerGatewaysOf(entry).flatMap((gateway) => gateway.origins))).slice(0, 8);
+    const directories = await Promise.allSettled(gatewayOrigins.map((origin) => partnerFetchJson(origin, '/relay-directory')));
+    for (const result of directories) {
+      if (result.status !== 'fulfilled' || !result.value) continue;
+      const doc = result.value;
+      const current = partnerState.entries[entry.operatorId];
+      const held = current?.directory?.body;
+      const verdict = verifyDirectory(doc, { operatorKey: entry.operatorKey, selfId: doc?.body?.relays?.[0]?.id, heldSerial: held?.serial || 0, heldBody: held || null });
+      if (!verdict.ok) continue;
+      const before = partnerGatewaysOf(current).map((gateway) => gateway.id);
+      changePartner(entry.operatorId, { directory: doc }, `directory ${doc.body.serial}`);
+      notePartnerGatewayChange(entry.operatorId, before);
+    }
+  }
+}
+
+function startPartners() {
+  try {
+    const kept = JSON.parse(fs.readFileSync(PARTNERS_PATH, 'utf8'));
+    partnerState.entries = partnerRules.mergePartners({}, Object.values(kept?.entries || {})).held;
+    if (wellFormedOverride(kept?.override)) partnerState.override = kept.override;
+    if (wellFormedCarry(kept?.carryBetween)) partnerState.carryBetween = kept.carryBetween;
+  } catch (_error) { /* none kept yet */ }
+  applyPartners();
+  setInterval(() => pollPartnerRequests().catch(() => {}), JOIN_POLL_MS).unref?.();
+  setInterval(() => {
+    pullPartnerDirectories().catch(() => {});
+    if (selfIsGateway()) announcePartnerList();
+  }, PARTNER_PULL_MS).unref?.();
+}
+
 app.post('/Monitor_Server/transit', authMiddleware, (req, res) => {
   res.json({
     ok: true,
     status: relayPeers.status(),
     directory: directorySummary(),
+    partners: partnerSummary(),
     peers: relayPeers.peerEntries().map((entry) => ({
       id: entry.id.slice(0, 16),
       origin: entry.origin,
       linked: entry.linked,
       role: entry.role,
+      kind: directoryState.manualIds.has(entry.id) ? 'manual' : (isFamilyPeer(entry.id) ? 'family' : (partnerAllowed.has(entry.id) ? 'partner' : 'manual')),
       traffic: transitTraffic.get(entry.id) || { carried: 0, bytes: 0 },
     })),
   });
@@ -6894,9 +7970,33 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
     reply({ type: 'error', reason: 'transit-busy', toRelay: facts.toRelay, tag });
     return;
   }
-  const link = relayPeers.linkFor(facts.toRelay);
+  carryToward(envelope, facts, { clientId, tag, reply });
+}
+
+/* The next link toward a relay: a link to it, or, for a relay of a partner's
+   family, the best of the gateways on the way. A relay of this family is
+   only ever reached over its own link. */
+function nextLinkToward(toRelay, { viaAllowed = true } = {}) {
+  const direct = relayPeers.linkFor(toRelay);
+  if (direct) return direct;
+  if (familyIds().has(toRelay)) return null;
+  const operatorId = partnerOperatorOf(toRelay);
+  if (operatorId && selfIsGateway()) {
+    const route = routeToPartner(operatorId, { viaAllowed });
+    if (route) return relayPeers.linkFor(route.id);
+  }
+  const info = reachView().get(toRelay);
+  if (info) {
+    const id = bestOwnGateway(info.gateways);
+    if (id) return relayPeers.linkFor(id);
+  }
+  return null;
+}
+
+function carryToward(envelope, facts, { clientId, tag, reply, hop, viaAllowed = true }) {
+  const link = nextLinkToward(facts.toRelay, { viaAllowed });
   if (link) {
-    carryOverLink(link, envelope, facts, { clientId, tag, reply });
+    carryOverLink(link, envelope, facts, { clientId, tag, reply, hop });
     return;
   }
   /* The link might be mid-redial (a drop-to-redial cycle is under two
@@ -6912,10 +8012,10 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
      one carried on. */
   const parkDeadline = Date.now() + TRANSIT_PARK_MS;
   const parkTimer = setInterval(() => {
-    const revived = relayPeers.linkFor(facts.toRelay);
+    const revived = nextLinkToward(facts.toRelay, { viaAllowed });
     if (revived) {
       clearInterval(parkTimer);
-      carryOverLink(revived, envelope, facts, { clientId, tag, reply });
+      carryOverLink(revived, envelope, facts, { clientId, tag, reply, hop });
       return;
     }
     if (Date.now() > parkDeadline) {
@@ -6930,7 +8030,7 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
    until the far relay answers. Every failure here is an answer to the sender,
    never a throw: this runs inside the socket receive handler, and a throw
    from it used to take the whole relay down. */
-function carryOverLink(activeLink, envelope, facts, { clientId, tag, reply }) {
+function carryOverLink(activeLink, envelope, facts, { clientId, tag, reply, hop }) {
   try {
     /* The envelope is a parsed object on this side of the socket; its wire
        size is the JSON. Buffer.byteLength(object) THROWS — and this sits in
@@ -6954,10 +8054,13 @@ function carryOverLink(activeLink, envelope, facts, { clientId, tag, reply }) {
     /* The carrier's own correlation id, not the client's tag. The tag belongs
        to the client and there is no reason for another relay to see it. */
     const ref = crypto.randomUUID();
+    /* `via` is the link it leaves by, which is not the relay it is for when
+       it goes through a gateway: that link dropping is what ends the wait. */
     rememberTransitWait(ref, {
-      clientId, tag, reply, toRelay: facts.toRelay, expiresAt: Date.now() + TRANSIT_WAIT_MS,
+      clientId, tag, reply, toRelay: facts.toRelay, via: activeLink.peerId, expiresAt: Date.now() + TRANSIT_WAIT_MS,
     });
-    if (!activeLink.send({ kind: 'transit', ref, envelope })) {
+    const frame = hop === undefined ? { kind: 'transit', ref, envelope } : { kind: 'transit', ref, envelope, hop };
+    if (!activeLink.send(frame)) {
       forgetTransitWait(ref);
       reply({ type: 'error', reason: activeLink.isOpen() ? 'transit-busy' : 'transit-unavailable', toRelay: facts.toRelay, tag });
       return;
@@ -6977,7 +8080,7 @@ function carryOverLink(activeLink, envelope, facts, { clientId, tag, reply }) {
 function failTransitWaitsFor(relayId) {
   if (!relayId || relayPeers.linkFor(relayId)) return;
   for (const [ref, waiting] of transitWaiting) {
-    if (waiting.toRelay !== relayId) continue;
+    if ((waiting.via || waiting.toRelay) !== relayId) continue;
     forgetTransitWait(ref);
     try {
       waiting.reply({ type: 'error', reason: 'transit-unavailable', toRelay: relayId, tag: waiting.tag });
@@ -7007,6 +8110,18 @@ function presenceQueryAllowed(link) {
 }
 
 function handleTransitFrame(payload, link) {
+  if (payload?.kind === 'partners') {
+    receivePartners(payload, link);
+    return;
+  }
+  if (payload?.kind === 'partner-directory' || payload?.kind === 'partner-keys' || payload?.kind === 'partner-gateways' || payload?.kind === 'partner-list' || payload?.kind === 'partner-list-relay') {
+    receivePartnerFrame(payload, link);
+    return;
+  }
+  if (payload?.kind === 'reach') {
+    receiveReach(payload, link);
+    return;
+  }
   if (payload?.kind === 'directory') {
     acceptDirectory(payload.doc, 'push');
     return;
@@ -7020,6 +8135,11 @@ function handleTransitFrame(payload, link) {
     return;
   }
   if (payload?.kind === 'transit') {
+    const outer = transitFacts(payload.envelope);
+    if (outer.toRelay && outer.toRelay !== relayIdentity.id) {
+      forwardTransitFrame(payload, link, outer);
+      return;
+    }
     let inner;
     try {
       inner = openTransit(relayPrivate, relayIdentity.id, payload.envelope);
@@ -7165,7 +8285,9 @@ function transitAnswerForClient(answer) {
     /* The reason is echoed only when it is one this relay would have sent
        itself, so a peer cannot invent a reason a client has a special path
        for. */
-    const known = new Set(['target-offline', 'target-restricted', 'transit-rejected', 'transit-busy']);
+    /* transit-unavailable too: through a gateway the relay that has no way
+       on is not the client's own, and the app re-sends on exactly that. */
+    const known = new Set(['target-offline', 'target-restricted', 'transit-rejected', 'transit-busy', 'transit-unavailable']);
     const reason = String(answer.reason || '');
     return { type: 'error', reason: known.has(reason) ? reason : 'transit-rejected' };
   }
@@ -10233,6 +11355,7 @@ setInterval(() => {
    seed. Called last, at boot, once everything it touches exists. */
 loadRuntimeTransitPeers();
 startRelayDirectory();
+startPartners();
 
 startFrontDoor();
 
