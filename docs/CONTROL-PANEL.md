@@ -158,6 +158,130 @@ change also needs a signature from a listed browser key, so a stolen session
 alone cannot re-sign your family. Anywhere else, clusters are shown, not
 changed.
 
+## Managing everything from the page (from 2.98.85)
+
+The easiest start is the launcher: `bash scripts/panel.sh`. It brings Docker
+up and asks for the port, the address, and whether the panel starts with
+Docker. The login's authenticator secret is shown as a QR code in the
+terminal, with the secret and its `otpauth://` link under it. Everything
+below is done in the page, and every change asks for a current
+authenticator code. A code is used once, so a second change in the same
+half-minute waits for the next code.
+
+**Servers.** One row per server in deploy.conf, with its SSH address, key,
+jump, public URL, cluster and live state. When a server cannot be reached,
+the row says why:
+
+- the key was refused;
+- no key file was found;
+- the name was not found;
+- the server does not answer.
+
+A refused key is never tried again by itself, because some servers lock an
+address out after a few failed logins. "Connect again" makes one fresh try.
+
+To add a new server:
+
+1. Press **Add a server**. Give a short name (`ir5`), the SSH host, user and
+   port, the key (picked from the keys the panel can see), an optional jump
+   through another server, the public URL, the region and the cluster.
+2. Press **Test the connection**. It is one SSH login, and it shows whether
+   Docker and P00RIJA are on the server.
+3. Enter a code and press **Save**. deploy.conf gets the server, with a dated
+   backup of what was there, and the panel connects to it straight away.
+   There is no restart, and the chips at the top show it.
+4. If P00RIJA is not installed there yet, either:
+   - press **Install**: the panel sends its own installer and compose file
+     over SSH and runs it with the ready-made Docker Hub images (give a
+     registry mirror for a server inside Iran);
+   - or run the **deploy.sh** command the panel shows, on your own computer.
+5. In **Family list**, press **+ name** to add it to the signed family list.
+   The list is signed and handed to every server.
+
+Edit and Remove work the same way. Remove takes the server out of
+deploy.conf (and, if you choose, out of the family list); the server itself
+is not touched. What the panel writes to deploy.conf is held to plain
+characters, so nothing in it can become a command when deploy.sh reads it.
+
+**Clusters.** In the Clusters section:
+
+- create a cluster from a name and its servers;
+- rename it (every member moves);
+- set its members with the checkboxes;
+- give a member its inside addresses;
+- delete it.
+
+Each change is signed by this browser's listed key, handed to every server,
+and written to deploy.conf for the next deploy.
+
+**The family list and the operator key.** The Family list section shows:
+
+- the signed list: every server's id, addresses, region, cluster, gateway,
+  and inside addresses;
+- the admin keys;
+- which version each server holds.
+
+While no admin key is listed, this browser's key can be listed with a code.
+After that, every change needs a listed key's signature. The operator key is:
+
+- **created** when there is none;
+- **imported** from a backup file;
+- **backed up** (a download, after the password and a code);
+- **removed** from this computer (a copy stays beside deploy.conf);
+- **replaced**. Every server's trust moves to the new key one at a time:
+  each gets its new key and, at once, the list signed with it. The first
+  that fails is put back on the old key and nothing after it is touched;
+  running it again carries on with the same new key.
+
+**My account.**
+
+- Change the panel password; the other sessions are signed out.
+- Replace the authenticator: the new QR and secret take effect only after a
+  code from them is entered, so nobody locks themselves out.
+- Sign out the other sessions.
+- See the last sign-ins.
+
+Sessions survive a restart of the panel.
+
+**System and log.** The System section starts with this panel's card:
+
+- its version, uptime and config folder (writable or not);
+- whether the operator key is present;
+- how to keep it.
+
+The Panel log section shows what was done and by whom. No password or secret
+is ever written to it.
+
+**Keeping it, from the terminal:**
+
+```bash
+bash scripts/panel.sh doctor
+```
+
+```bash
+bash scripts/panel.sh backup
+```
+
+```bash
+bash scripts/panel.sh restore FILE
+```
+
+```bash
+bash scripts/panel.sh update
+```
+
+```bash
+bash scripts/panel.sh uninstall
+```
+
+- `doctor` checks Docker, deploy.conf, every key, one SSH login per server,
+  the port, and TLS.
+- `backup` and `restore` copy the panel's login, trust, layout and sessions
+  to a file and back.
+- `update` gets a new image with the same settings.
+- `uninstall` removes the container and image; `--purge` removes the login
+  and settings too.
+
 ## Running it on a server
 
 Possible, with the warning above. Serve it over HTTPS with the server's
@@ -344,6 +468,127 @@ POORIJA_CONFIG_ACCESS=rw docker compose -f config/control-panel.compose.yaml up 
 `deploy.conf` ذخیره می‌کند و به همهٔ سرورها می‌دهد. هر تغییر امضای یک کلید مرورگرِ
 در فهرست را هم می‌خواهد، تا نشستِ دزدیده‌شده به‌تنهایی نتواند خانوادهٔ شما را دوباره
 امضا کند. هر جای دیگری خوشه‌ها فقط دیدنی‌اند.
+
+### مدیریت همه‌چیز از داخل صفحه (از 2.98.85)
+
+ساده‌ترین شروع لانچر است: `bash scripts/panel.sh`. این لانچر Docker را روشن
+می‌کند و پورت، نشانی، و اینکه پنل با Docker بالا بیاید را می‌پرسد. کلید برنامهٔ
+احراز هویت به شکل QR کد در ترمینال نشان داده می‌شود، و کلید و لینک
+`otpauth://` آن زیرش. همهٔ کارهای زیر داخل صفحه انجام می‌شوند و هر تغییر یک کد
+تازهٔ برنامهٔ احراز هویت می‌خواهد. هر کد یک بار به کار می‌رود، پس تغییر دوم در
+همان نیم‌دقیقه منتظر کد بعدی می‌ماند.
+
+**سرورها.** هر سرورِ deploy.conf یک ردیف دارد: نشانی SSH، کلید، مسیر جایگزین،
+نشانی عمومی، خوشه و وضعیت زنده. سروری که وصل نمی‌شود، دلیلش را می‌گوید:
+
+- کلید رد شد؛
+- فایل کلید پیدا نشد؛
+- نام پیدا نشد؛
+- سرور جواب نمی‌دهد.
+
+کلیدی که رد شده هرگز خودبه‌خود دوباره امتحان نمی‌شود، چون بعضی سرورها نشانی را
+بعد از چند ورود ناموفق قفل می‌کنند. «اتصال دوباره» یک تلاش تازه می‌کند.
+
+افزودن سرور تازه:
+
+1. **افزودن سرور** را بزنید. یک نام کوتاه (`ir5`)، میزبان، کاربر و پورت SSH،
+   کلید (از کلیدهایی که پنل می‌بیند)، مسیر جایگزین اختیاری از راه سروری دیگر،
+   نشانی عمومی، منطقه و خوشه را بدهید.
+2. **آزمایش اتصال** را بزنید. فقط یک ورود SSH است و نشان می‌دهد Docker و
+   P00RIJA روی سرور هستند یا نه.
+3. کد را وارد کنید و **ذخیره** را بزنید. سرور به deploy.conf اضافه می‌شود، با
+   یک نسخهٔ پشتیبان تاریخ‌دار از آنچه بود، و پنل همان لحظه به آن وصل می‌شود.
+   ری‌استارت لازم نیست و تراشه‌های بالای صفحه هم نشانش می‌دهند.
+4. اگر P00RIJA هنوز آنجا نصب نیست، یکی از این دو:
+   - **نصب** را بزنید: پنل نصب‌کننده و فایل compose خودش را با SSH می‌فرستد و
+     با ایمیج‌های آمادهٔ Docker Hub اجرا می‌کند (برای سرور داخل ایران یک mirror
+     رجیستری بدهید)؛
+   - یا فرمان **deploy.sh** را که پنل نشان می‌دهد روی کامپیوتر خودتان اجرا
+     کنید.
+5. در **فهرست خانواده**، دکمهٔ **+ نام** را بزنید تا به فهرست امضاشده اضافه
+   شود. فهرست امضا می‌شود و به همهٔ سرورها می‌رسد.
+
+ویرایش و حذف هم همین‌طورند. حذف، سرور را از deploy.conf (و اگر بخواهید از فهرست
+خانواده) بیرون می‌برد؛ به خود سرور دست نمی‌زند. آنچه پنل در deploy.conf
+می‌نویسد فقط نویسه‌های ساده است، پس هیچ‌چیزش وقتی deploy.sh آن را می‌خواند
+فرمان نمی‌شود.
+
+**خوشه‌ها.** در بخش خوشه‌ها:
+
+- یک خوشه را با نام و سرورهایش بسازید؛
+- نامش را عوض کنید (همهٔ اعضا جابه‌جا می‌شوند)؛
+- اعضایش را با تیک‌ها تعیین کنید؛
+- به هر عضو نشانی داخلی بدهید؛
+- خوشه را حذف کنید.
+
+هر تغییر با کلید ثبت‌شدهٔ همین مرورگر امضا می‌شود، به همهٔ سرورها می‌رسد، و
+برای استقرار بعدی در deploy.conf نوشته می‌شود.
+
+**فهرست خانواده و کلید اپراتور.** بخش فهرست خانواده این‌ها را نشان می‌دهد:
+
+- فهرست امضاشده: شناسه، نشانی‌ها، منطقه، خوشه، Gateway و نشانی داخلی هر سرور؛
+- کلیدهای ادمین؛
+- نسخه‌ای که هر سرور دارد.
+
+تا وقتی هیچ کلید ادمینی ثبت نیست، کلید همین مرورگر با یک کد ثبت می‌شود. از آن
+به بعد هر تغییر امضای یک کلید ثبت‌شده را می‌خواهد. کلید اپراتور:
+
+- وقتی نیست **ساخته** می‌شود؛
+- از فایل پشتیبان **وارد** می‌شود؛
+- از آن **پشتیبان** گرفته می‌شود (یک فایل، بعد از رمز و کد)؛
+- از این کامپیوتر **برداشته** می‌شود (یک نسخه کنار deploy.conf می‌ماند)؛
+- **عوض** می‌شود. اعتماد همهٔ سرورها یکی‌یکی به کلید تازه منتقل می‌شود: هر
+  سرور کلید تازه‌اش را می‌گیرد و همان لحظه فهرستی که با آن امضا شده. اولین
+  سروری که شکست بخورد به کلید قبلی برمی‌گردد و به بعدی‌ها دست زده نمی‌شود؛
+  اجرای دوباره با همان کلید تازه ادامه می‌دهد.
+
+**حساب من.**
+
+- رمز پنل را عوض کنید؛ نشست‌های دیگر بسته می‌شوند.
+- برنامهٔ احراز هویت را عوض کنید: QR و کلید تازه فقط بعد از وارد کردن یک کد از
+  آن‌ها جایگزین می‌شوند، پس کسی قفل نمی‌شود.
+- نشست‌های دیگر را ببندید.
+- آخرین ورودها را ببینید.
+
+نشست‌ها با ری‌استارت پنل از بین نمی‌روند.
+
+**سیستم و رویدادها.** بخش سیستم با کارت همین پنل شروع می‌شود:
+
+- نسخه، مدت روشن بودن و پوشهٔ تنظیمات (قابل نوشتن یا نه)؛
+- اینکه کلید اپراتور هست یا نه؛
+- راه نگه‌داری پنل.
+
+بخش رویدادهای پنل نشان می‌دهد چه کسی چه کرد. هیچ رمز یا کلیدی هرگز در آن
+نوشته نمی‌شود.
+
+**نگه‌داری، از ترمینال:**
+
+```bash
+bash scripts/panel.sh doctor
+```
+
+```bash
+bash scripts/panel.sh backup
+```
+
+```bash
+bash scripts/panel.sh restore FILE
+```
+
+```bash
+bash scripts/panel.sh update
+```
+
+```bash
+bash scripts/panel.sh uninstall
+```
+
+- `doctor` این‌ها را بررسی می‌کند: Docker، deploy.conf، همهٔ کلیدها، یک ورود
+  SSH به هر سرور، پورت و TLS.
+- `backup` و `restore` ورود، اعتماد، چیدمان و نشست‌های پنل را در یک فایل
+  می‌ریزند و برمی‌گردانند.
+- `update` ایمیج تازه را با همان تنظیمات می‌گیرد.
+- `uninstall` کانتینر و ایمیج را برمی‌دارد؛ `--purge` ورود و تنظیمات را هم.
 
 ### اجرا روی سرور
 

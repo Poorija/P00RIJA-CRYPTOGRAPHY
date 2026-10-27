@@ -17,11 +17,16 @@ import {
 } from './ui.js';
 import { SECTIONS, runRow, runGroup, runPicked, runForm, openMailbox, showLogs, exportCsv } from './sections.js';
 import { network, networkClick, wireGatewayDrag } from './graph.js';
+import { servers as serversSection, family as familySection, account as accountSection, log as logSection, adminClick, closeDialog } from './admin.js';
 
 /* ---- the overview and the key --------------------------------------------- */
 
 function serverCard(server) {
-  const status = !server.reachable ? `<span class="tag bad">${esc(t('unreachable'))}</span>`
+  /* Why a server cannot be reached, when ssh said: a refused key or a missing
+     key file is not the same as a server that is down, and is never retried on
+     its own (a wrong key tried again and again gets an address locked out). */
+  const problem = server.problem && server.problem !== 'unreachable' ? server.problem : 'unreachable';
+  const status = !server.reachable ? `<span class="tag bad" title="${esc(server.problemDetail || '')}">${esc(t(problem))}</span>`
     : `${server.locked ? `<span class="tag good">${esc(t('locked'))}</span>` : `<span class="tag">${esc(t('unlocked'))}</span>`}${server.passwordOk ? '' : ` <span class="tag warn">${esc(t('passwordNeeded'))}</span>`}`;
   /* /healthz gives the processor as a percent and memory in MB: the
      container's use against its limit when it has one, the process's
@@ -46,7 +51,8 @@ function serverCard(server) {
     <div class="row">
       <button data-lock="${esc(server.name)}" data-on="${server.locked ? '0' : '1'}"${server.locked ? '' : ' class="acc"'}>${esc(t(server.locked ? 'lockOff' : 'lockOn'))}</button>
       ${server.passwordOk || !server.reachable ? '' : `<input type="password" data-password="${esc(server.name)}" placeholder="${esc(t('passwordNeeded'))}">`}
-    </div></div>`;
+      ${server.reachable ? '' : `<button data-reconnect="${esc(server.name)}">${esc(t('reconnect'))}</button>`}
+    </div>${!server.reachable && server.problemDetail ? `<div class="mut mono small">${esc(server.problemDetail)}</div>` : ''}</div>`;
 }
 
 function renderOverview() {
@@ -71,7 +77,40 @@ function renderKeys() {
     <div class="row"><button id="checkAgain">${esc(t('checkAgain'))}</button><button class="bad" id="forgetKey">${esc(t('forgetKey'))}</button></div></section>`;
 }
 
-state.sections.push({ id: 'overview', title: 'overview', render: renderOverview }, network, ...SECTIONS, { id: 'keys', title: 'keys', render: renderKeys });
+state.sections.push({ id: 'overview', title: 'overview', render: renderOverview }, network, ...SECTIONS, { id: 'keys', title: 'keys', render: renderKeys },
+  serversSection, familySection, accountSection, logSection);
+
+/* The sidebar: what each section is under, and its icon. */
+const GROUPS = [
+  ['groupMain', ['overview', 'network']],
+  ['groupAdmin', ['servers', 'clusters', 'family', 'keys', 'account']],
+  ['groupMonitor', ['queues', 'users', 'relays', 'traffic', 'machine', 'reports', 'bootstrap', 'system', 'log']],
+];
+const ICONS = {
+  overview: 'fa-gauge-high', network: 'fa-diagram-project', servers: 'fa-server', clusters: 'fa-layer-group', family: 'fa-file-signature', keys: 'fa-key',
+  account: 'fa-user-shield', queues: 'fa-inbox', users: 'fa-users', relays: 'fa-tower-broadcast', traffic: 'fa-chart-line', machine: 'fa-hard-drive',
+  reports: 'fa-file-lines', bootstrap: 'fa-seedling', system: 'fa-microchip', log: 'fa-scroll',
+};
+function renderSidebar() {
+  const known = new Set(state.sections.map((section) => section.id));
+  $('sidebar').innerHTML = GROUPS.map(([group, ids]) => `<div class="side-group"><div>${esc(t(group))}</div>${ids.filter((id) => known.has(id)).map((id) => {
+    const section = state.sections.find((candidate) => candidate.id === id);
+    return `<button data-tab="${esc(id)}" data-section="${esc(id)}" aria-selected="${id === state.tab}"><i class="fa-solid ${ICONS[id] || 'fa-circle'}"></i><span>${esc(t(section.title))}</span></button>`;
+  }).join('')}</div>`).join('');
+}
+
+/* The chips at the top: every server, from a light list read every few
+   seconds, so one added or removed in deploy.conf shows without a reload. */
+function renderChips(list) {
+  $('serverChips').innerHTML = (list || []).map((server) => `<span class="srv-chip ${server.reachable ? 'up' : 'down'}" data-chip="${esc(server.name)}" title="${esc(server.problem ? t(server.problem) : server.reachable ? t('reachable') : t('unreachable'))}">${esc(server.name)}</span>`).join('');
+}
+
+/* Dark by default; the choice stays in this browser. */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  try { localStorage.setItem('panel_theme', document.documentElement.dataset.theme); } catch (_error) { /* a private window */ }
+}
+applyTheme((() => { try { return localStorage.getItem('panel_theme') || 'dark'; } catch (_error) { return 'dark'; } })());
 
 /* ---- the page ------------------------------------------------------------- */
 
@@ -101,7 +140,8 @@ function render() {
   const operator = data.operator || {};
   $('trustBox').hidden = Boolean(operator.confirmed);
   $('operatorCandidates').textContent = (operator.candidates || []).map((candidate) => `${candidate.name} — ${candidate.id}`).join('\n');
-  $('tabs').innerHTML = state.sections.map((section) => `<button data-tab="${esc(section.id)}" aria-selected="${section.id === state.tab}">${esc(t(section.title))}</button>`).join('');
+  renderSidebar();
+  renderChips(state.chips || data.servers);
   renderFilter();
   state.rows.clear();
   const section = current();
@@ -114,15 +154,25 @@ state.loaded = new Set();
 
 /* The section shown, read again; the page's own polling marks itself so it
    does not keep the session alive. */
-async function reload({ poll = false } = {}) {
+/* Someone is typing, or has typed something not yet sent: a redraw now
+   would take it away. */
+function typing() {
+  if (document.activeElement?.closest?.('[data-form], [data-ram], [data-cpu], select[data-gw-id], #sections input, #sections select, #sections textarea')) return true;
+  return [...document.querySelectorAll('#sections input:not([type="checkbox"]):not([readonly]), #sections textarea')].some((field) => field.value);
+}
+
+async function reload({ poll = false, force = false } = {}) {
   const section = current();
+  const shownBefore = state.loaded.has(section.id);
   if (section.load) {
     await section.load(poll);
     state.loaded.add(section.id);
   }
-  render();
+  /* A section already on screen keeps what is being typed into it; one shown
+     for the first time is drawn with its data. */
+  if (force || !shownBefore || !typing()) render();
 }
-hooks.reload = () => refresh().then(() => reload());
+hooks.reload = () => refresh().then(() => reload({ force: true }));
 
 async function refresh({ poll = false } = {}) {
   const data = await api('/api/servers', undefined, { poll });
@@ -148,12 +198,17 @@ async function showApp() {
 
 async function openTab(id) {
   state.tab = id;
+  document.querySelector('.app')?.classList.remove('menu-open');
   render();
   await reload();
 }
 
 document.addEventListener('click', async (event) => {
   const target = event.target;
+  if (target.closest('#themeToggle, [data-theme-toggle]')) { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); return; }
+  if (target.closest('#menuToggle')) { document.querySelector('.app')?.classList.toggle('menu-open'); return; }
+  if (event.target.id === 'dialog') { closeDialog(); return; }
+  if (await adminClick(target)) return;
   if (target.closest('[data-lang-toggle]')) {
     state.lang = state.lang === 'fa' ? 'en' : 'fa';
     try { localStorage.setItem('panel_lang', state.lang); } catch (_error) { /* a private window */ }
@@ -163,7 +218,7 @@ document.addEventListener('click', async (event) => {
   }
   const tab = target.closest('[data-tab]');
   if (tab) { await openTab(tab.getAttribute('data-tab')); return; }
-  if (target.closest('#refreshButton')) { await refresh(); await reload(); return; }
+  if (target.closest('#refreshButton')) { await refresh(); await reload({ force: true }); return; }
   if (state.tab === 'network' && await networkClick(target)) return;
   const act = target.closest('[data-act]');
   if (act) { await runRow(act.getAttribute('data-act'), act.getAttribute('data-row')); return; }
@@ -196,6 +251,14 @@ document.addEventListener('click', async (event) => {
     if (!confirm(t('confirmForget'))) return;
     await forgetDeviceKey();
     state.device = null;
+    render();
+    return;
+  }
+  const again = target.closest('[data-reconnect]');
+  if (again) {
+    again.disabled = true;
+    show(explain(await api('/api/reconnect', { server: again.getAttribute('data-reconnect') })));
+    await refresh();
     render();
     return;
   }
@@ -254,11 +317,28 @@ $('trustButton').addEventListener('click', async () => {
 
 wireGatewayDrag(document);
 applyLang();
+/* The version, at the foot of the login and of the app. */
+api('/api/version', undefined, { poll: true }).then((answer) => {
+  for (const id of ['appVersion', 'footVersion']) if ($(id)) $(id).textContent = answer.version || '';
+});
+setInterval(async () => {
+  if (!state.data || document.hidden) return;
+  const answer = await api('/api/chips', undefined, { poll: true });
+  if (answer.httpStatus !== 200) return;
+  const names = (list) => (list || []).map((server) => server.name).join(',');
+  const changed = names(answer.servers) !== names(state.chips || state.data.servers);
+  state.chips = answer.servers;
+  renderChips(state.chips);
+  /* A server came or went: the rest of the page follows. */
+  if (changed && !state.busy) { await refresh({ poll: true }); renderFilter(); }
+}, 4000);
 api('/api/session', undefined, { poll: true }).then((answer) => (answer.httpStatus === 200 ? showApp() : showLogin('')));
 setInterval(async () => {
   if (!state.data || document.hidden || state.busy) return;
   await refresh({ poll: true });
-  /* Typing into a form is not interrupted by a redraw. */
-  if (state.busy || document.activeElement?.closest?.('[data-form], [data-ram], [data-cpu], select[data-gw-id]')) return;
+  /* Typing into a form is not interrupted by a redraw, nor is anything
+     half-filled lost to one; the admin's own sections are not redrawn by
+     themselves at all. */
+  if (state.busy || typing() || ['servers', 'family', 'account', 'log'].includes(state.tab) || !$('dialog').hidden) return;
   await reload({ poll: true });
 }, 20000);

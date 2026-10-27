@@ -1,3 +1,89 @@
+# P00RIJA Cryptography 2.98.85
+
+Version 2.98.85 · build chat-v178
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پنل مرکزی حرفه‌ای · A professional central panel
+
+- **صفحهٔ ورود:** لوگو، نام برنامه و نسخه در پایین صفحه را دارد. Vazirmatn برای
+  فارسی و Inter برای انگلیسی است. ظاهر مدرن است، با منوی کناری و آیکون‌ها، تم تیره
+  و روشن، و سازگار با گوشی.
+- **تراشه‌های بالای صفحه:** وضعیت هر سرور را نشان می‌دهند و با اضافه یا کم شدن
+  سرور، بی‌آنکه صفحه دوباره بارگذاری شود، خودشان عوض می‌شوند.
+
+- **The login page:** it has the logo, the app's name, and the version at the
+  foot. Vazirmatn is used for Persian and Inter for English. The look is modern,
+  with a sidebar and icons, dark and light themes, and phone-friendly layout.
+- **Chips at the top:** they show each server's state, and change by
+  themselves, with no reload, when a server is added or removed.
+
+## سرورها، خوشه‌ها و فهرست خانواده از داخل پنل · Servers, clusters, and the family list from the panel
+
+- **سرور تازه:** با یک جادوگر اضافه می‌شود. آزمایش اتصال فقط یک ورود SSH است. نصب
+  P00RIJA روی سرور به دو راه ممکن است: از داخل پنل با ایمیج‌های آماده، یا با فرمان
+  deploy.sh که پنل نشان می‌دهد. بعد سرور به فهرست خانواده اضافه می‌شود.
+- **ویرایش و حذف سرور:** با پشتیبان تاریخ‌دار از deploy.conf انجام می‌شود. آنچه پنل
+  می‌نویسد هرگز در deploy.sh به فرمان تبدیل نمی‌شود.
+- **خوشه‌ها:** ساخته می‌شوند، نامشان عوض می‌شود، اعضا و نشانی داخلی‌شان تعیین
+  می‌شود، و حذف می‌شوند. هر تغییر امضا می‌شود و به همهٔ سرورها می‌رسد.
+- **فهرست امضاشدهٔ خانواده:** ورودی‌ها و کلیدهای ادمینش را می‌شود افزود و حذف کرد.
+- **کلید اپراتور:** ساخته، وارد، پشتیبان‌گیری و از این کامپیوتر برداشته می‌شود، یا
+  به شکل امن عوض می‌شود: سرور به سرور، و با برگشت سروری که شکست بخورد.
+
+- **A new server:** it is added with a wizard. The connection test is a single
+  SSH login. P00RIJA goes on the server either from the panel with the
+  ready-made images, or with the deploy.sh command the panel shows. Then the
+  server joins the family list.
+- **Editing and removing a server:** each change keeps a dated backup of
+  deploy.conf. Nothing the panel writes can become a command in deploy.sh.
+- **Clusters:** they are created, renamed, given members and inside addresses,
+  and deleted. Each change is signed and handed to every server.
+- **The signed family list:** its entries and admin keys can be added and
+  removed.
+- **The operator key:** it can be created, imported, backed up, and removed
+  from this computer, or replaced safely: server by server, with a server that
+  fails put back.
+
+## حساب من و QR کد ورود دومرحله‌ای · My account, and a QR code for two-step login
+
+- QR کد برنامهٔ احراز هویت در ترمینال و در صفحه نشان داده می‌شود، و کلید و لینک آن
+  هم زیرش هست.
+- از داخل پنل می‌شود رمز را عوض کرد، برنامهٔ احراز هویت را جایگزین کرد (کلید تازه
+  بعد از یک کد درست جایگزین می‌شود)، نشست‌های دیگر را بست، و ورودها را دید.
+- هر تغییر یک کد تازه می‌خواهد. نشست‌ها با ری‌استارت پنل از بین نمی‌روند.
+
+- The authenticator's QR code is shown in the terminal and in the page, with
+  its secret and link under it.
+- From the panel you can change the password, replace the authenticator (the
+  new key takes over after one right code), sign out other sessions, and see
+  the sign-ins.
+- Every change asks for a fresh code. Sessions survive a restart of the panel.
+
+## اتصال درست و امن به سرورها · Reaching the servers, correctly and safely
+
+- پنل داخل Docker کلیدهای SSH را با مسیری که deploy.conf می‌گوید پیدا می‌کند و از
+  مسیر جایگزینِ هر سرور (JUMP) می‌رود.
+- کلیدی که رد شود دیگر خودبه‌خود دوباره امتحان نمی‌شود، پس هیچ سروری نشانی شما را
+  قفل نمی‌کند.
+- فهرست سرورها با deploy.conf عوض می‌شود. هر سروری که وصل نیست، دلیلش را می‌گوید.
+- برای نگه‌داری پنل، `panel.sh doctor`، `backup`، `restore` و `uninstall` اضافه شدند.
+
+- The panel in Docker finds the SSH keys by the path deploy.conf gives, and
+  goes through each server's jump.
+- A refused key is never tried again by itself, so no server locks your
+  address out.
+- The list of servers follows deploy.conf. A server that cannot be reached says
+  why.
+- For upkeep, `panel.sh doctor`, `backup`, `restore`, and `uninstall` were
+  added.
+
+---
+
 # P00RIJA Cryptography 2.98.84
 
 Version 2.98.84 · build chat-v177

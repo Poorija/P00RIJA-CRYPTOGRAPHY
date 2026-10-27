@@ -11,6 +11,17 @@ WORKDIR /app
 COPY scripts/lib/relay-identity.js scripts/lib/relay-directory.js scripts/lib/operator-signature.js ./scripts/lib/
 COPY tools/relay-directory.mjs tools/admin-key.mjs tools/control-panel.mjs tools/control-panel.html tools/control-panel.js ./tools/
 COPY tools/panel ./tools/panel
+# The installer and compose file the panel sends to a new server, and the
+# version it shows.
+COPY scripts/docker-install.sh ./scripts/docker-install.sh
+COPY docker/compose.yaml ./docker/compose.yaml
+COPY package.json ./package.json
+# The logo and the fonts the page is set in.
+COPY assets/icon-app.svg ./assets/icon-app.svg
+COPY fonts/Vazirmatn/Vazirmatn-VariableFont_wght.ttf ./fonts/Vazirmatn/Vazirmatn-VariableFont_wght.ttf
+COPY fonts/Inter-Regular.ttf ./fonts/Inter-Regular.ttf
+COPY vendor/fontawesome/css/all.min.css ./vendor/fontawesome/css/all.min.css
+COPY vendor/fontawesome/webfonts ./vendor/fontawesome/webfonts
 # deploy.conf and the operator's files in /config (read-only unless the
 # operator key is there to change the family list), what the panel writes
 # (its login, the operator it trusts, the graph layout, the audit log) in

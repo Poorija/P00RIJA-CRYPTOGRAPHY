@@ -37,18 +37,25 @@
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { configDir, loadState, editRelay, signDraft, saveDraft, saveSigned } from '../relay-directory.mjs';
+import { configDir, loadState, editRelay, applyEdit, serverEntry, initKey, signDraft, saveDraft, saveSigned, parseDeployConf } from '../relay-directory.mjs';
 import { buildGraph } from './web/graphdata.js';
 import {
-  loadServers, serverRequest, connect, disconnect, makeAudit, createFamily, describe, setLock,
+  loadServers, serverRequest, connect, disconnect, reconnect, makeAudit, createFamily, describe, setLock,
+  sshArgs, onServerAsync, resolveKeyPath, sshFailure, SSH_FAILURES,
   sendJson, readBody, cookieOf, readJsonFile,
 } from './core.mjs';
-import { checkPassword, checkCode } from './login.mjs';
+import { checkPassword, checkCode, otpauthUri } from './login.mjs';
+import { stepUp, changePassword, beginTotp, confirmTotp, history } from './account.mjs';
+import { qrSvg } from './qr.mjs';
+import { readServers, setServer, removeServer, setField, writeConf, validName, SERVER_KEYS } from './deployconf.mjs';
+import { clusterView, planClusterChange, rotateOperator } from './family.mjs';
+import { startJob, startTask, jobView } from './jobs.mjs';
 
 const require = createRequire(import.meta.url);
 const signatures = require('../../scripts/lib/operator-signature.js');
@@ -66,6 +73,7 @@ const COOKIE = 'panel_session';
 const LOCK_PATH = '/control-panel/lock';
 const DIRECTORY_PATH = '/control-panel/directory';
 const LAYOUT_FILE = 'control-panel-layout.json';
+const SESSIONS_FILE = 'control-panel-sessions.json';
 
 const say = (line) => process.stdout.write(`${line}\n`);
 
@@ -76,6 +84,8 @@ let family = null;
 let audit = () => {};
 let loginFile = '';
 let layoutFile = '';
+let sessionsFile = '';
+let auditFile = '';
 let configPath = '';
 let allowedOrigins = new Set();
 let allowedHosts = new Set();
@@ -87,11 +97,44 @@ const directoryNonces = new Map();
 
 setInterval(() => {
   const now = Date.now();
-  for (const [token, entry] of sessions) if (now - entry.lastSeen > SESSION_IDLE_MS) sessions.delete(token);
+  let dropped = false;
+  for (const [key, entry] of sessions) if (now - entry.lastSeen > SESSION_IDLE_MS) { sessions.delete(key); dropped = true; }
+  if (dropped) saveSessions();
   for (const [address, entry] of failures) if (entry.until && entry.until <= now) failures.delete(address);
   for (const [nonce, until] of lockNonces) if (until <= now) lockNonces.delete(nonce);
   for (const [nonce, until] of directoryNonces) if (until <= now) directoryNonces.delete(nonce);
 }, 60000).unref();
+
+/* The time the authenticator codes are checked against. A suite can move it
+   forward (POORIJA_PANEL_CLOCK_FILE, milliseconds to add) so one single-use
+   code can follow another without waiting half a minute; unset, it is the
+   clock. */
+function now() {
+  if (!env.POORIJA_PANEL_CLOCK_FILE) return Date.now();
+  try { return Date.now() + (Number(fs.readFileSync(env.POORIJA_PANEL_CLOCK_FILE, 'utf8')) || 0); } catch (_error) { return Date.now(); }
+}
+
+/* Sessions outlive a restart: kept in the state folder by the hash of their
+   token (the token itself only ever in the browser's cookie), with the same
+   idle timeout. */
+const tokenKey = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+let sessionsSavedAt = 0;
+function saveSessions() {
+  if (!sessionsFile) return;
+  sessionsSavedAt = Date.now();
+  try {
+    const temp = `${sessionsFile}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+    fs.renameSync(temp, sessionsFile);
+  } catch (_error) { /* the session still works until a restart */ }
+}
+function loadSessions() {
+  const saved = readJsonFile(sessionsFile) || {};
+  const cutoff = Date.now() - SESSION_IDLE_MS;
+  for (const [key, entry] of Object.entries(saved)) {
+    if (/^[a-f0-9]{64}$/.test(key) && entry && entry.lastSeen > cutoff && typeof entry.user === 'string') sessions.set(key, { user: entry.user, since: Number(entry.since) || entry.lastSeen, lastSeen: entry.lastSeen });
+  }
+}
 
 /* ---- who may use it ------------------------------------------------------- */
 
@@ -109,12 +152,16 @@ function placeAllowed(req) {
 function sessionOf(req) {
   const token = cookieOf(req, COOKIE);
   if (!/^[a-f0-9]{64}$/.test(token)) return null;
-  const entry = sessions.get(token);
+  const key = tokenKey(token);
+  const entry = sessions.get(key);
   if (!entry) return null;
-  const now = Date.now();
-  if (now - entry.lastSeen > SESSION_IDLE_MS) { sessions.delete(token); return null; }
-  if (req.headers['x-panel-poll'] !== '1') entry.lastSeen = now;
-  return { token, ...entry };
+  const at = Date.now();
+  if (at - entry.lastSeen > SESSION_IDLE_MS) { sessions.delete(key); saveSessions(); return null; }
+  if (req.headers['x-panel-poll'] !== '1') {
+    entry.lastSeen = at;
+    if (at - sessionsSavedAt > 60000) saveSessions();
+  }
+  return { key, ...entry };
 }
 
 function writeLogin(record) {
@@ -136,18 +183,250 @@ function clientAddress(req) {
   return named && /^[0-9a-fA-F.:]{2,45}$/.test(named) ? bare(named) : socket;
 }
 
+/* A failed sign-in or a wrong step-up code: five lock the address. */
+function strike(address, what = 'login failed') {
+  const at = Date.now();
+  const strikes = failures.get(address);
+  const count = (strikes && !strikes.until ? strikes.count : 0) + 1;
+  failures.set(address, { count, until: count >= MAX_FAILURES ? at + LOCK_MS : 0 });
+  audit(`${what} from ${address}${count >= MAX_FAILURES ? ', address locked' : ''}`);
+}
+
+/* Every change to the panel itself, its servers, the family list or the
+   operator key asks for a current code. A wrong one counts against the
+   address like a failed sign-in; one already used is refused as used. */
+function confirmCode(req, res, code) {
+  const address = clientAddress(req);
+  if (lockedOut(req, res)) return false;
+  const record = readJsonFile(loginFile);
+  const verdict = stepUp(record, code, now());
+  if (!verdict.ok) {
+    if (verdict.reason === 'bad-code') strike(address, 'step-up code wrong');
+    sendJson(res, 403, { ok: false, reason: verdict.reason });
+    return false;
+  }
+  writeLogin({ ...readJsonFile(loginFile), lastStep: verdict.step });
+  return true;
+}
+
+/* ---- servers in deploy.conf ------------------------------------------------ */
+
+const testsBy = new Map();
+const configWritable = () => { try { fs.accessSync(configPath, fs.constants.W_OK); return true; } catch (_error) { return false; } };
+const confText = () => { try { return fs.readFileSync(path.join(configPath, 'deploy.conf'), 'utf8'); } catch (_error) { return ''; } };
+
+/* What a server's settings must look like before they are written or tried. */
+function cleanFields(raw) {
+  const fields = {};
+  for (const key of SERVER_KEYS) {
+    if (raw?.[key] === undefined || raw[key] === null || String(raw[key]).trim() === '') continue;
+    const value = String(raw[key]).trim();
+    if (value.length > 400 || /['\n\r\0]/.test(value)) throw new Error(`bad ${key}`);
+    fields[key] = value;
+  }
+  /* deploy.sh sources deploy.conf as shell and puts some values into a
+     command a shell runs (a jump's ProxyCommand), so every value is held to
+     the characters it needs and nothing a shell would act on. */
+  const allowed = {
+    SSH_HOST: /^[A-Za-z0-9.:-]{1,253}$/,
+    SSH_PORT: /^\d{1,5}$/,
+    SSH_USER: /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/,
+    SSH_KEY: /^[A-Za-z0-9._~\/-]{1,300}$/,
+    REMOTE_DIR: /^[A-Za-z0-9._~\/-]{1,300}$/,
+    PUBLIC_URL: /^https?:\/\/[A-Za-z0-9.:-]+(\/[A-Za-z0-9._~\/-]*)?$/,
+    REGION: /^[a-z][a-z-]{0,39}$/,
+    GATEWAY: /^\d{1,2}$/,
+    CLUSTER: /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$/u,
+    ROLE: /^[a-z][a-z-]{0,19}$/,
+  };
+  for (const [key, pattern] of Object.entries(allowed)) if (fields[key] !== undefined && !pattern.test(fields[key])) throw new Error(`bad ${key}`);
+  if (fields.SSH_HOST === undefined) throw new Error('bad SSH_HOST');
+  if (fields.JUMP && !validName(fields.JUMP)) throw new Error('bad JUMP');
+  if (fields.INSIDE !== undefined) {
+    const inside = fields.INSIDE.split(/[,\s]+/).filter(Boolean);
+    if (!inside.length || inside.length > 4 || !inside.every((origin) => /^https?:\/\/[A-Za-z0-9.\-[\]:]{1,200}$/.test(origin))) throw new Error('bad INSIDE');
+    fields.INSIDE = inside.join(',');
+  }
+  return fields;
+}
+
+/* An ssh target from settings not yet saved, the way loadServers reads them. */
+function sshFromFields(fields) {
+  const conf = parseDeployConf(confText());
+  const ssh = {
+    host: fields.SSH_HOST, user: fields.SSH_USER || os.userInfo().username, port: fields.SSH_PORT || '22',
+    key: fields.SSH_KEY ? resolveKeyPath(fields.SSH_KEY) : '', dir: fields.REMOTE_DIR || '~/work/pkg',
+  };
+  if (fields.JUMP && conf.servers.includes(fields.JUMP)) {
+    const key = conf.fields(fields.JUMP, 'SSH_KEY');
+    ssh.jump = { host: conf.fields(fields.JUMP, 'SSH_HOST'), user: conf.fields(fields.JUMP, 'SSH_USER') || ssh.user, port: conf.fields(fields.JUMP, 'SSH_PORT') || '22', key: key ? resolveKeyPath(key) : '' };
+  }
+  return ssh;
+}
+
+function sshKeysHere() {
+  const dir = path.join(os.homedir(), '.ssh');
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && !entry.name.endsWith('.pub') && !/^(known_hosts|config|authorized_keys|environment)/.test(entry.name) && !entry.name.endsWith('.old'))
+      .map((entry) => entry.name).sort();
+  } catch (_error) { return []; }
+}
+
+/* One login: is Docker there, is the stack, which version. */
+const PROBE = `printf 'docker=%s\\n' "$(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+printf 'installed=%s\\n' "$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c '^Poorija-Cryptography_ChatSignal$')"
+printf 'version=%s\\n' "$(curl -sk --max-time 5 https://127.0.0.1:8585/ 2>/dev/null | grep -o '?v=[0-9][^\"&]*' | head -1 | cut -c4-)"
+`;
+const shellArg = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+async function serversRoute(req, res, url, body, who) {
+  if (url.pathname === '/api/servers/test') {
+    /* Each test is a login somewhere: a few a minute per session. */
+    const recent = (testsBy.get(who.key) || []).filter((at) => Date.now() - at < 60000);
+    if (recent.length >= 10) return sendJson(res, 429, { ok: false, reason: 'too-many-tests' });
+    testsBy.set(who.key, [...recent, Date.now()]);
+    let fields;
+    try { fields = cleanFields(body.fields); } catch (error) { return sendJson(res, 400, { ok: false, reason: error.message }); }
+    const ssh = sshFromFields(fields);
+    /* Only a key from the SSH folder the panel was given, never another file. */
+    const keys = path.join(os.homedir(), '.ssh');
+    if (ssh.key && !path.resolve(ssh.key).startsWith(`${keys}${path.sep}`)) return sendJson(res, 400, { ok: false, reason: 'key-outside-ssh-folder' });
+    if (ssh.key && !fs.existsSync(ssh.key)) return sendJson(res, 200, { ok: false, problem: 'key-missing', detail: `no key ${path.basename(ssh.key)} in the SSH folder` });
+    const run = await onServerAsync(ssh, PROBE, 30000);
+    audit(`${who.user} tested ${fields.SSH_USER || ''}@${fields.SSH_HOST}: ${run.ok ? 'answered' : 'no answer'}`);
+    if (!run.ok) return sendJson(res, 200, { ok: false, problem: sshFailure(run.err) || 'unreachable', detail: String(run.err).trim().split('\n').pop()?.slice(0, 200) || '' });
+    const seen = Object.fromEntries(run.out.split('\n').map((line) => /^(\w+)=(.*)$/.exec(line.trim())).filter(Boolean).map((match) => [match[1], match[2]]));
+    return sendJson(res, 200, { ok: true, docker: seen.docker || '', installed: seen.installed === '1', version: seen.version || '' });
+  }
+  if (url.pathname === '/api/servers/save') {
+    const name = String(body.name || '');
+    let fields;
+    try {
+      if (!validName(name)) throw new Error('bad name');
+      fields = cleanFields(body.fields);
+    } catch (error) { return sendJson(res, 400, { ok: false, reason: error.message }); }
+    if (!configWritable()) return sendJson(res, 409, { ok: false, reason: 'read-only' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    try { writeConf(configPath, setServer(confText(), name, fields)); } catch (error) { return sendJson(res, 400, { ok: false, reason: error.message }); }
+    audit(`${who.user} saved server ${name} in deploy.conf`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/servers/remove') {
+    const name = String(body.name || '');
+    if (!readServers(confText()).some((server) => server.name === name)) return sendJson(res, 404, { ok: false, reason: 'no-such-server' });
+    if (!configWritable()) return sendJson(res, 409, { ok: false, reason: 'read-only' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    writeConf(configPath, removeServer(confText(), name));
+    audit(`${who.user} removed server ${name} from deploy.conf`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/servers/install') {
+    const server = servers.find((candidate) => candidate.name === body.name);
+    if (!server?.ssh) return sendJson(res, 404, { ok: false, reason: 'no-such-server' });
+    const domain = String(body.domain || '');
+    const email = String(body.email || '');
+    const registry = String(body.registry || '');
+    if (!/^[A-Za-z0-9.-]{1,253}$/.test(domain) || (email && !/^[^\s'"\\]+@[^\s'"\\]+$/.test(email)) || (registry && !/^[A-Za-z0-9.:/-]{1,200}$/.test(registry))) {
+      return sendJson(res, 400, { ok: false, reason: 'bad-options' });
+    }
+    if (SSH_FAILURES.has(server.sshState)) return sendJson(res, 409, { ok: false, reason: server.sshState });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    /* The panel's own copies of the installer and its compose file go with it,
+       so a server installs the release the panel is. */
+    const installer = fs.readFileSync(path.join(HERE, '..', '..', 'scripts', 'docker-install.sh')).toString('base64');
+    const compose = fs.readFileSync(path.join(HERE, '..', '..', 'docker', 'compose.yaml')).toString('base64');
+    const options = [`--domain ${shellArg(domain)}`, ...(email ? [`--email ${shellArg(email)}`] : []), ...(registry ? [`--registry ${shellArg(registry)}`] : [])].join(' ');
+    const script = `set -e
+mkdir -p ~/p00rija-installer/scripts ~/p00rija-installer/docker
+printf '%s' '${installer}' | base64 -d > ~/p00rija-installer/scripts/docker-install.sh
+printf '%s' '${compose}' | base64 -d > ~/p00rija-installer/docker/compose.yaml
+bash ~/p00rija-installer/scripts/docker-install.sh --yes ${options} < /dev/null
+`;
+    const name = server.name;
+    const job = startJob(`install on ${name}`, ['ssh', ...sshArgs(server.ssh), 'bash -s'], {
+      input: script,
+      onDone: (done) => audit(`install on ${name} finished (exit ${done.code})`),
+    });
+    audit(`${who.user} install on ${name} started (${domain})`);
+    return sendJson(res, 200, { ok: true, job });
+  }
+  return sendJson(res, 404, { ok: false });
+}
+
+/* ---- the account ----------------------------------------------------------- */
+
+function signOutOthers(who) {
+  let count = 0;
+  for (const key of [...sessions.keys()]) if (key !== who.key) { sessions.delete(key); count += 1; }
+  saveSessions();
+  return count;
+}
+
+/* A locked address is answered the same whatever it sends, before any
+   password or code is looked at: otherwise the answers would still tell a
+   right password from a wrong one while it is locked. */
+function lockedOut(req, res) {
+  const strikes = failures.get(clientAddress(req));
+  if (!(strikes?.until > Date.now())) return false;
+  sendJson(res, 429, { ok: false, reason: 'locked', retryAfter: Math.ceil((strikes.until - Date.now()) / 1000) });
+  return true;
+}
+
+async function account(req, res, url, body, who) {
+  if (lockedOut(req, res)) return undefined;
+  if (url.pathname === '/api/account/password') {
+    if (!confirmCode(req, res, body.code)) return undefined;
+    let record;
+    try { record = changePassword(readJsonFile(loginFile), { current: body.current, next: body.next }); } catch (error) {
+      if (error.message === 'bad-password') strike(clientAddress(req), 'password change with a wrong password');
+      return sendJson(res, error.message === 'bad-password' ? 403 : 400, { ok: false, reason: error.message });
+    }
+    writeLogin(record);
+    const count = signOutOthers(who);
+    audit(`${who.user} password changed; signed out ${count} other session(s)`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/account/totp/begin') {
+    if (!checkPassword(readJsonFile(loginFile), who.user, body.password)) {
+      strike(clientAddress(req), 'authenticator change with a wrong password');
+      return sendJson(res, 403, { ok: false, reason: 'bad-password' });
+    }
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const { record, secret } = beginTotp(readJsonFile(loginFile));
+    writeLogin(record);
+    const uri = otpauthUri({ ...record, totp: secret });
+    audit(`${who.user} began a new authenticator`);
+    return sendJson(res, 200, { ok: true, secret, uri, svg: qrSvg(uri) });
+  }
+  if (url.pathname === '/api/account/totp/confirm') {
+    let record;
+    try { record = confirmTotp(readJsonFile(loginFile), body.code, now()); } catch (error) {
+      return sendJson(res, 400, { ok: false, reason: error.message });
+    }
+    writeLogin(record);
+    audit(`${who.user} authenticator replaced`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/account/sessions/revoke') {
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const count = signOutOthers(who);
+    audit(`${who.user} signed out ${count} other session(s)`);
+    return sendJson(res, 200, { ok: true, count });
+  }
+  return sendJson(res, 404, { ok: false });
+}
+
 async function login(req, res, body) {
   const address = clientAddress(req);
-  const now = Date.now();
+  const at = Date.now();
   const strikes = failures.get(address);
-  if (strikes?.until > now) return sendJson(res, 429, { ok: false, reason: 'locked', retryAfter: Math.ceil((strikes.until - now) / 1000) });
+  if (strikes?.until > at) return sendJson(res, 429, { ok: false, reason: 'locked', retryAfter: Math.ceil((strikes.until - at) / 1000) });
   const record = readJsonFile(loginFile);
   const passwordOk = checkPassword(record, body.username, body.password);
-  const step = passwordOk ? checkCode(record.totp, body.code, { now, lastStep: Number(record.lastStep) || 0 }) : -1;
+  const step = passwordOk ? checkCode(record.totp, body.code, { now: now(), lastStep: Number(record.lastStep) || 0 }) : -1;
   if (step < 0) {
-    const count = (strikes && !strikes.until ? strikes.count : 0) + 1;
-    failures.set(address, { count, until: count >= MAX_FAILURES ? now + LOCK_MS : 0 });
-    audit(`login failed from ${address}${count >= MAX_FAILURES ? ', address locked' : ''}`);
+    strike(address);
     return sendJson(res, 401, { ok: false, reason: 'login-failed' });
   }
   failures.delete(address);
@@ -157,7 +436,8 @@ async function login(req, res, body) {
     if (oldest) sessions.delete(oldest[0]);
   }
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { user: record.username, lastSeen: now, since: now });
+  sessions.set(tokenKey(token), { user: record.username, lastSeen: at, since: at });
+  saveSessions();
   audit(`login ${record.username} ok from ${address}`);
   res.writeHead(200, {
     'Content-Type': 'application/json', 'Cache-Control': 'no-store',
@@ -339,16 +619,49 @@ function directoryView() {
   };
 }
 
+/* The signed list, handed to every server; what each said. */
+async function publishDirectory(doc) {
+  const published = [];
+  for (const server of servers) {
+    const answer = await serverRequest(server, '/Monitor_Server/directory', { method: 'POST', body: doc });
+    published.push({ server: server.name, ok: answer.json?.ok === true || answer.json?.reason === 'stale', reason: answer.json?.reason || (answer.status ? '' : 'unreachable') });
+  }
+  family.forget();
+  return published;
+}
+
+/* A cluster or inside address changed in the list is written to deploy.conf
+   too, so the next deploy keeps it. */
+function clustersToDeployConf(draft, names) {
+  if (!configWritable()) return;
+  let text = confText();
+  const inConf = new Set(readServers(text).map((server) => server.name));
+  let changed = false;
+  for (const relay of draft.relays || []) {
+    if (!names.has(relay.name) || !inConf.has(relay.name)) continue;
+    text = setField(text, relay.name, 'CLUSTER', relay.cluster || '');
+    text = setField(text, relay.name, 'INSIDE', (relay.inside || []).join(','));
+    changed = true;
+  }
+  if (changed) writeConf(configPath, text);
+}
+
 async function editDirectory(res, body, who) {
   const { state, canEdit, reason } = operatorFiles();
   if (!canEdit) return sendJson(res, 409, { ok: false, reason });
-  const edits = body.edits;
-  if (!Array.isArray(edits) || !edits.length || edits.length > 20) return sendJson(res, 400, { ok: false, reason: 'bad-edits' });
+  /* What is signed is exactly what is sent: a list of edits, or one cluster
+     change the panel turns into edits. */
+  const signedBody = body.change !== undefined ? { change: body.change } : { edits: body.edits };
+  let edits;
+  try {
+    edits = body.change !== undefined ? planClusterChange(state.draft, body.change) : body.edits;
+  } catch (error) { return sendJson(res, 400, { ok: false, reason: 'bad-edits', detail: error.message }); }
+  if (!Array.isArray(edits) || !edits.length || edits.length > 40) return sendJson(res, 400, { ok: false, reason: 'bad-edits' });
   if (!body.signature) return sendJson(res, 403, { ok: false, reason: 'signature-needed' });
   const directory = await family.directory();
   if (!directory || directory.operator?.id !== state.key.id) return sendJson(res, 409, { ok: false, reason: 'operator-unconfirmed' });
   const verdict = signatures.verifyRequest(String(body.signature), {
-    method: 'POST', path: DIRECTORY_PATH, body: { edits }, relay: state.key.id,
+    method: 'POST', path: DIRECTORY_PATH, body: signedBody, relay: state.key.id,
     keys: signatures.signingKeys(directory, directory.operator.key),
     nonceSeen: (nonce) => (directoryNonces.get(nonce) || 0) > Date.now(),
   });
@@ -358,14 +671,31 @@ async function editDirectory(res, body, who) {
   }
   directoryNonces.set(verdict.nonce, Date.now() + 10 * 60 * 1000);
   let draft = state.draft;
+  const touched = new Set();
   try {
     for (const edit of edits) {
-      const changes = {};
-      if (edit?.op === 'cluster') changes.cluster = String(edit.cluster ?? '');
-      else if (edit?.op === 'inside') changes.inside = edit.inside;
-      else if (edit?.op === 'gateway') changes.gateway = edit.gateway;
-      else throw new Error(`unknown change ${String(edit?.op).slice(0, 20)}`);
-      draft = editRelay(draft, String(edit.name || ''), changes);
+      const name = String(edit?.name || '');
+      if (edit?.op === 'cluster' || edit?.op === 'inside' || edit?.op === 'gateway') {
+        const changes = edit.op === 'cluster' ? { cluster: String(edit.cluster ?? '') } : edit.op === 'inside' ? { inside: edit.inside } : { gateway: edit.gateway };
+        draft = editRelay(draft, name, changes);
+        if (edit.op !== 'gateway') touched.add(name);
+      } else if (edit?.op === 'remove') {
+        const relay = (draft.relays || []).find((entry) => entry.name === name);
+        if (!relay) throw new Error(`no relay called ${name}`);
+        draft = applyEdit(draft, { op: 'remove', id: relay.id });
+      } else if (edit?.op === 'add') {
+        const server = servers.find((candidate) => candidate.name === name);
+        if (!server?.relayId) throw new Error(`${name} has not shown a verified relay identity`);
+        const existing = (draft.relays || []).find((entry) => entry.id === server.relayId || entry.name === name);
+        draft = applyEdit(draft, { op: 'add', relay: serverEntry(parseDeployConf(confText()), name, existing, { id: server.relayId, origin: server.publicUrl }) });
+        touched.add(name);
+      } else if (edit?.op === 'admin-add') {
+        draft = applyEdit(draft, { op: 'admin-add', admin: { name: String(edit.name || ''), key: String(edit.key || '') } });
+      } else if (edit?.op === 'admin-remove') {
+        draft = applyEdit(draft, { op: 'admin-remove', name });
+      } else {
+        throw new Error(`unknown change ${String(edit?.op).slice(0, 20)}`);
+      }
     }
   } catch (error) {
     return sendJson(res, 400, { ok: false, reason: 'bad-edits', detail: error.message });
@@ -373,14 +703,187 @@ async function editDirectory(res, body, who) {
   saveDraft(configPath, draft);
   const doc = signDraft(loadState(configPath));
   saveSigned(configPath, doc);
-  const published = [];
-  for (const server of servers) {
-    const answer = await serverRequest(server, '/Monitor_Server/directory', { method: 'POST', body: doc });
-    published.push({ server: server.name, ok: answer.json?.ok === true || answer.json?.reason === 'stale', reason: answer.json?.reason || (answer.status ? '' : 'unreachable') });
-  }
-  family.forget();
+  clustersToDeployConf(draft, touched);
+  const published = await publishDirectory(doc);
   audit(`${who.user} family list ${doc.body.serial} signed (${edits.map((edit) => `${edit.op} ${String(edit.name || '').slice(0, 30)}`).join(', ')}) by ${verdict.name}; ${published.filter((entry) => entry.ok).length}/${published.length} servers took it`);
   return sendJson(res, 200, { ok: true, serial: doc.body.serial, published });
+}
+
+/* ---- the family list and the operator key, as the page shows them ---------- */
+
+async function familyView() {
+  const { state, canEdit, reason } = operatorFiles();
+  const draft = state.draft || { relays: [], admins: [] };
+  const carried = await Promise.all(servers.map(async (server) => {
+    const answer = await serverRequest(server, '/relay-directory', { auth: false, timeout: 8000 });
+    return { server: server.name, serial: Number(answer.json?.body?.serial) || 0 };
+  }));
+  return {
+    ok: true, canEdit, reason,
+    operator: { present: Boolean(state.key?.privateKey), id: state.key?.id || '', name: String(state.key?.name || '') },
+    serial: state.signed?.body?.serial || 0,
+    signedAt: state.signed?.body?.issuedAt || '',
+    relays: (draft.relays || []).map((relay) => ({
+      name: String(relay.name || ''), id: String(relay.id || ''), origins: (relay.origins || []).map(String), region: String(relay.region || ''),
+      gateway: Number(relay.gateway) || 0, cluster: String(relay.cluster || ''), inside: (relay.inside || []).map(String),
+    })),
+    admins: (draft.admins || []).map((admin) => ({ name: String(admin.name || ''), id: String(admin.id || '') })),
+    clusters: clusterView(draft),
+    carried,
+  };
+}
+
+const stampNow = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+const writePrivateJson = (file, value) => {
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, file);
+};
+
+/* The keys of an operator key file belong together: the private key makes
+   the public one, and the id is its hash. */
+function checkKeyFile(file) {
+  const publicKey = String(file?.publicKey || '');
+  const derived = crypto.createPublicKey(crypto.createPrivateKey(String(file?.privateKey || ''))).export({ type: 'spki', format: 'der' }).toString('base64');
+  if (derived !== publicKey) throw new Error('the private key does not make that public key');
+  if (crypto.createHash('sha256').update(Buffer.from(publicKey, 'base64')).digest('hex') !== file.id) throw new Error('the id is not that key’s');
+  return { name: String(file.name || 'operator').slice(0, 64), id: file.id, publicKey, privateKey: String(file.privateKey), createdAt: String(file.createdAt || '') };
+}
+
+async function operatorRoute(req, res, url, body, who) {
+  if (lockedOut(req, res)) return undefined;
+  const keyFile = path.join(configPath, 'operator-key.json');
+  const present = fs.existsSync(keyFile);
+  if (url.pathname === '/api/family/bootstrap-admin') {
+    const { state, canEdit, reason } = operatorFiles();
+    if (!canEdit) return sendJson(res, 409, { ok: false, reason });
+    if ((state.draft.admins || []).length) return sendJson(res, 409, { ok: false, reason: 'admins-exist' });
+    let draft;
+    try { draft = applyEdit(state.draft, { op: 'admin-add', admin: { name: String(body.name || ''), key: String(body.key || '') } }); } catch (error) {
+      return sendJson(res, 400, { ok: false, reason: 'bad-key', detail: error.message });
+    }
+    if (!confirmCode(req, res, body.code)) return undefined;
+    saveDraft(configPath, draft);
+    const doc = signDraft(loadState(configPath));
+    saveSigned(configPath, doc);
+    const published = await publishDirectory(doc);
+    audit(`${who.user} listed the first admin key ${String(body.name || '').slice(0, 40)}; family list ${doc.body.serial}, ${published.filter((entry) => entry.ok).length}/${published.length} servers took it`);
+    return sendJson(res, 200, { ok: true, serial: doc.body.serial, published });
+  }
+  if (!configWritable()) return sendJson(res, 409, { ok: false, reason: 'read-only' });
+  if (url.pathname === '/api/operator/create') {
+    if (present) return sendJson(res, 409, { ok: false, reason: 'exists' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const made = initKey(configPath, String(body.name || 'operator').slice(0, 64));
+    if (!loadState(configPath).draft) saveDraft(configPath, { relays: [], revoked: [], admins: [] });
+    audit(`${who.user} made an operator key ${made.id.slice(0, 16)}`);
+    return sendJson(res, 200, { ok: true, id: made.id });
+  }
+  if (url.pathname === '/api/operator/import') {
+    if (present) return sendJson(res, 409, { ok: false, reason: 'exists' });
+    let file;
+    try { file = checkKeyFile(body.file); } catch (error) { return sendJson(res, 400, { ok: false, reason: 'bad-key-file', detail: error.message }); }
+    if (!confirmCode(req, res, body.code)) return undefined;
+    writePrivateJson(keyFile, file);
+    if (!loadState(configPath).draft) saveDraft(configPath, { relays: [], revoked: [], admins: [] });
+    family.forget();
+    audit(`${who.user} imported the operator key ${file.id.slice(0, 16)}`);
+    return sendJson(res, 200, { ok: true, id: file.id });
+  }
+  if (url.pathname === '/api/operator/export') {
+    if (!present) return sendJson(res, 404, { ok: false, reason: 'no-operator-key' });
+    if (!checkPassword(readJsonFile(loginFile), who.user, body.password)) {
+      strike(clientAddress(req), 'operator key export with a wrong password');
+      return sendJson(res, 403, { ok: false, reason: 'bad-password' });
+    }
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const content = fs.readFileSync(keyFile);
+    const id = String(readJsonFile(keyFile)?.id || 'operator').slice(0, 12);
+    audit(`${who.user} operator key exported`);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="operator-key-${id}.json"` });
+    return res.end(content);
+  }
+  if (url.pathname === '/api/operator/remove') {
+    if (!present) return sendJson(res, 404, { ok: false, reason: 'no-operator-key' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    /* A copy stays beside it: removing the family's master key by mistake
+       must not lose the family. */
+    fs.renameSync(keyFile, path.join(configPath, `operator-key.json.removed-${stampNow()}`));
+    family.forget();
+    audit(`${who.user} removed the operator key from this computer (a copy kept beside deploy.conf)`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/operator/rotate') {
+    if (!present) return sendJson(res, 404, { ok: false, reason: 'no-operator-key' });
+    if (servers.some((server) => !server.ssh)) return sendJson(res, 409, { ok: false, reason: 'needs-ssh' });
+    if (servers.some((server) => SSH_FAILURES.has(server.sshState))) return sendJson(res, 409, { ok: false, reason: 'servers-unreachable' });
+    if (!checkPassword(readJsonFile(loginFile), who.user, body.password)) {
+      strike(clientAddress(req), 'operator key replacement with a wrong password');
+      return sendJson(res, 403, { ok: false, reason: 'bad-password' });
+    }
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const job = startTask('replace the operator key', (log) => replaceOperatorKey(log), { onDone: (done) => audit(`operator key replacement finished (${done.code === 0 ? 'every server' : 'stopped'})`) });
+    audit(`${who.user} began replacing the operator key`);
+    return sendJson(res, 200, { ok: true, job });
+  }
+  return sendJson(res, 404, { ok: false });
+}
+
+/* The new key is kept as operator-key.next.json until every server has it, so
+   a replacement that stopped carries on with the same key when run again. */
+async function replaceOperatorKey(log) {
+  const nextFile = path.join(configPath, 'operator-key.next.json');
+  const state = loadState(configPath);
+  let next = readJsonFile(nextFile);
+  if (!next?.privateKey) {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const spki = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    next = { name: state.key.name, id: crypto.createHash('sha256').update(Buffer.from(spki, 'base64')).digest('hex'), publicKey: spki, privateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }), createdAt: new Date().toISOString() };
+    writePrivateJson(nextFile, next);
+  }
+  log(`new operator key ${next.id.slice(0, 16)}…`);
+  const doc = signDraft({ ...state, key: next });
+  const stamp = stampNow();
+  const restart = `p="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' Poorija-Cryptography_ChatSignal)"
+f="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' Poorija-Cryptography_ChatSignal)"
+docker compose -p "$p" -f "$f" --env-file .env up -d chat-signal >/dev/null 2>&1`;
+  const onEnv = (server, script) => onServerAsync(server.ssh, `set -e\ncd ${server.ssh.dir.replace(/[^A-Za-z0-9._~/-]/g, '')}\n${script}\n${restart}\n`, 120000);
+  const healthy = async (server) => {
+    for (let i = 0; i < 40; i += 1) {
+      const health = await serverRequest(server, '/chat-health', { auth: false, timeout: 5000 });
+      if (health.status === 200) return true;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    return false;
+  };
+  const result = await rotateOperator({
+    servers,
+    log,
+    applyKey: async (server) => {
+      const run = await onEnv(server, `cp .env .env.bak-operator-${stamp}
+if grep -q '^CHAT_OPERATOR_KEY=' .env; then sed -i "s|^CHAT_OPERATOR_KEY=.*|CHAT_OPERATOR_KEY=${next.publicKey}|" .env; else echo "CHAT_OPERATOR_KEY=${next.publicKey}" >> .env; fi`);
+      if (!run.ok) return { ok: false, reason: String(run.err).trim().split('\n').pop()?.slice(0, 160) || 'ssh failed' };
+      return (await healthy(server)) ? { ok: true } : { ok: false, reason: 'the relay did not come back' };
+    },
+    revertKey: async (server) => {
+      await onEnv(server, `[ -f .env.bak-operator-${stamp} ] && cp .env.bak-operator-${stamp} .env`);
+      await healthy(server);
+      return { ok: true };
+    },
+    deliver: async (server) => {
+      const answer = await serverRequest(server, '/Monitor_Server/directory', { method: 'POST', body: doc });
+      return { ok: answer.json?.ok === true, reason: answer.json?.reason || (answer.status ? '' : 'unreachable') };
+    },
+  });
+  if (result.failed) throw new Error(`stopped at ${result.failed.name}: ${result.failed.reason}. ${result.done.length ? `${result.done.join(', ')} already have the new key; ` : ''}run it again to carry on with the same new key.`);
+  const keyFile = path.join(configPath, 'operator-key.json');
+  fs.renameSync(keyFile, path.join(configPath, `operator-key.json.old-${stamp}`));
+  fs.renameSync(nextFile, keyFile);
+  saveSigned(configPath, doc);
+  /* The panel trusts the family it just handed a new key. */
+  writePrivateJson(path.join(env.POORIJA_PANEL_STATE_DIR || configPath, TRUST_FILE), { operatorId: next.id, operatorKey: next.publicKey, name: next.name, pinnedAt: new Date().toISOString() });
+  family.forget();
+  log(`✓ every server trusts the new key; the old one is kept as operator-key.json.old-${stamp}`);
 }
 
 async function overview(who) {
@@ -419,6 +922,45 @@ async function api(req, res, url, who) {
     if (url.pathname === '/api/servers') return sendJson(res, 200, await overview(who));
     if (url.pathname === '/api/graph') return sendJson(res, 200, await graphData());
     if (url.pathname === '/api/directory') return sendJson(res, 200, directoryView());
+    if (url.pathname === '/api/family') return sendJson(res, 200, await familyView());
+    /* What the top bar's chips need, every few seconds, without asking any
+       server anything: names and the last state each was seen in. */
+    if (url.pathname === '/api/chips') {
+      return sendJson(res, 200, { ok: true, servers: servers.map((server) => ({ name: server.name, reachable: server.lastReachable === true, problem: SSH_FAILURES.has(server.sshState) ? server.sshState : '' })) });
+    }
+    if (url.pathname === '/api/system') {
+      const { state } = operatorFiles();
+      return sendJson(res, 200, {
+        ok: true, version: VERSION, uptimeMs: Date.now() - STARTED_AT, configDir: configPath, writable: configWritable(),
+        operatorKey: Boolean(state.key?.privateKey), servers: servers.length, direct: Boolean(env.POORIJA_PANEL_DIRECT),
+        sessionIdleMs: SESSION_IDLE_MS, node: process.version,
+      });
+    }
+    if (url.pathname === '/api/log') {
+      let lines = [];
+      try { lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n').slice(-300).reverse(); } catch (_error) { lines = []; }
+      return sendJson(res, 200, { ok: true, lines });
+    }
+    if (url.pathname === '/api/servers-config') {
+      return sendJson(res, 200, { ok: true, writable: configWritable(), keys: sshKeysHere(), servers: readServers(confText()) });
+    }
+    if (url.pathname === '/api/jobs') {
+      const view = jobView(url.searchParams.get('id'));
+      return view ? sendJson(res, 200, view) : sendJson(res, 404, { ok: false });
+    }
+    if (url.pathname === '/api/servers/deploy-command') {
+      const name = String(url.searchParams.get('name') || '');
+      if (!validName(name)) return sendJson(res, 400, { ok: false });
+      return sendJson(res, 200, { ok: true, command: `bash scripts/deploy.sh --skip-bump --prebuilt --server ${name}` });
+    }
+    if (url.pathname === '/api/account') {
+      return sendJson(res, 200, {
+        ok: true, user: who.user,
+        sessions: [...sessions.entries()].map(([key, entry]) => ({ since: entry.since, lastSeen: entry.lastSeen, current: key === who.key })),
+        history: history(auditFile),
+        pending: Boolean(readJsonFile(loginFile)?.pendingTotp),
+      });
+    }
     return sendJson(res, 404, { ok: false });
   }
   if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
@@ -428,8 +970,12 @@ async function api(req, res, url, who) {
   let body = {};
   try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch (_error) { return sendJson(res, 400, { ok: false, reason: 'bad-json' }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return sendJson(res, 400, { ok: false, reason: 'bad-json' });
+  if (url.pathname.startsWith('/api/account/')) return account(req, res, url, body, who);
+  if (url.pathname.startsWith('/api/servers/')) return serversRoute(req, res, url, body, who);
+  if (url.pathname.startsWith('/api/operator/') || url.pathname === '/api/family/bootstrap-admin') return operatorRoute(req, res, url, body, who);
   if (url.pathname === '/api/logout') {
-    sessions.delete(who.token);
+    sessions.delete(who.key);
+    saveSessions();
     audit(`logout ${who.user}`);
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie ? '; Secure' : ''}` });
     return res.end(JSON.stringify({ ok: true }));
@@ -448,6 +994,13 @@ async function api(req, res, url, who) {
     const { status, reason } = await family.trust(body.operatorId);
     if (status === 200) audit(`${who.user} confirmed the family operator`);
     return sendJson(res, status, status === 200 ? { ok: true } : { ok: false, reason });
+  }
+  if (url.pathname === '/api/reconnect') {
+    const server = servers.find((candidate) => candidate.name === body.server);
+    if (!server || server.direct) return sendJson(res, 404, { ok: false });
+    audit(`${who.user} ${server.name} asked to connect again`);
+    await reconnect(server);
+    return sendJson(res, 200, { ok: true, state: server.sshState || '' });
   }
   if (url.pathname === '/api/password') {
     const server = servers.find((candidate) => candidate.name === body.server);
@@ -472,8 +1025,20 @@ const ASSETS = {
   '/graph.js': ['graph.js', 'application/javascript; charset=utf-8'],
   '/graphdata.js': ['graphdata.js', 'application/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/admin.js': ['admin.js', 'application/javascript; charset=utf-8'],
 };
-const PAGE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/* The brand and the fonts, from the repository itself (CSP stays 'self'). */
+const BRAND = {
+  '/logo.svg': [path.join(HERE, '..', '..', 'assets', 'icon-app.svg'), 'image/svg+xml'],
+  '/fonts/vazirmatn.ttf': [path.join(HERE, '..', '..', 'fonts', 'Vazirmatn', 'Vazirmatn-VariableFont_wght.ttf'), 'font/ttf'],
+  '/fonts/inter.ttf': [path.join(HERE, '..', '..', 'fonts', 'Inter-Regular.ttf'), 'font/ttf'],
+  /* The icons, from the repository's own Font Awesome. */
+  '/fa/css/all.min.css': [path.join(HERE, '..', '..', 'vendor', 'fontawesome', 'css', 'all.min.css'), 'text/css; charset=utf-8'],
+  ...Object.fromEntries(['fa-solid-900', 'fa-regular-400', 'fa-brands-400', 'fa-v4compatibility'].map((name) => [`/fa/webfonts/${name}.woff2`, [path.join(HERE, '..', '..', 'vendor', 'fontawesome', 'webfonts', `${name}.woff2`), 'font/woff2']])),
+};
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version || ''; } catch (_error) { return ''; } })();
+const STARTED_AT = Date.now();
+const PAGE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const asset = (name) => { const file = path.join(HERE, 'web', name); return fs.existsSync(file) ? fs.readFileSync(file) : Buffer.alloc(0); };
 
 async function handle(req, res) {
@@ -488,6 +1053,13 @@ async function handle(req, res) {
     res.writeHead(200, { 'Content-Type': page[1], 'Cache-Control': 'no-store', 'Content-Security-Policy': PAGE_POLICY });
     return res.end(asset(page[0]));
   }
+  const brand = BRAND[url.pathname];
+  if (brand && req.method === 'GET' && fs.existsSync(brand[0])) {
+    res.writeHead(200, { 'Content-Type': brand[1], 'Cache-Control': 'public, max-age=86400' });
+    return res.end(fs.readFileSync(brand[0]));
+  }
+  /* The version, for the login page's foot: nothing else is said before a login. */
+  if (url.pathname === '/api/version' && req.method === 'GET') return sendJson(res, 200, { ok: true, version: VERSION });
   if (!url.pathname.startsWith('/api/')) return sendJson(res, 404, { ok: false });
   /* Writes come as JSON only: a form on another site can post, but not JSON. */
   if (req.method === 'POST' && !/^application\/json(;|$)/i.test(String(req.headers['content-type'] || ''))) return sendJson(res, 415, { ok: false, reason: 'json-only' });
@@ -502,6 +1074,48 @@ async function handle(req, res) {
   return api(req, res, url, who);
 }
 
+/* The list of servers is deploy.conf's, followed as it changes: a server
+   added there is connected, one removed is let go, one whose address or key
+   changed is connected afresh. Polled, because a folder bind-mounted into a
+   container does not always pass file events through. */
+const sshSignature = (server) => JSON.stringify([server.publicUrl, server.ssh]);
+function followDeployConf(dir) {
+  if (env.POORIJA_PANEL_DIRECT) return;
+  const file = path.join(dir, 'deploy.conf');
+  const stamp = () => { try { const stat = fs.statSync(file); return `${stat.mtimeMs}:${stat.size}`; } catch (_error) { return ''; } };
+  let last = stamp();
+  let busy = false;
+  const timer = setInterval(async () => {
+    const now = stamp();
+    if (busy || !now || now === last) return;
+    busy = true;
+    last = now;
+    try {
+      const fresh = loadServers(dir);
+      const kept = [];
+      const added = [];
+      for (const server of fresh) {
+        const old = servers.find((candidate) => candidate.name === server.name);
+        if (old && sshSignature(old) === sshSignature(server)) kept.push(old);
+        else added.push(server);
+      }
+      const gone = servers.filter((server) => !kept.includes(server));
+      disconnect(gone);
+      servers = fresh.map((server) => kept.find((candidate) => candidate.name === server.name) || server);
+      /* Connected in the background: waiting here for a slow tunnel held up
+         every change after it, a removal included. */
+      if (added.length) connect(added).catch(() => {});
+      family.forget();
+      if (added.length || gone.length) audit(`deploy.conf changed: ${servers.map((server) => server.name).join(', ')}`);
+    } catch (error) {
+      audit(`deploy.conf could not be read: ${error.message}`);
+    } finally {
+      busy = false;
+    }
+  }, Math.max(200, Number(env.POORIJA_PANEL_CONF_POLL_MS) || 3000));
+  timer.unref?.();
+}
+
 async function main() {
   const dir = configDir();
   const stateDir = env.POORIJA_PANEL_STATE_DIR || dir;
@@ -512,11 +1126,15 @@ async function main() {
   if (!readJsonFile(loginFile)?.hash) {
     throw new Error(`no login yet at ${loginFile}; make one first with: node tools/panel/setup-login.mjs (in Docker: docker compose -f config/control-panel.compose.yaml run --rm -it control-panel setup-login)`);
   }
-  audit = makeAudit(path.join(stateDir, LOG_FILE));
+  auditFile = path.join(stateDir, LOG_FILE);
+  audit = makeAudit(auditFile);
+  sessionsFile = path.join(stateDir, SESSIONS_FILE);
+  loadSessions();
   servers = loadServers(dir);
   if (!servers.length) throw new Error('deploy.conf names no server');
   family = createFamily({ dir, trustFile: path.join(stateDir, TRUST_FILE), audit, servers: () => servers });
   await connect(servers);
+  followDeployConf(dir);
 
   const tls = env.POORIJA_PANEL_TLS_CERT && env.POORIJA_PANEL_TLS_KEY
     ? { cert: fs.readFileSync(env.POORIJA_PANEL_TLS_CERT), key: fs.readFileSync(env.POORIJA_PANEL_TLS_KEY) }

@@ -504,7 +504,11 @@ JUMP_OPTS=()
 if [ -n "${POORIJA_SSH_JUMP:-}" ]; then
     jump_target="${POORIJA_SSH_JUMP%%|*}"; jump_key="${POORIJA_SSH_JUMP#*|}"
     jump_port="${jump_target##*:}"; jump_target="${jump_target%:*}"
-    JUMP_OPTS=(-o "ProxyCommand=ssh -p $jump_port -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new${jump_key:+ -i $jump_key -o IdentitiesOnly=yes} -W %h:%p $jump_target")
+    # ssh hands ProxyCommand to a shell: every part that came from deploy.conf
+    # is quoted for it, so a key path with a space (or anything worse) stays
+    # one word and never becomes a command.
+    jump_key_arg=""; [ -n "$jump_key" ] && jump_key_arg=" -i $(printf '%q' "$jump_key") -o IdentitiesOnly=yes"
+    JUMP_OPTS=(-o "ProxyCommand=ssh -p $(printf '%q' "$jump_port") -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new${jump_key_arg} -W %h:%p $(printf '%q' "$jump_target")")
     SSH_OPTS+=("${JUMP_OPTS[@]}")
 fi
 remote() { ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" "$@"; }

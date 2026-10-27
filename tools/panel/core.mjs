@@ -38,7 +38,7 @@ export const DASHBOARD_PORT = 9000;
 /* POORIJA_PANEL_DIRECT is for the test suite: servers on this machine,
    reached without SSH. Only loopback addresses are taken, so it can never
    send a dashboard password across a network. */
-export function loadServers(dir) {
+export function loadServers(dir, { home = os.homedir() } = {}) {
   const direct = String(process.env.POORIJA_PANEL_DIRECT || '').trim();
   if (direct) {
     return direct.split(',').map((pair) => {
@@ -51,23 +51,53 @@ export function loadServers(dir) {
   const file = path.join(dir, 'deploy.conf');
   if (!fs.existsSync(file)) throw new Error(`no deployment settings at ${file}; run scripts/deploy.sh once first`);
   const conf = parseDeployConf(fs.readFileSync(file, 'utf8'));
-  return conf.servers.map((name) => ({
-    name,
-    publicUrl: conf.fields(name, 'PUBLIC_URL'),
-    ssh: {
-      host: conf.fields(name, 'SSH_HOST'),
-      user: conf.fields(name, 'SSH_USER') || os.userInfo().username,
-      port: conf.fields(name, 'SSH_PORT') || '22',
-      key: conf.fields(name, 'SSH_KEY').replace(/^~(?=\/)/, os.homedir()),
-      dir: conf.fields(name, 'REMOTE_DIR') || '~/work/pkg',
-    },
-  })).filter((server) => server.ssh.host);
+  const sshOf = (name) => ({
+    host: conf.fields(name, 'SSH_HOST'),
+    user: conf.fields(name, 'SSH_USER') || os.userInfo().username,
+    port: conf.fields(name, 'SSH_PORT') || '22',
+    key: conf.fields(name, 'SSH_KEY') ? resolveKeyPath(conf.fields(name, 'SSH_KEY'), { home }) : '',
+    dir: conf.fields(name, 'REMOTE_DIR') || '~/work/pkg',
+  });
+  return conf.servers.map((name) => {
+    const ssh = sshOf(name);
+    /* <NAME>_JUMP names the server to go through, as scripts/deploy.sh does. */
+    const via = conf.fields(name, 'JUMP');
+    if (via && via !== name && conf.servers.includes(via)) {
+      const jump = sshOf(via);
+      if (jump.host) ssh.jump = { host: jump.host, user: jump.user, port: jump.port, key: jump.key };
+    }
+    return { name, publicUrl: conf.fields(name, 'PUBLIC_URL'), ssh };
+  }).filter((server) => server.ssh.host);
 }
 
+/* deploy.conf names keys as the computer that wrote it sees them. In the
+   panel's container that computer's SSH folder is a copy at ~/.ssh, so a key
+   named by the host's own path (/Users/<name>/.ssh/key) is looked for there:
+   by the folder the launcher says it mounted, then by the file's name. A key
+   found nowhere keeps its path, to be reported missing rather than tried. */
+export function resolveKeyPath(key, { home = os.homedir(), hostSshDir = process.env.POORIJA_PANEL_HOST_SSH_DIR || '' } = {}) {
+  const value = String(key || '');
+  if (!value) return '';
+  if (value.startsWith('~/')) return path.join(home, value.slice(2));
+  if (fs.existsSync(value)) return value;
+  const local = path.join(home, '.ssh');
+  const hostDir = String(hostSshDir || '').replace(/\/+$/, '');
+  if (hostDir && value.startsWith(`${hostDir}/`)) {
+    const mapped = path.join(local, value.slice(hostDir.length + 1));
+    if (fs.existsSync(mapped)) return mapped;
+  }
+  const byName = path.join(local, path.basename(value));
+  return fs.existsSync(byName) ? byName : value;
+}
+
+const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 export const sshArgs = (ssh, extra = []) => [
   '-p', ssh.port, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
   ...(process.env.POORIJA_PANEL_KNOWN_HOSTS ? ['-o', `UserKnownHostsFile=${process.env.POORIJA_PANEL_KNOWN_HOSTS}`] : []),
-  ...(ssh.key ? ['-i', ssh.key, '-o', 'IdentitiesOnly=yes'] : []), ...extra, `${ssh.user}@${ssh.host}`,
+  ...(ssh.key ? ['-i', ssh.key, '-o', 'IdentitiesOnly=yes'] : []),
+  /* Through a faster server, the way scripts/deploy.sh goes (its JUMP). */
+  ...(ssh.jump ? ['-o', `ProxyCommand=ssh -p ${ssh.jump.port || 22} -o BatchMode=yes${ssh.jump.key ? ` -i ${shellQuote(ssh.jump.key)} -o IdentitiesOnly=yes` : ''} ${ssh.jump.user}@${ssh.jump.host} -W %h:%p`] : []),
+  ...extra, `${ssh.user}@${ssh.host}`,
 ];
 /* A script on stdin to `bash -s`: whatever the login shell, and nothing on
    a command line. */
@@ -75,6 +105,21 @@ export const onServer = (ssh, script, timeout = 60000) => {
   const run = spawnSync('ssh', [...sshArgs(ssh), 'bash -s'], { input: script, encoding: 'utf8', timeout });
   return { ok: run.status === 0, out: String(run.stdout || ''), err: String(run.stderr || '') };
 };
+
+/* The same, without holding the panel up while it runs. */
+export function onServerAsync(ssh, script, timeout = 60000) {
+  return new Promise((resolve) => {
+    const child = spawn('ssh', [...sshArgs(ssh), 'bash -s'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeout);
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.stderr.on('data', (chunk) => { err += chunk; });
+    child.on('error', (error) => { err += error.message; });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ ok: code === 0, out, err }); });
+    child.stdin.end(script);
+  });
+}
 
 export function freePort() {
   return new Promise((resolve, reject) => {
@@ -84,18 +129,47 @@ export function freePort() {
   });
 }
 
+/* What ssh said when it gave up, as a state the page can show. A refused key
+   or a changed host key is never tried again on its own: some servers lock an
+   address out after a few failed logins, and a tunnel that retried a wrong key
+   every minute was exactly that. Only a network that did not answer is tried
+   again, further apart each time. */
+export const SSH_FAILURES = new Set(['auth-failed', 'key-missing', 'host-unknown']);
+export function sshFailure(stderr) {
+  const text = String(stderr || '');
+  if (/Permission denied|Too many authentication failures|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(text)) return 'auth-failed';
+  if (/Could not resolve hostname|Name or service not known|nodename nor servname/i.test(text)) return 'host-unknown';
+  return '';
+}
+const lastLine = (text) => String(text || '').trim().split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 200) || '';
+
 /* One tunnel per server, kept up: a dropped one comes back with backoff. */
 export async function openTunnel(server) {
+  server.closing = false;
+  if (server.ssh.key && !fs.existsSync(server.ssh.key)) {
+    server.sshState = 'key-missing';
+    server.sshReason = `no key file at ${server.ssh.key}`;
+    return;
+  }
   const port = await freePort();
   server.base = `http://127.0.0.1:${port}`;
-  let delay = 2000;
+  const first = Math.max(100, Number(process.env.POORIJA_PANEL_RETRY_MS) || 2000);
+  let delay = first;
   const start = () => {
-    const child = spawn('ssh', [...sshArgs(server.ssh, ['-N', '-o', 'ExitOnForwardFailure=yes', '-L', `127.0.0.1:${port}:127.0.0.1:${DASHBOARD_PORT}`])], { stdio: 'ignore' });
+    if (server.closing) return;
+    server.sshState = 'connecting';
+    const child = spawn('ssh', [...sshArgs(server.ssh, ['-N', '-o', 'ExitOnForwardFailure=yes', '-L', `127.0.0.1:${port}:127.0.0.1:${DASHBOARD_PORT}`])], { stdio: ['ignore', 'ignore', 'pipe'] });
     server.tunnel = child;
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-4000); });
     const upAt = Date.now();
     child.on('exit', () => {
-      if (server.closing) return;
-      if (Date.now() - upAt > 60000) delay = 2000;
+      if (server.closing || server.tunnel !== child) return;
+      const failure = sshFailure(stderr);
+      server.sshReason = lastLine(stderr);
+      if (failure) { server.sshState = failure; return; }
+      server.sshState = 'retrying';
+      if (Date.now() - upAt > 60000) delay = first;
       setTimeout(start, delay).unref?.();
       delay = Math.min(delay * 2, 60000);
     });
@@ -103,8 +177,40 @@ export async function openTunnel(server) {
   start();
 }
 
+/* Waits until the tunnel is up (its local port answers) or ssh has given up. */
+export async function tunnelSettled(server, ms = 12000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (!server.base || SSH_FAILURES.has(server.sshState)) return false;
+    const { port } = new URL(server.base);
+    const open = await new Promise((resolve) => {
+      const socket = net.connect({ host: '127.0.0.1', port: Number(port) });
+      socket.once('connect', () => { socket.destroy(); resolve(true); });
+      socket.once('error', () => resolve(false));
+    });
+    if (open) { server.sshState = 'up'; return true; }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+/* Asked for from the page: one fresh attempt, whatever happened before. */
+export async function reconnect(server) {
+  server.closing = true;
+  const old = server.tunnel;
+  server.tunnel = null;
+  old?.kill('SIGTERM');
+  await openTunnel(server);
+  if (await tunnelSettled(server)) {
+    server.password = readPassword(server) || server.password || '';
+    await identify(server);
+  }
+}
+
 export function readPassword(server) {
   if (server.direct) return String(process.env.POORIJA_PANEL_PASSWORD || '');
+  /* No second login where the tunnel's was already refused. */
+  if (SSH_FAILURES.has(server.sshState)) return '';
   const dir = server.ssh.dir.replace(/'/g, '');
   const read = onServer(server.ssh, `sed -n 's/^MONITOR_PASSWORD=//p' '${dir}/.env' 2>/dev/null | head -1 | tr -d "\\"'"\n`);
   return read.ok ? read.out.trim() : '';
@@ -155,9 +261,12 @@ export async function connect(servers) {
   for (const server of servers) {
     if (server.direct) server.base = server.direct; else await openTunnel(server);
   }
-  /* A moment for the tunnels, then what each server is and its password. */
-  if (servers.some((server) => server.ssh)) await new Promise((resolve) => setTimeout(resolve, 2500));
+  /* Each tunnel up or given up, then what each server is and its password:
+     reading the password is another SSH login, never tried with a key the
+     tunnel's own login just had refused. */
+  await Promise.all(servers.filter((server) => !server.direct).map((server) => tunnelSettled(server)));
   for (const server of servers) {
+    if (SSH_FAILURES.has(server.sshState)) continue;
     server.password = readPassword(server);
     await identify(server);
   }
@@ -269,7 +378,14 @@ export function createFamily({ dir, trustFile, audit, servers }) {
 export async function describe(server) {
   const health = await serverRequest(server, '/chat-health', { auth: false });
   const row = { name: server.name, proxy: server.proxy, reachable: health.status === 200, version: String(health.json?.version || '').slice(0, 40), locked: health.json?.locked === true, passwordOk: false };
-  if (!row.reachable) return row;
+  server.lastReachable = row.reachable;
+  if (!row.reachable) {
+    /* Why not, in words the page can show: a refused key reads differently
+       from a server that is down. */
+    row.problem = SSH_FAILURES.has(server.sshState) ? server.sshState : 'unreachable';
+    row.problemDetail = String(server.sshReason || '').slice(0, 200);
+    return row;
+  }
   const [stats, transit, partners] = await Promise.all([
     serverRequest(server, '/healthz'),
     serverRequest(server, '/Monitor_Server/transit', { method: 'POST', body: {} }),

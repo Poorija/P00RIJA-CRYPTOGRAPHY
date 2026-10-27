@@ -56,6 +56,8 @@ try {
   check('allowing exactly the addresses it is reached at', line.includes('-e POORIJA_PANEL_ORIGINS=http://127.0.0.1:8686,http://localhost:8686'), line);
   check('with the config folder read-only, the SSH keys and its own state volume',
     line.includes(`-v ${a}/.config/p00rija-cryptography:/config:ro`) && line.includes(`-v ${a}/.ssh:/ssh-src:ro`) && line.includes('-v panel-state:/state'), line);
+  check('and tells the panel where those keys are on this computer, so deploy.conf’s key paths can be found in the copy',
+    line.includes(`-e POORIJA_PANEL_HOST_SSH_DIR=${a}/.ssh`), line);
   check('built from this checkout, tagged for Docker Hub', first.out.includes(`+ docker build -f ${ROOT}/config/Dockerfile.control-panel -t poorija/p00rija-panel:${VERSION} ${ROOT}`)
     && line.endsWith(`poorija/p00rija-panel:${VERSION}`), first.out.split('\n').find((l) => l.startsWith('+ docker build')) || '');
 
@@ -102,15 +104,34 @@ try {
   check('a port already in use is refused before anything starts', taken.code !== 0 && /already in use/.test(taken.out) && !taken.runLine, taken.out.slice(-200));
 
   /* Write access needs the operator key. */
+  /* Since the panel edits deploy.conf, write access no longer needs the operator key. */
   const f = freshHome();
   const write = run(f, ['--yes', '--dry-run', '--no-open', '--write']);
-  check('write access without operator-key.json is refused', write.code !== 0 && /operator-key\.json/.test(write.out), write.out.slice(-200));
-  fs.mkdirSync(path.join(f, '.config/p00rija-cryptography'), { recursive: true });
-  fs.writeFileSync(path.join(f, '.config/p00rija-cryptography/operator-key.json'), '{}');
-  const writable = run(f, ['--yes', '--dry-run', '--no-open', '--write']);
-  check('and with it the config folder is mounted writable', writable.runLine.includes(`-v ${f}/.config/p00rija-cryptography:/config:rw`), writable.runLine);
+  check('write access mounts the config folder writable, operator key or not', write.code === 0 && write.runLine.includes(`-v ${f}/.config/p00rija-cryptography:/config:rw`), write.runLine || write.out.slice(-200));
+  const asked = freshHome();
+  const askedRun = run(asked, ['--dry-run', '--no-open'], '\n\n\n\n\nyes\n');
+  check('and it is asked for even without the operator key', /edit deploy\.conf/.test(askedRun.out) && askedRun.runLine.includes(':/config:rw'), askedRun.runLine || askedRun.out.slice(-200));
 
-  check('no settings file ever holds a password', [a, b, c, d, e, f].every((home) => !/password/i.test(settings(home))));
+  /* Keeping it: doctor, backup, restore, uninstall. */
+  const keep = freshHome();
+  fs.mkdirSync(path.join(keep, '.config/p00rija-cryptography'), { recursive: true });
+  fs.writeFileSync(path.join(keep, '.config/p00rija-cryptography/deploy.conf'), "SERVERS='a b'\nA_SSH_HOST='a.example'\nA_SSH_KEY='~/.ssh/k'\nB_SSH_HOST='b.example'\n");
+  const doctor = run(keep, ['doctor', '--dry-run']);
+  check('doctor lists every check it would make, one SSH login per server and no more',
+    ['check docker', 'check config', 'check key a', 'check ssh a', 'check ssh b', 'check port 8686'].every((line) => doctor.out.includes(line)) && !/^\+ ssh/m.test(doctor.out), doctor.out.slice(-300));
+  const backup = run(keep, ['backup', path.join(keep, 'panel.tar.gz'), '--dry-run']);
+  check('backup streams the panel’s state into a file only you can read', /\+ \(umask 077\) docker run --rm -v panel-state:\/state --entrypoint sh \S+ -c tar czf - -C \/state \. > .*panel\.tar\.gz/.test(backup.out), backup.out.slice(-300));
+  fs.writeFileSync(path.join(keep, 'panel.tar.gz'), 'x');
+  const restore = run(keep, ['restore', path.join(keep, 'panel.tar.gz'), '--dry-run']);
+  check('restore streams it back, with the panel stopped meanwhile', /\+ docker stop Poorija-Cryptography_ControlPanel/.test(restore.out) && /\+ docker run --rm -i -v panel-state:\/state --entrypoint sh \S+ -c tar xzf - -C \/state < .*panel\.tar\.gz/.test(restore.out) && /\+ docker start Poorija-Cryptography_ControlPanel/.test(restore.out), restore.out.slice(-300));
+  const noBackup = run(keep, ['restore', path.join(keep, 'absent.tar.gz'), '--dry-run']);
+  check('a backup file that is not there is refused', noBackup.code !== 0, noBackup.out.slice(-120));
+  const uninstall = run(keep, ['uninstall', '--dry-run']);
+  check('uninstall takes the container and the image, and leaves the login', /\+ docker rm -f Poorija-Cryptography_ControlPanel/.test(uninstall.out) && /\+ docker rmi /.test(uninstall.out) && !/volume rm/.test(uninstall.out), uninstall.out.slice(-300));
+  const purge = run(keep, ['uninstall', '--purge', '--yes', '--dry-run']);
+  check('with --purge, the login, the state and the settings go too', /\+ docker volume rm panel-state/.test(purge.out), purge.out.slice(-300));
+
+  check('no settings file ever holds a password', [a, b, c, d, e, f, asked].every((home) => !/password/i.test(settings(home))));
 
   /* The launcher waits a long time for a person (the questions, the login),
      and its file can change meanwhile — an edit, a pull, a sync. Bash reads a
@@ -145,7 +166,7 @@ try {
   const stop = run(a, ['stop', '--dry-run']);
   check('stop stops the panel container', stop.out.includes('+ docker stop Poorija-Cryptography_ControlPanel'), stop.out.slice(-200));
   const help = run(a, ['--help']);
-  check('--help names every subcommand', ['start', 'stop', 'status', 'logs', 'update', 'login'].every((word) => help.out.includes(word)), '');
+  check('--help names every subcommand', ['start', 'stop', 'status', 'logs', 'update', 'login', 'doctor', 'backup', 'restore', 'uninstall'].every((word) => help.out.includes(word)), '');
 } catch (error) {
   check('the suite ran to the end', false, error?.stack || String(error));
 } finally {

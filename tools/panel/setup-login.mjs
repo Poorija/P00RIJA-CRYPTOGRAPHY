@@ -22,6 +22,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { configDir } from '../relay-directory.mjs';
 import { makeLogin, base32Encode, otpauthUri } from './login.mjs';
+import { qrTerminal } from './qr.mjs';
 import crypto from 'node:crypto';
 
 const say = (line) => process.stdout.write(`${line}\n`);
@@ -54,9 +55,15 @@ async function main(argv) {
   fs.writeFileSync(temp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temp, file);
   say(`login written: ${file}`);
-  say('Add this to your authenticator app (it is shown only now):');
+  say('Scan this with your authenticator app (it is shown only now):');
+  say('');
+  /* Dark on light, set here, so the code reads the same on a dark terminal
+     and a light one. */
+  for (const line of qrTerminal(otpauthUri(record)).split('\n')) say(`  \x1b[30;47m${line}\x1b[0m`);
+  say('');
+  say('Or type the secret, or open the link on the phone:');
   say(`  secret: ${record.totp.replace(/(.{4})/g, '$1 ').trim()}`);
-  say(`  or the link: ${otpauthUri(record)}`);
+  say(`  link:   ${otpauthUri(record)}`);
   say('Then log in with the name, the password and the six-digit code the app shows.');
 }
 

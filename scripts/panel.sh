@@ -14,6 +14,10 @@
 #   bash scripts/panel.sh                 start (asks the first time)
 #   bash scripts/panel.sh --reconfigure   ask again
 #   bash scripts/panel.sh stop | status | logs | update | login
+#   bash scripts/panel.sh doctor             check Docker, deploy.conf, keys, one SSH login per server
+#   bash scripts/panel.sh backup [FILE]      the panel's login, trust and layout to a file
+#   bash scripts/panel.sh restore FILE       and back
+#   bash scripts/panel.sh uninstall [--purge]   remove it (--purge: its login and settings too)
 #
 # It asks for the port, the address to listen on (this computer only, or the
 # LAN), whether the panel should come back by itself whenever Docker starts,
@@ -35,7 +39,7 @@
 #   --ssh-dir DIR       the SSH keys deploy.conf names (default ~/.ssh)
 #   --tls-cert FILE     serve HTTPS with this certificate (and --tls-key FILE);
 #                       asked for when the panel listens on the LAN
-#   --write             let the panel change the family list (needs operator-key.json)
+#   --write             let the panel edit deploy.conf and sign the family list
 #   --build | --pull    build from this checkout, or pull from Docker Hub
 #   --yes               take the saved answers, or the defaults, without asking
 #   --reconfigure       ask every question again
@@ -70,9 +74,12 @@ COMMAND=start
 DRY=0 YES=0 RECONFIGURE=0 OPEN=1 SOURCE=""
 F_PORT="" F_BIND="" F_HOST="" F_AUTOSTART="" F_CONFIG="" F_SSH="" F_WRITE="" F_TLS_CERT="" F_TLS_KEY=""
 LOGIN_ARGS=()
+PURGE=0 FILE_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    start|stop|status|logs|update|login) COMMAND="$1" ;;
+    start|stop|status|logs|update|login|doctor|backup|restore|uninstall) COMMAND="$1"
+      case "$1" in backup|restore) if [ $# -gt 1 ] && [ "${2#--}" = "$2" ]; then FILE_ARG="$2"; shift; fi ;; esac ;;
+    --purge) PURGE=1 ;;
     --port) F_PORT="${2:?--port needs a number}"; shift ;;
     --bind) F_BIND="${2:?--bind needs an address}"; shift ;;
     --host) F_HOST="${2:?--host needs a name or IP}"; shift ;;
@@ -193,16 +200,16 @@ configure() {
     [ -z "$F_AUTOSTART" ] && ask_yes_no PANEL_AUTOSTART "Start it by itself whenever Docker starts? (yes/no)"
     [ -z "$F_CONFIG" ] && ask PANEL_CONFIG_DIR "Folder with deploy.conf"
     [ -z "$F_SSH" ] && ask PANEL_SSH_DIR "Folder with the SSH keys"
-    if [ -z "$F_WRITE" ] && [ -f "$PANEL_CONFIG_DIR/operator-key.json" ]; then
-      ask_yes_no PANEL_WRITE "Let the panel sign family-list changes with operator-key.json? (yes/no)"
+    if [ -z "$F_WRITE" ]; then
+      # The panel adds and removes servers in deploy.conf, and signs the family
+      # list where operator-key.json is: offered always, yes by default there.
+      [ "$HAVE_SETTINGS" = 0 ] && [ -f "$PANEL_CONFIG_DIR/operator-key.json" ] && PANEL_WRITE=yes
+      ask_yes_no PANEL_WRITE "Let the panel edit deploy.conf and sign the family list? (yes/no)"
     fi
   fi
   case "$PANEL_PORT" in ''|*[!0-9]*) die "the port must be a number (got \"$PANEL_PORT\")" ;; esac
   [ "$PANEL_PORT" -ge 1 ] && [ "$PANEL_PORT" -le 65535 ] || die "the port must be 1-65535 (got $PANEL_PORT)"
   case "$PANEL_AUTOSTART" in yes|no) ;; *) die "--autostart takes yes or no (got \"$PANEL_AUTOSTART\")" ;; esac
-  if [ "$PANEL_WRITE" = yes ] && [ ! -f "$PANEL_CONFIG_DIR/operator-key.json" ]; then
-    die "write access is only for the folder that holds operator-key.json, and $PANEL_CONFIG_DIR has none"
-  fi
   if [ -n "$PANEL_TLS_CERT" ] || [ -n "$PANEL_TLS_KEY" ]; then
     [ -f "$PANEL_TLS_CERT" ] || die "the TLS certificate $PANEL_TLS_CERT is not there"
     [ -f "$PANEL_TLS_KEY" ] || die "the TLS key ${PANEL_TLS_KEY:-(none given)} is not there; pass --tls-key FILE"
@@ -289,7 +296,7 @@ start() {
   mkdir -p "$PANEL_SSH_DIR" 2>/dev/null || true
   if [ "$DRY" = 1 ]; then run docker rm -f "$NAME"; else docker rm -f "$NAME" >/dev/null 2>&1 || true; fi
   run docker run -d --name "$NAME" --restart "$restart" -p "$publish" \
-    -e "POORIJA_PANEL_ORIGINS=$origins" \
+    -e "POORIJA_PANEL_ORIGINS=$origins" -e "POORIJA_PANEL_HOST_SSH_DIR=$PANEL_SSH_DIR" \
     -v "$PANEL_CONFIG_DIR:/config:$access" -v "$PANEL_SSH_DIR:/ssh-src:ro" -v "$VOLUME:/state" \
     ${tls_args[@]+"${tls_args[@]}"} \
     "$image"
@@ -298,8 +305,99 @@ start() {
   if [ "$OPEN" = 1 ] && [ "$(uname -s)" = Darwin ]; then run open "$url"; fi
 }
 
+# ---- keeping it -------------------------------------------------------------
+conf_value() { # conf_value NAME KEY — from deploy.conf, read by the shell that wrote it
+  local file="$PANEL_CONFIG_DIR/deploy.conf" up
+  up="$(printf %s "$1" | tr a-z A-Z)"
+  [ -f "$file" ] || return 0
+  ( set -a; . "$file" >/dev/null 2>&1; eval "printf '%s' \"\${${up}_$2:-}\"" )
+}
+doctor() {
+  local failed=0 servers name host user port key jump
+  mark() { if [ "$1" = 0 ]; then say "✓ $2"; else say "✗ $2"; failed=1; fi; }
+  if [ "$DRY" = 1 ]; then
+    say "check docker"; say "check config"
+    servers="$( [ -f "$PANEL_CONFIG_DIR/deploy.conf" ] && ( set -a; . "$PANEL_CONFIG_DIR/deploy.conf" >/dev/null 2>&1; printf '%s' "${SERVERS:-}" ))"
+    for name in $servers; do say "check key $name"; say "check ssh $name"; done
+    say "check port $PANEL_PORT"
+    [ -n "$PANEL_TLS_CERT" ] && say "check tls"
+    return 0
+  fi
+  docker info >/dev/null 2>&1; mark $? "Docker is running"
+  [ -f "$PANEL_CONFIG_DIR/deploy.conf" ]; mark $? "deploy.conf at $PANEL_CONFIG_DIR"
+  servers="$( [ -f "$PANEL_CONFIG_DIR/deploy.conf" ] && ( set -a; . "$PANEL_CONFIG_DIR/deploy.conf" >/dev/null 2>&1; printf '%s' "${SERVERS:-}" ))"
+  for name in $servers; do
+    host="$(conf_value "$name" SSH_HOST)"; user="$(conf_value "$name" SSH_USER)"; port="$(conf_value "$name" SSH_PORT)"
+    key="$(conf_value "$name" SSH_KEY)"; key="${key/#\~/$HOME}"; jump="$(conf_value "$name" JUMP)"
+    if [ -n "$key" ] && [ ! -f "$key" ]; then mark 1 "$name: key $key not found (no login tried)"; continue; fi
+    [ -n "$key" ] && mark 0 "$name: key found"
+    local args=(-p "${port:-22}" -o BatchMode=yes -o ConnectTimeout=10)
+    [ -n "$key" ] && args+=(-i "$key" -o IdentitiesOnly=yes)
+    if [ -n "$jump" ]; then
+      local jh jp ju jk; jh="$(conf_value "$jump" SSH_HOST)"; jp="$(conf_value "$jump" SSH_PORT)"; ju="$(conf_value "$jump" SSH_USER)"; jk="$(conf_value "$jump" SSH_KEY)"; jk="${jk/#\~/$HOME}"
+      args+=(-o "ProxyCommand=ssh -p $(printf '%q' "${jp:-22}") -o BatchMode=yes${jk:+ -i $(printf '%q' "$jk") -o IdentitiesOnly=yes} $(printf '%q' "${ju:-$USER}@$jh") -W %h:%p")
+    fi
+    # One login, never retried: some servers lock out an address after a few failures.
+    ssh "${args[@]}" "${user:-$USER}@$host" true >/dev/null 2>&1; mark $? "$name: SSH login to ${user:-$USER}@$host${jump:+ through $jump}"
+  done
+  port_free "$PANEL_PORT"; mark $? "port $PANEL_PORT free (or the panel's own)"
+  if [ -n "$PANEL_TLS_CERT" ]; then [ -f "$PANEL_TLS_CERT" ] && [ -f "$PANEL_TLS_KEY" ]; mark $? "TLS certificate and key"; fi
+  return $failed
+}
+backup_state() {
+  local file="${FILE_ARG:-$HOME/p00rija-panel-backup-$(date +%Y%m%d-%H%M%S).tar.gz}" image
+  [ -d "$(dirname "$file")" ] || die "no folder for $file"
+  image="${PANEL_IMAGE:-$(image_ref)}"
+  ensure_docker
+  # Streamed out and written here, owner-only: the file holds the login's hash
+  # and the authenticator secret, and a file made inside the container would
+  # be root's and readable by everyone.
+  if [ "$DRY" = 1 ]; then
+    printf '+ (umask 077) docker run --rm -v %s:/state --entrypoint sh %s -c tar czf - -C /state . > %s\n' "$VOLUME" "$image" "$file"
+  else
+    ( umask 077; docker run --rm -v "$VOLUME:/state" --entrypoint sh "$image" -c 'tar czf - -C /state .' > "$file" ) || die "the backup failed"
+    chmod 600 "$file"
+  fi
+  say "✓ The panel's state (login, trust, layout, sessions, log) is in $file, readable by you only. Keep it private."
+}
+restore_state() {
+  [ -n "$FILE_ARG" ] || die "restore needs the backup file: bash scripts/panel.sh restore FILE"
+  [ -f "$FILE_ARG" ] || die "no backup at $FILE_ARG"
+  local image
+  image="${PANEL_IMAGE:-$(image_ref)}"
+  ensure_docker
+  run docker stop "$NAME" || true
+  if [ "$DRY" = 1 ]; then
+    printf '+ docker run --rm -i -v %s:/state --entrypoint sh %s -c tar xzf - -C /state < %s\n' "$VOLUME" "$image" "$FILE_ARG"
+  else
+    docker run --rm -i -v "$VOLUME:/state" --entrypoint sh "$image" -c 'tar xzf - -C /state && chown -R node:node /state' < "$FILE_ARG" || die "the restore failed"
+  fi
+  run docker start "$NAME" || true
+  say "✓ Restored from $FILE_ARG"
+}
+uninstall_panel() {
+  local image="${PANEL_IMAGE:-$(image_ref)}" answer=""
+  ensure_docker
+  run docker rm -f "$NAME" || true
+  run docker rmi "$image" || true
+  if [ "$PURGE" = 1 ]; then
+    if [ "$YES" = 0 ]; then
+      printf 'Also delete the panel login, its trust and layout (the panel-state volume) and %s? (yes/no) [no]: ' "$SETTINGS" >&2
+      IFS= read -r answer || answer=""
+      case "$answer" in y|Y|yes|YES|بله) ;; *) say "Kept the login and settings."; return 0 ;; esac
+    fi
+    run docker volume rm "$VOLUME" || true
+    if [ "$DRY" = 1 ]; then printf '+ rm %s\n' "$SETTINGS"; else rm -f "$SETTINGS"; fi
+  fi
+  say "✓ The panel is uninstalled.$([ "$PURGE" = 1 ] || printf ' Its login and settings are kept; --purge removes them too.')"
+}
+
 case "$COMMAND" in
   start) start ;;
+  doctor) doctor ;;
+  backup) backup_state ;;
+  restore) restore_state ;;
+  uninstall) uninstall_panel ;;
   update) SOURCE="${SOURCE:-}"; YES=1; start ;;
   stop) run docker stop "$NAME" ;;
   status) run docker ps -a --filter "name=^${NAME}\$" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}' ;;

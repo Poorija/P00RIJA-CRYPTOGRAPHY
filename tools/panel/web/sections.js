@@ -13,6 +13,7 @@
  * row. Each section reads (load) and draws (render); the buttons on a row
  * act on that row's server, the buttons above a table on every server shown.
  * How each action builds its request is in BODIES, GROUP_BODIES and FORMS. */
+import { loadClusterAdmin, renderClusterAdmin, loadPanelSystem, renderPanelSystem } from './admin.js';
 import {
   state, t, esc, num, pct, fmtBytes, fmtTime, serverCall, serverDownload, fanOut, shownServers, clusterOf, byCluster,
   rowRef, serverCells, button, groupButton, table, serverTable, card, show, explain, report, allServers, hooks, regionText, csvCell, visible,
@@ -278,7 +279,7 @@ const bootstrap = {
 
 const system = {
   id: 'system', title: 'system',
-  async load(poll) { state.cache.system = await fanOut('/healthz', { method: 'GET', poll }); },
+  async load(poll) { [state.cache.system] = await Promise.all([fanOut('/healthz', { method: 'GET', poll }), loadPanelSystem()]); },
   render() {
     const results = state.cache.system || [];
     const servers = serverTable(results, {
@@ -286,7 +287,7 @@ const system = {
       cells: ({ data }) => [esc(data.hostname || '—'), esc(data.nodeVersion || '—'), `${Math.round(num(data.uptime) / 60)} min`, data.turnEnabled ? tag('on', 'good') : tag('off', 'bad'), `<span class="mono">${esc(String(data.relayId || '').slice(0, 16))}</span>`],
       actions: ({ server }) => `<button data-logs="${esc(rowRef({ server: server.name }))}">${esc(t('logs'))}</button>`,
     });
-    return card('system', servers, `${groupButton('optimize-ram')}${groupButton('clear-memory', { cls: 'bad' })}${groupButton('alert-test')}`)
+    return renderPanelSystem() + card('system', servers, `${groupButton('optimize-ram')}${groupButton('clear-memory', { cls: 'bad' })}${groupButton('alert-test')}`)
       + card('changePassword', `<div class="row" data-form="change-password"><select data-field="server">${serverOptions()}</select>
         <input type="password" data-field="oldPassword" autocomplete="off" placeholder="${esc(t('oldPassword'))}"><input type="password" data-field="newPassword" autocomplete="new-password" placeholder="${esc(t('newPassword'))}">
         <input type="password" data-field="newPassword2" autocomplete="new-password" placeholder="${esc(t('newPassword2'))}"><button data-form-run="change-password" class="acc">${esc(t('changePassword'))}</button></div>`);
@@ -297,7 +298,7 @@ const system = {
 
 const clusters = {
   id: 'clusters', title: 'clusters',
-  async load(poll) { state.cache.clusters = await fanOut('/Monitor_Server/transit', { poll }); },
+  async load(poll) { [state.cache.clusters] = await Promise.all([fanOut('/Monitor_Server/transit', { poll }), loadClusterAdmin()]); },
   render() {
     const results = state.cache.clusters || [];
     const linkedTo = (name) => {
@@ -319,7 +320,7 @@ const clusters = {
           + `<td>${inside(server)}/${mates(server).length}</td><td>${outside(server)}</td><td>${warn}</td></tr>`;
       })];
     });
-    return card('clusters', `${table(['server', 'cluster', 'region', 'insideAddresses', 'inCluster', 'otherClusters', ''], rows)}<p class="mut">${esc(t('clustersHint'))}</p>`);
+    return renderClusterAdmin() + card('clusters', `${table(['server', 'cluster', 'region', 'insideAddresses', 'inCluster', 'otherClusters', ''], rows)}<p class="mut">${esc(t('clustersHint'))}</p>`);
   },
 };
 
