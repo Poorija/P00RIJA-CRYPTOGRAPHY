@@ -28551,3 +28551,30 @@ html:not(.dark) .chat-link-sas { color: #0c4a6e; }
   .chat-link-card { padding: 1rem 0.8rem 0.9rem; }
   .chat-link-qr-box { min-height: 0; padding: 0.35rem; }
 }
+
+/* =====================================================================
+   Secure Chat's section tabs show their whole label on a phone
+   ---------------------------------------------------------------------
+   An iPhone at 390–440px read "تماس…" and "تنظیما…". Two things together:
+   Font Awesome 7 gives every icon a fixed 1.25em box (version 6 drew each at
+   its own width), and the strip split its width into five equal columns
+   although the fifth, search, is a lone icon with no label. The four views
+   now share the width, search takes only what its loupe needs, and the icons
+   in this strip are drawn at their own width again.
+   ===================================================================== */
+/* Every layout in this file was written for Font Awesome 6, which drew an
+   icon at its own width; nothing here uses .fa-fw. Version 7 made the fixed
+   1.25em box the default, which is what pushed these labels into an
+   ellipsis. Its own variable puts the old default back for the whole app,
+   and an explicit .fa-fw would still get the fixed box. */
+:root { --fa-width: auto; }
+html body #mainApp #content-chat .chat-nav-bar {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto !important;
+  grid-auto-columns: auto !important;
+}
+html body #mainApp #content-chat .chat-nav-bar .chat-nav-search { margin-inline-start: 0 !important; }
+@media (max-width: 1023px) {
+  html body #mainApp #content-chat .chat-nav-bar { padding-inline: 0.4rem !important; }
+  html body #mainApp #content-chat .chat-nav-bar .chat-nav-item { padding-inline: 0.4rem !important; }
+  html body #mainApp #content-chat .chat-nav-bar .chat-nav-search { padding-inline: 0.6rem !important; }
+}

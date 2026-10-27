@@ -1,11 +1,11 @@
 # P00RIJA Standalone Relay
 # This Dockerfile only includes the signaling server — the same program the
 # full stack runs (scripts/server.js), started through standalone-relay/server.js.
-# Node 26.12.0, the newest release. Pinned to the exact version rather than
+# Node 26.12.1, the newest release. Pinned to the exact version rather than
 # node:26-alpine: a build reuses whatever image the machine already holds, so a
 # floating tag kept running a months-old patch release without saying so, and
 # on the relay in Iran a pull can stall for good. Moving up is this one line.
-FROM node:26.12.0-alpine
+FROM node:26.12.1-alpine
 WORKDIR /app
 COPY standalone-relay/package.json .
 RUN npm install --production

@@ -229,6 +229,11 @@ try {
     check('a frame with a negative hop is refused', rule({ hop: -10 }).action === 'reject');
     check('a frame whose hop is not a whole number is refused', rule({ hop: 'x' }).action === 'reject' && rule({ hop: 1.5 }).action === 'reject');
     check('a frame from an older relay, with no hop at all, counts as the first', action(rule({ hop: undefined })) === 'partner:c');
+    /* Two members of a family whose own path is closed reach each other
+       through a third member, once. */
+    check('a family frame for another member, on its first hop, goes on to it', action(rule({ target: { family: 'self' }, hop: 0 })) === 'family'
+      && action(rule({ target: { family: 'self' }, hop: undefined })) === 'family');
+    check('but never a second time', rule({ target: { family: 'self' }, hop: 1 }).action === 'reject');
 
     const notice = rules.signGatewayNotice({ operatorId: A.operatorId, gateways: [{ id: a2.id, priority: 1 }], updatedAt: 500 }, { id: a1.id, key: a1.key }, a1.pair.privateKey);
     const noticeOk = rules.verifyGatewayNotice(notice, { directoryBody: A.doc.body, heldAt: 100 });
@@ -265,7 +270,7 @@ try {
     const privateOnes = ['http://127.0.0.1:8585', 'http://10.0.0.5', 'https://192.168.1.1', 'http://169.254.169.254', 'http://localhost:9000',
       'http://[::1]:8585', 'http://172.16.0.1', 'http://[fc00::1]', 'http://0.0.0.0', 'http://100.64.0.1', 'http://relay.localhost'];
     check('a partner’s origin at a private, loopback or link-local address is refused', privateOnes.every((origin) => safe(origin) === ''), JSON.stringify(privateOnes.map((origin) => safe(origin))));
-    check('a public one is kept as its origin', safe('https://fl.example.com:8585/some/path') === 'https://fl.example.com:8585' && safe('http://93.113.238.213:8585') === 'http://93.113.238.213:8585');
+    check('a public one is kept as its origin', safe('https://fl.example.com:8585/some/path') === 'https://fl.example.com:8585' && safe('http://1.1.1.1:8585') === 'http://1.1.1.1:8585');
     check('other schemes and credentials are refused', safe('ftp://fl.example.com') === '' && safe('https://u:p@fl.example.com') === '' && safe('not a url') === '');
     check('a private one is allowed only when the relay is told to', safe('http://127.0.0.1:8585', { allowPrivate: true }) === 'http://127.0.0.1:8585');
     const embedded = ['http://[64:ff9b::a00:1]', 'http://[2002:a00:1::]', 'http://[2001:0:1::1]', 'http://[::10.0.0.1]', 'http://[::ffff:10.0.0.1]', 'http://relay:8585', 'http://box.internal', 'http://printer.local'];
@@ -279,8 +284,8 @@ try {
       lookup('relay.example', {}, (error, address) => resolve(error ? `error:${error.code}` : address));
     });
     check('a partner host resolving to a private address is not dialled', await lookupWith([{ address: '10.0.0.7', family: 4 }], true) === 'error:EPRIVATE');
-    check('nor one with a private answer among public ones', await lookupWith([{ address: '93.113.238.213', family: 4 }, { address: '127.0.0.1', family: 4 }], true) === 'error:EPRIVATE');
-    check('a partner host with public answers is dialled at the one checked', await lookupWith([{ address: '93.113.238.213', family: 4 }], true) === '93.113.238.213');
+    check('nor one with a private answer among public ones', await lookupWith([{ address: '1.1.1.1', family: 4 }, { address: '127.0.0.1', family: 4 }], true) === 'error:EPRIVATE');
+    check('a partner host with public answers is dialled at the one checked', await lookupWith([{ address: '1.1.1.1', family: 4 }], true) === '1.1.1.1');
     check('a host no partner named resolves as before', await lookupWith([{ address: '10.0.0.7', family: 4 }], false) === '10.0.0.7');
 
     /* A family's partner list, signed by the relay that says it, so a common

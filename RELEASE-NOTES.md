@@ -1,3 +1,310 @@
+# P00RIJA Cryptography 2.98.84
+
+Version 2.98.84 · build chat-v177
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## ایمیج‌های آماده روی Docker Hub · Ready-made images on Docker Hub
+
+- هر سرور حالا فقط با Docker و با یک خط نصب می‌شود؛ نه کلون لازم است و نه build.
+  نصب‌کننده (`scripts/docker-install.sh`) دامنه را می‌پرسد، یا از IP سرور با گواهی
+  خودامضا استفاده می‌کند. بعد رمزهای TURN را تصادفی می‌سازد، اولین گواهی را می‌گیرد،
+  سرور را بالا می‌آورد و ورود داشبورد را نشان می‌دهد. اجرای دوباره‌اش یعنی
+  به‌روزرسانی، و `.env` و داده‌ها می‌مانند. اگر Let's Encrypt هنوز گواهی ندهد (دامنه
+  هنوز به سرور اشاره نمی‌کند یا پورت ۸۰ بسته است)، سرور با گواهی خودامضای موقت بالا
+  می‌آید و گواهی واقعی خودش جایگزین می‌شود. جایی که Docker Hub بسته است، `--registry`
+  ایمیج‌ها را از راه یک mirror می‌کشد. ایمیج‌ها برای amd64 و arm64 ساخته می‌شوند:
+  `poorija/p00rija-app`، `poorija/p00rija-relay`، `poorija/p00rija-cert-renewer` و
+  `poorija/p00rija-panel`.
+
+- A server now installs with Docker alone, in one line: nothing to clone or
+  build. The installer (`scripts/docker-install.sh`) asks for a domain, or uses
+  the server's IP with a self-signed certificate. It then makes random TURN
+  secrets, gets the first certificate, starts the server, and prints the
+  dashboard login. Running it again updates, and keeps `.env` and the data.
+  If Let's Encrypt does not issue a certificate yet (the domain does not point
+  at the server, or port 80 is closed), the server starts on a temporary
+  self-signed certificate and the real one replaces it by itself. Where Docker
+  Hub is blocked, `--registry` pulls through a mirror. The images
+  are built for amd64 and arm64: `poorija/p00rija-app`, `poorija/p00rija-relay`,
+  `poorija/p00rija-cert-renewer`, and `poorija/p00rija-panel`.
+
+## رمز اول داشبورد، تصادفی · The dashboard's first password, random
+
+- سروری که بدون رمز مانیتورینگ بالا بیاید، در اولین اجرا یک رمز تصادفی ۲۰ نویسه‌ای
+  می‌سازد و فقط hash آن را نگه می‌دارد. رمز را یک بار نشان می‌دهد: در لاگ، و در فایلی
+  که فقط کاربر سرور می‌خواند. نام کاربری پیش‌فرض `admin` است. با تغییر رمز از
+  داشبورد، آن فایل پاک می‌شود. هیچ سروری با رمزی که دیگران می‌دانند بالا نیست.
+  سرورهایی که رمزشان را در `.env` دارند مثل قبل کار می‌کنند.
+
+- A server started with no monitoring password makes a random 20-character one
+  on its first start and keeps only its hash. It shows the password once: in
+  its log, and in a file only the server's user can read. The default user is
+  `admin`. A change from the dashboard removes that file. No server is up with
+  a password anyone else knows. Servers that have their password in `.env`
+  work as before.
+
+## پنل مرکزی با یک فرمان · The central panel in one command
+
+- ‏`scripts/panel.sh` اگر Docker روشن نباشد روشنش می‌کند و پنل مرکزی را در یک کانتینر
+  بالا می‌آورد. بار اول پورت را می‌پرسد، و اینکه پنل فقط روی همین کامپیوتر باشد یا
+  روی شبکهٔ محلی، و اینکه با روشن شدن Docker خودش بالا بیاید یا نه. جواب‌ها را نگه
+  می‌دارد، ولی هیچ رمزی را نه. ورود پنل را خود شما می‌سازید. روی شبکهٔ محلی، با
+  گواهی روی HTTPS کار می‌کند، و بدون گواهی به‌روشنی هشدار می‌دهد.
+
+- `scripts/panel.sh` starts Docker if it is not running and brings the central
+  panel up in a container. The first time it asks for the port, whether the
+  panel stays on this computer or is on the LAN, and whether it starts whenever
+  Docker starts. It keeps the answers, and never a password. You make the
+  panel's login yourself. On the LAN it serves HTTPS when given a certificate,
+  and warns plainly when it is not.
+
+## انتشار بی‌نشت · Publishing without leaks
+
+- اسکریپت انتشار (`scripts/dockerhub-release.sh`) پیش از هر push همهٔ لایه‌های هر
+  ایمیج و تاریخچهٔ build آن را می‌گردد. دنبال نام‌ها، نشانی‌ها و رشته‌هایی است که
+  نباید منتشر شوند، و با پیدا شدن هر کدام متوقف می‌شود.
+
+- The release script (`scripts/dockerhub-release.sh`) searches every layer of
+  every image, and its build history, before any push. It looks for the names,
+  addresses, and strings that must not be published, and stops on any of them.
+
+## برچسب تب‌های چت امن روی گوشی · Secure Chat's tab labels on a phone
+
+- روی آیفون، برچسب «تماس‌ها» و «تنظیمات» در نوار بالای چت امن بریده می‌شد. علتش
+  Font Awesome 7 بود که همهٔ آیکون‌ها را هم‌عرض کرده بود. آیکون‌ها در کل برنامه دوباره
+  عرض خودشان را دارند، و دکمهٔ جستجو فقط به اندازهٔ آیکونش جا می‌گیرد.
+
+- On an iPhone, the "Calls" and "Settings" labels in Secure Chat's top bar were
+  cut short. The cause was Font Awesome 7, which had made every icon the same
+  width. Icons across the app have their own width again, and the search button
+  takes only its icon's room.
+
+---
+
+# P00RIJA Cryptography 2.98.83
+
+Version 2.98.83 · build chat-v176
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## سرور TURN بی‌هشدار · The TURN server, without warnings
+
+- coturn 4.18 گزینهٔ قدیمی `--no-cli` را منسوخ کرده و در هر شروع خطا ثبت می‌کرد؛ آن
+  گزینه برداشته شد (رابط خط فرمان coturn در این نسخه خودش خاموش است). آزمایش TURN حالا
+  پارامترها را از خود فایل compose می‌خواند و هر گزینهٔ منسوخ را رد می‌کند.
+
+- coturn 4.18 deprecates the old `--no-cli` and logged an error on every
+  start; the flag is gone (coturn's command line interface is off by default in
+  this version). The TURN test now takes its arguments from the compose file
+  itself and refuses any that are deprecated.
+
+---
+
+# P00RIJA Cryptography 2.98.82
+
+Version 2.98.82 · build chat-v175
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هشدار دقیق‌تر برای لینکی که راه دیگری دارد · A truer alert for a link that has another way
+
+- وقتی لینک مستقیم بین دو سرور خانواده بسته است ولی پیام‌ها از راه سرور سومی می‌روند،
+  تلگرام دیگر هر چند ساعت هشدار «بحرانی» نمی‌فرستد؛ یک «هشدار» می‌آید که می‌گوید لینک
+  مستقیم برقرار نیست و پیام‌ها و تماس‌ها از راه کدام سرور می‌روند.
+
+- When the direct link between two servers of a family is closed but traffic
+  goes through a third, Telegram no longer sends a critical alert every few
+  hours; a warning says the direct link is down and through which server
+  messages and calls go.
+
+---
+
+# P00RIJA Cryptography 2.98.81
+
+Version 2.98.81 · build chat-v174
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## هشدارهای تلگرام، کامل و همین لحظه · Telegram alerts, complete and of the moment
+
+- **هر پیام یک کارت است:** شدت، نام کامل سرور (نام، نشانی، داخل یا خارج ایران، خوشه،
+  جایگاه Gateway، نسخه و شناسهٔ رله) و وضعیت همان سرور در لحظهٔ فرستادن: کاربران
+  آنلاین، صف پیام، پردازنده، حافظه، دیسک، لینک رله‌ها و post-quantum، TURN و مدت روشن
+  بودن، با تاریخ شمسی و ساعت تهران.
+- **دستورهای ربات:** `/status` وضعیت همهٔ سرورها را همین لحظه، به تفکیک خوشه، می‌دهد؛
+  `/servers` فهرست کامل سرورها و `/help` راهنما. فقط چت اپراتور جواب می‌گیرد.
+- **گزارش روزانه:** هر روز ساعت ۹ صبح به وقت تهران خلاصهٔ همهٔ سرورها خودش می‌آید.
+- **هر سرور خانواده هشدارش را می‌رساند:** رله‌ها به هم می‌گویند کدامشان ربات دارد و
+  هشدارها همیشه به همان می‌رسند؛ سرور تازه‌ای که به خانواده بپیوندد بی‌هیچ تنظیم دستی
+  هشدار می‌فرستد.
+
+## یک بار ساختن، همه‌جا یکسان · Build once, the same everywhere
+
+- **`scripts/deploy.sh --prebuilt`:** همهٔ ایمیج‌ها یک بار روی کامپیوتر استقرار ساخته
+  می‌شوند و هر سرور فقط لایه‌هایی را که ندارد از راه تونل SSH می‌گیرد. همهٔ سرورها
+  ایمیج‌هایی با digest یکسان اجرا می‌کنند و استقرار در پایان آن را بررسی می‌کند. سروری که
+  npm یا Docker Hub برایش گیر می‌کند دیگر به آن‌ها نیازی ندارد، و سرور کند می‌تواند از
+  راه سروری سریع‌تر برسد.
+- **همه‌چیز در آخرین نسخه:** Node 26.12.1، nginx 1.31.8، coturn 4.18.0، Docker CLI
+  29.9.2، Alpine 3.24.3، express 5.3.0، ws 8.22.0، Tauri 2.12.5 و افزونه‌هایش،
+  jszip 3.10.2، otpauth 9.5.2 و Font Awesome 7.3.1. سرور TURN تازه با همان تنظیمات
+  و اعتبارهای زمان‌دار آزمایش شده است.
+- **اصلاح‌ها:** چهار آیکونی که نمایش داده نمی‌شدند حالا دیده می‌شوند، و نوشتن دوبارهٔ
+  تنظیمات استقرار دیگر منطقه، خوشه و Gateway سرورها را پاک نمی‌کند.
+
+- **Every message is a card:** how serious it is, the server named in full
+  (name, address, inside or outside Iran, cluster, gateway place, version, and
+  relay id), and that server's state at the moment the card is sent: people
+  online, queued messages, processor, memory, disk, relay links and how many are
+  post-quantum, TURN, and uptime, with the Persian date and Tehran time.
+- **Bot commands:** `/status` gives every server's state right now, by
+  cluster; `/servers` the full list of servers; `/help` what it can do. Only the
+  operator's chat is answered.
+- **A daily summary:** every day at 09:00 Tehran time, every server's state
+  arrives on its own.
+- **Every server of the family gets its alerts through:** relays tell each
+  other which of them has the bot and alerts always go there; a new server that
+  joins the family sends alerts with nothing set by hand.
+- **`scripts/deploy.sh --prebuilt`:** every image is built once, on the
+  deploying computer, and each server pulls only the layers it lacks through an
+  SSH tunnel. Every server runs the same image digests, and the deploy checks
+  that at the end. A server whose npm or Docker Hub stalls no longer needs
+  either, and a slow server can be reached through a faster one.
+- **Everything at its newest:** Node 26.12.1, nginx 1.31.8, coturn 4.18.0,
+  Docker CLI 29.9.2, Alpine 3.24.3, express 5.3.0, ws 8.22.0, Tauri 2.12.5 and
+  its plugins, jszip 3.10.2, otpauth 9.5.2, and Font Awesome 7.3.1. The new TURN
+  server is tested with the same settings and time-limited credentials.
+- **Fixes:** four icons that did not show now do, and rewriting the deploy
+  settings no longer drops the servers' region, cluster, and gateway.
+
+---
+
+# P00RIJA Cryptography 2.98.80
+
+Version 2.98.80 · build chat-v173
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## راه دوم بین سرورهای یک خانواده · A second way between a family's servers
+
+- **وقتی مسیر بین دو سرور بسته است:** گاهی شبکه راه بین دو سرور را می‌بندد در حالی
+  که هر کدام هنوز به بقیه می‌رسد. حالا هر رله به رله‌هایی که با آن‌ها لینک دارد می‌گوید
+  با کدام سرورهای خانواده لینک دارد، و پیامی که برای سروری بی‌لینک است یک گام از راه
+  سروری می‌رود که به آن لینک دارد، اگر بشود از همان خوشه. پیام تا سرور مقصد مهروموم
+  می‌ماند و سرور وسط نمی‌تواند بازش کند. پیام، تماس و پیدا کردن مسیر بین کاربران آن
+  دو سرور مثل قبل کار می‌کند.
+
+- **When the path between two servers is closed:** a network sometimes closes
+  the way between two servers while each still reaches everybody else. Each
+  relay now tells the relays it is linked to which of the family's servers it
+  has links with, and what is meant for a server with no link goes one step
+  through a server that has one, of the same cluster where possible. It stays
+  sealed to the server it is for, and the server in between cannot open it.
+  Messages, calls, and finding routes between the users of those two servers
+  work as before.
+
+---
+
+# P00RIJA Cryptography 2.98.79
+
+Version 2.98.79 · build chat-v172
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## پنل مرکزی کامل، در مرورگر · The full central panel, in your browser
+
+- **همهٔ کارهای پنل هر رله، برای همهٔ سرورها:** پنل مرکزی حالا همهٔ بخش‌های پنل رله را
+  دارد (نمای کلی، صف‌های پیام، کاربران، رله‌ها، ترافیک، سرور و پشتیبان، گزارش‌ها، نصب
+  خام، سیستم) و هر بخش برای همهٔ سرورها یک جدول است که سرور و خوشهٔ هر ردیف را نشان
+  می‌دهد. هر ردیف کار خودش را دارد و کارهای گروهی روی همهٔ سرورهای نمایش‌داده‌شده یا یک
+  خوشه یکی‌یکی انجام می‌شوند. هر کاری که پنل یک رله می‌کند، پنل مرکزی هم می‌کند.
+- **در داکر و مرورگر، با ورود:** `config/control-panel.compose.yaml` پنل را روی کامپیوتر
+  خودتان بالا می‌آورد؛ با نام، رمز و کد دومرحله‌ای (TOTP) وارد می‌شوید. پنج ورود ناموفق
+  نشانی را قفل می‌کند و نشست بعد از بی‌کاری بسته می‌شود. پنل فقط روی 127.0.0.1 جواب
+  می‌دهد و هیچ پورتی روی سرورها باز نمی‌کند.
+- **کلید امضا در خود مرورگر:** هر مرورگر کلید خودش را با WebCrypto می‌سازد که بیرون‌بردنی
+  نیست؛ کارهای حساس همان‌جا امضا می‌شوند و میزبان پنل هیچ کلیدی ندارد. سرورهای قفل‌شده
+  هیچ کار حساسی را بی‌امضا نمی‌پذیرند.
+- **شبکه به صورت گراف:** رله‌ها در قاب خوشه‌هایشان، Gatewayها با شمارهٔ اولویت، شریک‌ها،
+  و وضعیت هر لینک. از روی گراف می‌شود گره‌ها را چید، رله را به خوشهٔ دیگر برد، ترتیب
+  Gatewayها را با کشیدن عوض کرد، لینک دستی کشید و به درخواست شراکت جواب داد؛ هر کار
+  پیش از اجرا تأیید می‌خواهد و اگر حساس باشد امضا می‌شود.
+- **خوشه‌ها:** رله‌های یک خانواده در گروه‌های نام‌دار، مثلاً خوشهٔ داخل کشور و خوشهٔ خارج
+  از کشور. همه مثل قبل با هم در ارتباط امن‌اند و کاربران دو خوشه مثل قبل با هم حرف
+  می‌زنند؛ ولی رله‌های هر خوشه اول با نشانی‌های داخلی به هم وصل می‌شوند، پس **اگر اینترنت
+  بین‌الملل قطع شود، خوشهٔ داخل کشور به‌تنهایی کار می‌کند**: پیام، تماس و پیدا کردن
+  مسیر بین کاربران سرورهای داخلی. پنل برای هر خوشه نشان می‌دهد مستقل است یا نه و برای
+  هر سرور داخلی بدون نشانی داخلی هشدار می‌دهد.
+- **برای هر کسی که خودش میزبانی می‌کند:** با همان `deploy.conf`؛ راهنما در
+  `docs/CONTROL-PANEL.md`. حالت خط فرمان نسخهٔ قبل هم مثل قبل کار می‌کند.
+- **اصلاح‌ها:** دکمهٔ حذف لینک دستی در پنل رله دوباره کار می‌کند، پنل هر رله خوشهٔ
+  رله‌های خانواده را نشان می‌دهد، و بررسی پس از استقرار وقتی شبکه یک درخواست را بیندازد
+  یک بار دوباره امتحان می‌کند و می‌گوید کدام بخش به بار دوم رسید.
+
+- **Everything a relay's dashboard does, for every server:** the central panel
+  now has every section of a relay's dashboard (overview, message queues,
+  users, relays, traffic, server and backups, reports, fresh install, and
+  system), each one table for all servers with the server and its cluster on
+  every row. Each row has its own actions, and group actions run on every
+  server shown, or one cluster, one after another. Whatever a relay's
+  dashboard does, the central panel does.
+- **In Docker, in your browser, with a login:** `config/control-panel.compose.yaml`
+  runs the panel on your own computer; you log in with a name, a password, and
+  an authenticator code (TOTP). Five failed logins lock the address, and a
+  session ends when it sits idle. The panel answers on 127.0.0.1 only and
+  opens no port on any server.
+- **The signing key lives in the browser:** each browser makes its own key with
+  WebCrypto, which cannot be taken out of it; dangerous actions are signed
+  there, and the panel's host holds no key. A locked server takes nothing
+  dangerous unsigned.
+- **The network as a graph:** relays in their cluster frames, gateways with
+  their order, partners, and the state of every link. On the graph you can lay
+  out the nodes, move a relay to another cluster, reorder the gateways by
+  dragging, draw a manual link, and answer partner requests; each change asks
+  first and is signed when it must be.
+- **Clusters:** a family's relays in named groups, such as the servers inside
+  the country and the servers outside it. They all stay linked securely, and
+  users of the two clusters talk as before; but the relays of a cluster reach
+  each other first at their inside addresses, so **if the international
+  internet is cut, the cluster inside the country keeps working on its own**:
+  messages, calls, and finding routes between the users of the inside servers.
+  The panel shows whether each cluster is independent and warns about every
+  inside server without an inside address.
+- **For anyone who self-hosts:** the same `deploy.conf`; the guide is
+  `docs/CONTROL-PANEL.md`. The command-line panel of the last release works as
+  before.
+- **Fixes:** the relay dashboard's "remove link" button works again, each
+  relay's dashboard shows the clusters of its family, and the check after a
+  deploy tries a request once more when the network drops it, and says which
+  part needed the second try.
+
+---
+
 # P00RIJA Cryptography 2.98.78
 
 Version 2.98.78 · build chat-v171

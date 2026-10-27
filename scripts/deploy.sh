@@ -65,6 +65,12 @@ Options
   --dry-run       Show what rsync would copy. Changes nothing.
   --skip-bump     Skip the version bump on the server; for a change that
                   touched only the server config.
+  --prebuilt      Build every image once, here, for linux/amd64, and have each
+                  server pull them (only the layers it lacks) through an SSH
+                  tunnel from a registry on 127.0.0.1 here: every server runs
+                  the same images, and none has to reach npm or Docker Hub.
+                  <NAME>_JUMP='<other server>' in the settings sends a slow
+                  server's connections through a faster one.
   --reconfigure   Ask for the server details again and overwrite the saved ones.
   --edit          Open the saved settings in \$EDITOR.
   --where         Print the path of the settings file.
@@ -93,6 +99,7 @@ USAGE
 
 MODE="deploy"
 SKIP_BUMP=""
+PREBUILT=""
 WANT_RECONFIGURE=0
 ONLY_SERVER=""
 # A while loop rather than `for arg in "$@"`, because --server takes a value
@@ -104,6 +111,7 @@ while [ $# -gt 0 ]; do
         --check) MODE="check" ;;
         --dry-run) MODE="dry-run" ;;
         --skip-bump) SKIP_BUMP="--skip-bump" ;;
+        --prebuilt) PREBUILT="--prebuilt" ;;
         --reconfigure|--configure) WANT_RECONFIGURE=1 ;;
         --server)
             ONLY_SERVER="${2:-}"
@@ -171,6 +179,12 @@ CONF
                 for field in ROLE SSH_HOST SSH_USER SSH_PORT SSH_KEY REMOTE_DIR PUBLIC_URL; do
                     eval "value=\${${upper}_${field}:-}"
                     printf "%s_%s='%s'\n" "$upper" "$field" "$value"
+                done
+                # The family's and the deploy's own fields, kept when set: a
+                # rewrite used to drop them.
+                for field in REGION GATEWAY CLUSTER INSIDE JUMP; do
+                    eval "value=\${${upper}_${field}:-}"
+                    [ -n "$value" ] && printf "%s_%s='%s'\n" "$upper" "$field" "$value"
                 done
             done
         } >> "$CONFIG_FILE"
@@ -250,6 +264,50 @@ family_sync() {
     fi
 }
 
+# ------------------------------------------------------------- built here once
+#
+# --prebuilt: the images are built on this machine, for the servers'
+# architecture, and pushed to a registry that answers on this machine's
+# 127.0.0.1 only. Each server pulls them through a reverse SSH tunnel, which
+# brings only the layers it does not hold yet, so every server runs the same
+# image digests and a release after the first moves only what changed. The
+# registry stays up between deploys for that reason (poorija-deploy-registry).
+REGISTRY_PORT="${POORIJA_REGISTRY_PORT:-5055}"
+REGISTRY="127.0.0.1:$REGISTRY_PORT"
+# What scripts/server-backup.sh runs as alpine:latest, pinned here.
+ALPINE_TAG="3.24.3"
+coturn_image() { sed -n 's/^ *image: *\(coturn\/coturn:[^ ]*\).*/\1/p' "$(dirname "$0")/../config/docker-compose.yaml" | head -1; }
+tree_version() { sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$(dirname "$0")/../package.json" | head -1; }
+prebuilt_build() {
+    log "Building the images here, once, for every server (linux/amd64)"
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { fail "--prebuilt needs Docker running on this machine."; return 1; }
+    if ! docker ps --format '{{.Names}}' | grep -Fxq poorija-deploy-registry; then
+        docker rm -f poorija-deploy-registry >/dev/null 2>&1
+        docker run -d --restart unless-stopped --name poorija-deploy-registry -p "$REGISTRY:5000" \
+            -v poorija-deploy-registry:/var/lib/registry registry:3.1.2 >/dev/null || { fail "could not start the local registry"; return 1; }
+        sleep 2
+    fi
+    local version root
+    version="$(tree_version)"
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+    for spec in "poorija-crypto config/Dockerfile" "poorija-chat-signal config/Dockerfile.chat-signal" "poorija-cert-renewer config/Dockerfile.cert-renewer"; do
+        set -- $spec
+        printf "  %s:%s\n" "$1" "$version"
+        # Cached on what goes in (files by content, pinned versions), so a
+        # release moves only the layers that changed.
+        docker buildx build --platform linux/amd64 --pull --provenance=false --sbom=false \
+            -f "$root/$2" -t "$REGISTRY/$1:$version" --push "$root" >/tmp/poorija-prebuilt-$1.log 2>&1 \
+            || { fail "building $1 failed:"; tail -15 /tmp/poorija-prebuilt-$1.log | sed 's/^/    /'; return 1; }
+    done
+    for base in "$(coturn_image)" "alpine:$ALPINE_TAG"; do
+        printf "  %s\n" "$base"
+        printf 'FROM %s\n' "$base" | docker buildx build --platform linux/amd64 --pull --provenance=false --sbom=false \
+            -t "$REGISTRY/$base" --push - >/tmp/poorija-prebuilt-base.log 2>&1 \
+            || { fail "copying $base failed:"; tail -10 /tmp/poorija-prebuilt-base.log | sed 's/^/    /'; return 1; }
+    done
+    ok "built and held at $REGISTRY for this run"
+}
+
 # --------------------------------------------------------------- more than one
 #
 # Two servers that are meant to stay in step have to be deployed from one tree
@@ -284,6 +342,13 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
     [ "$MODE" = "check" ] && ARGS+=(--check)
     [ "$MODE" = "dry-run" ] && ARGS+=(--dry-run)
     [ -n "$SKIP_BUMP" ] && ARGS+=("$SKIP_BUMP")
+    [ -n "$PREBUILT" ] && ARGS+=("$PREBUILT")
+    if [ -n "$PREBUILT" ] && [ "$MODE" = "deploy" ]; then
+        prebuilt_build || exit 1
+        export POORIJA_PREBUILT_DONE=1
+        POORIJA_PREBUILT_REPORT="$(mktemp)"
+        export POORIJA_PREBUILT_REPORT
+    fi
 
     OVERALL=0
     SERVED=""
@@ -296,6 +361,13 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         eval "s_dir=\${${upper}_REMOTE_DIR:-}"
         eval "s_url=\${${upper}_PUBLIC_URL:-}"
         eval "s_role=\${${upper}_ROLE:-app}"
+        eval "s_jump=\${${upper}_JUMP:-}"
+        jump=""
+        if [ -n "$s_jump" ]; then
+            ju="$(printf '%s' "$s_jump" | tr '[:lower:]' '[:upper:]' | tr -c '[:alnum:]' '_')"
+            eval "j_host=\${${ju}_SSH_HOST:-}"; eval "j_user=\${${ju}_SSH_USER:-$USER}"; eval "j_port=\${${ju}_SSH_PORT:-22}"; eval "j_key=\${${ju}_SSH_KEY:-}"
+            [ -n "$j_host" ] && jump="$j_user@$j_host:$j_port|$j_key"
+        fi
         if [ -z "$s_host" ]; then
             fail "SERVERS names '$name' but ${upper}_SSH_HOST is not set in $CONFIG_FILE"
             OVERALL=1
@@ -311,6 +383,7 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
         POORIJA_REMOTE_DIR="$s_dir" \
         POORIJA_PUBLIC_URL="${s_url:-https://$s_host:8585}" \
         POORIJA_ROLE="$s_role" \
+        POORIJA_SSH_JUMP="$jump" \
             bash "$0" ${ARGS[@]+"${ARGS[@]}"}
         child=$?
         [ "$child" -eq 0 ] || OVERALL=1
@@ -350,6 +423,19 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
     else
         fail "the servers are not all serving the same build"
         OVERALL=1
+    fi
+    # The images themselves, by digest, as each server reported them.
+    if [ -n "${POORIJA_PREBUILT_REPORT:-}" ] && [ -s "$POORIJA_PREBUILT_REPORT" ]; then
+        echo
+        log "The images each server runs"
+        sed 's/^/  /' "$POORIJA_PREBUILT_REPORT"
+        if [ "$(cut -d' ' -f2- "$POORIJA_PREBUILT_REPORT" | sort -u | wc -l | tr -d ' ')" = "1" ]; then
+            ok "every server runs the same images"
+        else
+            fail "the servers do not all run the same images"
+            OVERALL=1
+        fi
+        rm -f "$POORIJA_PREBUILT_REPORT"
     fi
 
     family_sync
@@ -411,7 +497,23 @@ fi
 SSH_OPTS=(-p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new
     -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 [ -n "$KEY" ] && [ -f "$KEY" ] && SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
+# Through another server, when <NAME>_JUMP names one: a path from here to
+# this server can be slow while the one between the two servers is not. The
+# hop only forwards the connection; it holds no key for this server.
+JUMP_OPTS=()
+if [ -n "${POORIJA_SSH_JUMP:-}" ]; then
+    jump_target="${POORIJA_SSH_JUMP%%|*}"; jump_key="${POORIJA_SSH_JUMP#*|}"
+    jump_port="${jump_target##*:}"; jump_target="${jump_target%:*}"
+    JUMP_OPTS=(-o "ProxyCommand=ssh -p $jump_port -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new${jump_key:+ -i $jump_key -o IdentitiesOnly=yes} -W %h:%p $jump_target")
+    SSH_OPTS+=("${JUMP_OPTS[@]}")
+fi
 remote() { ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" "$@"; }
+# The same options as one string for rsync's -e, an option with spaces in
+# single quotes (rsync splits its -e on spaces and honours quotes).
+RSYNC_SSH="ssh"
+for opt in "${SSH_OPTS[@]}"; do
+    case "$opt" in *" "*) RSYNC_SSH="$RSYNC_SSH '$opt'" ;; *) RSYNC_SSH="$RSYNC_SSH $opt" ;; esac
+done
 
 # ---------------------------------------------------------- what is live now
 # A relay server has no index.html, no js/ and no service worker; checking for
@@ -758,7 +860,7 @@ else
 fi
 
 RSYNC_BASE=(-az --human-readable --exclude '.DS_Store' --exclude '*.bak'
-            --exclude 'e2e/screenshots' --exclude 'e2e/tmp' -e "ssh ${SSH_OPTS[*]}")
+            --exclude 'e2e/screenshots' --exclude 'e2e/tmp' -e "$RSYNC_SSH")
 [ "$MODE" = "dry-run" ] && RSYNC_BASE+=(--dry-run --itemize-changes)
 
 # ------------------------------------------------------------- snapshot first
@@ -784,6 +886,7 @@ remote "mkdir -p '$REMOTE_DIR/scripts'" >/dev/null 2>&1
 scp -P "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
     $( [ -n "$KEY" ] && [ -f "$KEY" ] && printf -- '-i %s -o IdentitiesOnly=yes ' "$KEY" ) \
+    ${JUMP_OPTS[@]+"${JUMP_OPTS[@]}"} \
     scripts/server-backup.sh "$USER_NAME@$HOST:$REMOTE_DIR/scripts/server-backup.sh"
 if [ $? -ne 0 ]; then
     fail "Could not upload scripts/server-backup.sh to the server."
@@ -853,15 +956,46 @@ if ! remote 'docker ps >/dev/null 2>&1'; then
     echo "      bash scripts/deploy.sh --check"
     exit 1
 fi
+# The images built here, pulled through a reverse tunnel to the registry on
+# this machine's 127.0.0.1: only the layers this server lacks travel.
+prebuilt_pull() {
+    local version coturn
+    version="$(tree_version)"; coturn="$(coturn_image)"
+    log "Pulling the images built here (only the layers this server lacks)"
+    ssh "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes -R "$REGISTRY:$REGISTRY" "$USER_NAME@$HOST" 'bash -s' <<PULL 2>&1 | sed 's/^/  /'
+set -e
+R="$REGISTRY"
+for ref in poorija-crypto:$version poorija-chat-signal:$version poorija-cert-renewer:$version $coturn alpine:$ALPINE_TAG; do
+    docker pull -q "\$R/\$ref" >/dev/null
+    docker tag "\$R/\$ref" "\$ref"
+    docker rmi "\$R/\$ref" >/dev/null
+    printf '%-40s %s\n' "\$ref" "\$(docker image inspect --format '{{.Id}}' "\$ref" | cut -c8-19)"
+done
+docker tag "alpine:$ALPINE_TAG" alpine:latest
+PULL
+    return "${PIPESTATUS[0]}"
+}
 if [ "$ROLE" = "relay" ]; then
     # The relay's own compose file, from its own directory: its build context
     # is the parent, which is why the whole tree is not needed here but the
     # parent path is.
     remote "cd '$REMOTE_DIR/standalone-relay' && docker compose up -d --build" 2>&1 | sed 's/^/  /'
+elif [ -n "$PREBUILT" ]; then
+    if [ -z "${POORIJA_PREBUILT_DONE:-}" ]; then prebuilt_build || exit 1; fi
+    prebuilt_pull || { fail "The images did not reach the server; the running stack was left alone."; exit 1; }
+    remote "cd '$REMOTE_DIR' && bash scripts/sync-to-server.sh $SKIP_BUMP --prebuilt" 2>&1 | sed 's/^/  /'
 else
     remote "cd '$REMOTE_DIR' && bash scripts/sync-to-server.sh $SKIP_BUMP" 2>&1 | sed 's/^/  /'
 fi
 deploy_status=${PIPESTATUS[0]}
+if [ -n "$PREBUILT" ] && [ "$ROLE" = "app" ] && [ -n "${POORIJA_PREBUILT_REPORT:-}" ]; then
+    version="$(tree_version)"
+    ids="$(remote 'bash -s' 2>/dev/null <<IDS | tr '\n' ' ' | sed 's/ *$//'
+for ref in poorija-crypto:$version poorija-chat-signal:$version poorija-cert-renewer:$version; do docker image inspect --format '{{.Id}}' "\$ref" | cut -c8-19; done
+IDS
+)"
+    printf '%s %s\n' "${POORIJA_SERVER_NAME:-server}" "$ids" >> "$POORIJA_PREBUILT_REPORT"
+fi
 
 echo
 log "Checking what $PUBLIC_URL serves now"

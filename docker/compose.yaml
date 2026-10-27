@@ -1,0 +1,197 @@
+# P00RIJA Cryptography — the whole server from Docker Hub, nothing to build.
+#
+# The easy way is the installer, which writes .env, makes the first
+# certificate and starts this file (docs/DOCKER.md):
+#
+#   curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/docker-install.sh | bash
+#
+# By hand: put this file and a .env beside it (DOMAIN, EXTERNAL_IP, TURN_USER,
+# TURN_PASSWORD, TURN_SECRET at least), then
+#
+#   docker compose run --rm --no-deps cert-renewer --once
+#   docker compose up -d
+#
+# The same services as config/docker-compose.yaml, which builds them from
+# source: the app (8585), the relay, the TURN server (3478 udp/tcp, 5349,
+# relay ports 49152-50152/udp) and the certificate renewer (port 80 only for
+# Let's Encrypt). Data, certificates and Let's Encrypt state live next to this
+# file. With no MONITOR_PASSWORD the relay makes a random one on its first
+# start and shows it once (docker logs, or data/chat-signal/initial-monitor-password);
+# the dashboard user is MONITOR_USER, admin by default.
+#
+#   APP_VERSION            image tag (default latest)
+#   P00RIJA_IMAGE_PREFIX   where the images come from (default poorija/)
+#   P00RIJA_REGISTRY       a registry mirror in front of coturn too, with a
+#                          trailing slash (the installer's --registry sets both)
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  poorija-cryptography:
+    image: ${P00RIJA_IMAGE_PREFIX:-poorija/}p00rija-app:${APP_VERSION:-latest}
+    container_name: Poorija-Cryptography_App
+    logging: *default-logging
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8585
+      APP_DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      APP_ORIGIN: https://${DOMAIN}:${APP_PORT:-8585}
+      APP_ORIGIN_WS: wss://${DOMAIN}:${APP_PORT:-8585}
+      APP_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
+      APP_FRONTS: ${CHAT_FRONTS:-}
+    depends_on:
+      - chat-signal
+    ports:
+      - "${APP_PORT:-8585}:8585"
+      - "${APP_FRONT_BIND:-127.0.0.1}:${APP_FRONT_PORT:-8586}:8586"
+    volumes:
+      - ${SSL_CERT_PATH:-${CERTS_DIR:-./certs}/${CERT_FILE:-cert.pem}}:/etc/nginx/certs/fullchain.pem:ro
+      - ${SSL_KEY_PATH:-${CERTS_DIR:-./certs}/${KEY_FILE:-key.pem}}:/etc/nginx/certs/privkey.pem:ro
+    extra_hosts:
+      - "chat-signal:host-gateway"
+    networks:
+      - poorija_net
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  chat-signal:
+    image: ${P00RIJA_IMAGE_PREFIX:-poorija/}p00rija-relay:${APP_VERSION:-latest}
+    container_name: Poorija-Cryptography_ChatSignal
+    logging: *default-logging
+    environment:
+      CHAT_TURN_URL: ${CHAT_TURN_URL:-turn:${DOMAIN:-localhost}:3478?transport=udp,turn:${DOMAIN:-localhost}:3478?transport=tcp,turns:${DOMAIN:-localhost}:5349?transport=tcp}
+      CHAT_TURN_USERNAME: ${TURN_USER:?Set TURN_USER in .env}
+      CHAT_TURN_CREDENTIAL: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      CHAT_TURN_SECRET: ${TURN_SECRET:-}
+      CHAT_PUBLIC_RELAY_ORIGIN: ${CHAT_PUBLIC_RELAY_ORIGIN:-}
+      DOMAIN: ${DOMAIN:-}
+      CHAT_PUBLIC_PRESENCE_URL: ${CHAT_PUBLIC_PRESENCE_URL:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${DOMAIN:-localhost}}
+      CHAT_PUSH_STORE_PATH: /data/push-subscriptions.json
+      CHAT_VAPID_STORE_PATH: /data/vapid.json
+      CHAT_TRANSIT_PEERS: ${CHAT_TRANSIT_PEERS:-}
+      CHAT_OPERATOR_KEY: ${CHAT_OPERATOR_KEY:-}
+      CHAT_DIRECTORY_SOURCES: ${CHAT_DIRECTORY_SOURCES:-}
+      CHAT_DIRECTORY_MIN_SERIAL: ${CHAT_DIRECTORY_MIN_SERIAL:-0}
+      CHAT_GATEWAY_STABLE_MS: ${CHAT_GATEWAY_STABLE_MS:-60000}
+      CHAT_GATEWAY_HANDOFF_MS: ${CHAT_GATEWAY_HANDOFF_MS:-120000}
+      CHAT_JOIN_PER_HOUR: ${CHAT_JOIN_PER_HOUR:-10}
+      CHAT_JOIN_WAITING_MAX: ${CHAT_JOIN_WAITING_MAX:-20}
+      CHAT_REQUIRE_OPERATOR_SIGNATURE: ${CHAT_REQUIRE_OPERATOR_SIGNATURE:-0}
+      CHAT_CENTRAL_CONTROL: ${CHAT_CENTRAL_CONTROL:-1}
+      CHAT_TRANSIT_INSECURE_TLS: ${CHAT_TRANSIT_INSECURE_TLS:-}
+      CHAT_OFFLINE_STORE_PATH: /data/offline-messages.json
+      CHAT_POLICY_STORE_PATH: /data/server-policy.json
+      CHAT_SELF_DESTRUCT_STORE_PATH: /data/self-destruct-records.json
+      CHAT_ALLOWED_ORIGINS: ${CHAT_ALLOWED_ORIGINS:-}
+      CHAT_MIRROR_ORIGINS: ${CHAT_MIRROR_ORIGINS:-}
+      CHAT_LINK_PREVIEWS: ${CHAT_LINK_PREVIEWS:-1}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_STICKERS_UPSTREAM: ${TELEGRAM_STICKERS_UPSTREAM:-}
+      CHAT_ALERT_TELEGRAM_CHAT_ID: ${CHAT_ALERT_TELEGRAM_CHAT_ID:-}
+      CHAT_ALERT_PEERS: ${CHAT_ALERT_PEERS:-}
+      CHAT_ALERT_LABEL: ${CHAT_ALERT_LABEL:-}
+      CHAT_ALERT_DISK_FREE_PCT: ${CHAT_ALERT_DISK_FREE_PCT:-10}
+      CHAT_ALERT_DISK_FREE_GB: ${CHAT_ALERT_DISK_FREE_GB:-2}
+      CHAT_ALERT_MEMORY_FREE_PCT: ${CHAT_ALERT_MEMORY_FREE_PCT:-10}
+      CHAT_ALERT_TURN_PCT: ${CHAT_ALERT_TURN_PCT:-80}
+      CHAT_ALERT_LINK_MBPS: ${CHAT_ALERT_LINK_MBPS:-0}
+      CHAT_TURN_PORT_MIN: ${TURN_MIN_PORT:-49152}
+      CHAT_TURN_PORT_MAX: ${TURN_MAX_PORT:-50152}
+      CHAT_LISTEN_HOSTS: ${CHAT_LISTEN_HOSTS:-127.0.0.1,docker0}
+      CHAT_FRONTS: ${CHAT_FRONTS:-}
+      CHAT_FRONT_DOORS: ${CHAT_FRONT_DOORS:-}
+      CHAT_FRONT_PORT: ${CHAT_FRONT_PORT:-9011}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
+      MONITOR_USER: ${MONITOR_USER:-admin}
+      CHAT_TLS_CERT_PATH: /etc/certs/${CERT_FILE:-cert.pem}
+      OPS_INSTALL_DIR: ${OPS_INSTALL_DIR:-}
+      OPS_BACKUP_DIR: ${OPS_BACKUP_DIR:-}
+      CHAT_BOOTSTRAP_PORT: ${CHAT_BOOTSTRAP_PORT:-9080}
+      APP_VERSION: ${APP_VERSION:-}
+    network_mode: host
+    volumes:
+      - ./data/chat-signal:/data
+      - ${CERTS_DIR:-./certs}:/etc/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: ${CHAT_SIGNAL_MEM_LIMIT:-2g}
+    restart: unless-stopped
+
+  coturn:
+    image: ${P00RIJA_REGISTRY:-}coturn/coturn:4.18.0-alpine
+    container_name: Poorija-Cryptography_Coturn
+    logging: *default-logging
+    network_mode: host
+    environment:
+      TURN_USER: ${TURN_USER:?Set TURN_USER in .env}
+      TURN_PASSWORD: ${TURN_PASSWORD:?Set TURN_PASSWORD in .env}
+      TURN_SECRET: ${TURN_SECRET:-}
+    command:
+      - --log-file=stdout
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --listening-ip=0.0.0.0
+      - --realm=${DOMAIN:-localhost}
+      - --server-name=${DOMAIN:-localhost}
+      - --cert=/etc/coturn/certs/cert.pem
+      - --pkey=/etc/coturn/certs/key.pem
+      - $$( [ -n "$$TURN_SECRET" ] && echo --use-auth-secret || echo --lt-cred-mech )
+      - $$( [ -n "$$TURN_SECRET" ] && echo --static-auth-secret=$$TURN_SECRET || echo --user=$$TURN_USER:$$TURN_PASSWORD )
+      - --fingerprint
+      - --no-multicast-peers
+      - --min-port=${TURN_MIN_PORT:-49152}
+      - --max-port=${TURN_MAX_PORT:-50152}
+      - --external-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
+      - --relay-ip=${EXTERNAL_IP:?Set EXTERNAL_IP in .env}
+    volumes:
+      - ${SSL_CERT_PATH:-${CERTS_DIR:-./certs}/${CERT_FILE:-cert.pem}}:/etc/coturn/certs/cert.pem:ro
+      - ${SSL_KEY_PATH:-${CERTS_DIR:-./certs}/${KEY_FILE:-key.pem}}:/etc/coturn/certs/key.pem:ro
+    restart: unless-stopped
+
+  cert-renewer:
+    image: ${P00RIJA_IMAGE_PREFIX:-poorija/}p00rija-cert-renewer:${APP_VERSION:-latest}
+    container_name: Poorija-Cryptography_CertRenewer
+    logging: *default-logging
+    entrypoint: ["/bin/sh", "/usr/local/bin/cert-renewer.sh"]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      EXTERNAL_IP: ${EXTERNAL_IP:-}
+      CERT_MODE: ${CERT_MODE:-}
+      CERT_SANS: ${CERT_SANS:-}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+      CERT_DEPLOY_DIR: /deploy-certs
+      CERT_FILE: ${CERT_FILE:-cert.pem}
+      KEY_FILE: ${KEY_FILE:-key.pem}
+      CERTS_DIR_ON_HOST: ${CERTS_DIR:-./certs}
+      SSL_CERT_PATH_ON_HOST: ${SSL_CERT_PATH:-${CERTS_DIR:-./certs}/${CERT_FILE:-cert.pem}}
+      SSL_KEY_PATH_ON_HOST: ${SSL_KEY_PATH:-${CERTS_DIR:-./certs}/${KEY_FILE:-key.pem}}
+      LETSENCRYPT_DIR: /etc/letsencrypt
+      RENEW_BEFORE_DAYS: ${CERT_RENEW_BEFORE_DAYS:-10}
+      CHECK_INTERVAL_SECONDS: ${CERT_CHECK_INTERVAL_SECONDS:-21600}
+      APP_CONTAINER: Poorija-Cryptography_App
+      COTURN_CONTAINER: Poorija-Cryptography_Coturn
+      RENEWER_CONTAINER: Poorija-Cryptography_CertRenewer
+      COTURN_KEY_UID: ${COTURN_KEY_UID:-65534}
+    network_mode: host
+    volumes:
+      - ${CERTS_DIR:-./certs}:/deploy-certs
+      - ${LETSENCRYPT_DIR:-./letsencrypt}:/etc/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+networks:
+  poorija_net:
+    driver: bridge

@@ -26,6 +26,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const net = require('net');
 const { relayIdFor } = require('./relay-identity.js');
 
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -52,6 +53,10 @@ function wellFormed(doc) {
   if (typeof body.operator?.key !== 'string' || !HEX64.test(String(body.operator?.id || ''))) return false;
   if (!Array.isArray(body.relays) || !Array.isArray(body.revoked)) return false;
   if (!body.relays.every((relay) => relay && HEX64.test(String(relay.id || '')) && (relay.origins === undefined || Array.isArray(relay.origins)))) return false;
+  /* A cluster is a name; inside addresses are where cluster mates reach a
+     relay when the wider network does not. */
+  if (!body.relays.every((relay) => (relay.cluster === undefined || (typeof relay.cluster === 'string' && relay.cluster.length <= 40))
+    && (relay.inside === undefined || (Array.isArray(relay.inside) && relay.inside.length <= 4 && relay.inside.every(webOrigin))))) return false;
   /* Admin keys, when listed: each id is the hash of its key. */
   if (body.admins !== undefined && !(Array.isArray(body.admins) && body.admins.length <= 32 && body.admins.every((admin) => (
     admin && typeof admin.key === 'string' && typeof admin.name === 'string' && admin.name.length <= 64 && relayIdFor(admin.key) === admin.id
@@ -90,10 +95,19 @@ function verifyDirectory(doc, { operatorKey, selfId, heldSerial = 0, heldBody = 
 /* What believing a directory changes for one relay: every other member is
    allowed (and dialled where it has an address); whatever an earlier
    directory added and this one no longer names, and every revoked id, goes. */
+/* A cluster mate is tried at its inside addresses first (a country cut off
+   from the rest of the internet keeps its own routes); any other relay at
+   its public addresses first, its inside ones last. */
 function planChanges(directory, selfId, previouslyAdded = new Set()) {
+  const selfCluster = directory.relays.find((relay) => relay.id === selfId)?.cluster || '';
   const allow = directory.relays
     .filter((relay) => relay.id !== selfId)
-    .map((relay) => ({ id: relay.id, origins: (relay.origins || []).map(String).join('|') }));
+    .map((relay) => {
+      const publicOrigins = (relay.origins || []).map(String);
+      const inside = (relay.inside || []).map(String);
+      const ordered = selfCluster && relay.cluster === selfCluster ? [...inside, ...publicOrigins] : [...publicOrigins, ...inside];
+      return { id: relay.id, origins: Array.from(new Set(ordered)).join('|') };
+    });
   const named = new Set(directory.relays.map((relay) => relay.id));
   const drop = new Set(directory.revoked);
   for (const id of previouslyAdded) if (!named.has(id)) drop.add(id);
@@ -101,4 +115,23 @@ function planChanges(directory, selfId, previouslyAdded = new Set()) {
   return { allow, drop: Array.from(drop) };
 }
 
-module.exports = { canonicalJson, operatorIdFor, signDirectory, verifyDirectory, planChanges };
+function webOrigin(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch (_error) { return false; }
+}
+
+/* Whether a dial checks the certificate's name. An IP address has no name a
+   certificate could carry, and a relay of the family is authenticated anyway:
+   the link handshake proves its key, and the link is encrypted under keys only
+   the two relays derive. So for a family relay at an IP address the name check
+   is left out; everywhere else it stays as configured. */
+function verifyTlsFor({ origin, familyMember, verifyTls = true }) {
+  if (!verifyTls) return false;
+  let host = '';
+  try { host = new URL(String(origin)).hostname.replace(/^\[|\]$/g, ''); } catch (_error) { return true; }
+  return !(familyMember && net.isIP(host));
+}
+
+module.exports = { canonicalJson, operatorIdFor, signDirectory, verifyDirectory, planChanges, verifyTlsFor };

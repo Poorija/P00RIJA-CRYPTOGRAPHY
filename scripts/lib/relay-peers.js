@@ -115,12 +115,13 @@ function parsePeerAllowlist(value) {
  * default: the link is authenticated by relay identity whatever the transport
  * says, so the certificate is defence in depth rather than the control. */
 function makeIdentityFetcher({ verifyTls = true, timeoutMs = 8000 } = {}) {
-  return function fetchIdentity(origin) {
+  return function fetchIdentity(origin, options = {}) {
     return new Promise((resolve, reject) => {
       let url;
       try { url = new URL('/relay-identity', origin); } catch (error) { return reject(error); }
       const agent = url.protocol === 'https:' ? https : http;
-      const request = agent.get(url, { rejectUnauthorized: verifyTls, timeout: timeoutMs }, (response) => {
+      const verify = options.verifyTls === undefined ? verifyTls : options.verifyTls;
+      const request = agent.get(url, { rejectUnauthorized: verify, timeout: timeoutMs }, (response) => {
         if (response.statusCode !== 200) {
           response.resume();
           return reject(new Error(`relay identity answered ${response.statusCode}`));
@@ -162,6 +163,9 @@ function createRelayPeers({
   WebSocketImpl,
   fetchIdentity,
   verifyTls = true,
+  /* Per address and relay: whether this dial checks the certificate's name
+     (relay-directory.js, verifyTlsFor). */
+  verifyTlsFor = () => verifyTls,
   log = console,
   onFrame = () => {},
   onLinkUp = () => {},
@@ -423,7 +427,8 @@ function createRelayPeers({
       /* One address per attempt, round the list: a mirror gets its turn
          when the main address keeps failing. */
       const target = originForAttempt(origin, attempt);
-      const bundle = await fetchIdentity(target);
+      const verify = verifyTlsFor(peerId, target);
+      const bundle = await fetchIdentity(target, { verifyTls: verify });
       /* The key is checked against the id that was WANTED, not against the id
          the answer carried. Otherwise whoever answers is authenticated as
          themselves, which is not the question being asked. */
@@ -435,7 +440,7 @@ function createRelayPeers({
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocketImpl(url.toString(), {
         handshakeTimeout: DIAL_TIMEOUT_MS,
-        rejectUnauthorized: verifyTls,
+        rejectUnauthorized: verify,
       });
       const link = await new Promise((resolve, reject) => {
         const giveUp = setTimer(() => reject(new Error('handshake timed out')), HANDSHAKE_TIMEOUT_MS);

@@ -1,0 +1,86 @@
+/*
+ * P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
+ * Copyright (C) 2026 Poorija <p00rija@tutamail.com>
+ * https://github.com/Poorija/P00RIJA-Cryptography
+ * Licensed under the GNU Affero General Public License, version 3 only.
+ */
+
+:root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --mut:#6b7385; --line:#e3e6ec; --good:#1f8a4c; --bad:#c23b3b; --warn:#b7791f; --acc:#2f6fdb; --soft:#eef2fb; }
+@media (prefers-color-scheme: dark) { :root { --bg:#12151b; --card:#1b2029; --text:#e6e9ef; --mut:#9aa3b5; --line:#2a313d; --good:#3fbf74; --bad:#e06464; --warn:#e0a84a; --acc:#5b8ff0; --soft:#222a38; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin:0; font:14px/1.6 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; background:var(--bg); color:var(--text); }
+header { display:flex; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid var(--line); background:var(--card); flex-wrap:wrap; position:sticky; top:0; z-index:5; }
+header h1 { font-size:17px; margin:0; flex:1; }
+main { padding:16px; max-width:1500px; margin:0 auto; display:grid; gap:14px; }
+#sections { display:grid; gap:14px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.spread { justify-content:space-between; }
+button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:7px; padding:5px 11px; cursor:pointer; }
+button:disabled { opacity:.5; cursor:default; }
+button.acc { background:var(--acc); border-color:var(--acc); color:#fff; }
+button.bad { border-color:var(--bad); color:var(--bad); }
+button.link { border:0; background:none; color:var(--acc); padding:0; }
+input, select, textarea { font:inherit; padding:5px 9px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--text); }
+input.wide { flex:1; min-width:280px; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:start; padding:7px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mut); font-weight:600; font-size:12px; white-space:nowrap; }
+tr.group td { background:var(--soft); font-weight:600; }
+.scroll { overflow:auto; }
+.tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); white-space:nowrap; }
+.good { color:var(--good); border-color:var(--good); } .bad { color:var(--bad); border-color:var(--bad); } .warn { color:var(--warn); border-color:var(--warn); }
+.bad-text { color:var(--bad); min-height:1.6em; }
+.mut { color:var(--mut); }
+.mono { font-family: ui-monospace, Menlo, monospace; direction:ltr; unicode-bidi:embed; }
+.pre { white-space:pre-wrap; margin:6px 0; }
+pre { white-space:pre-wrap; margin:0; font-size:12px; direction:ltr; text-align:left; max-height:320px; overflow:auto; }
+.login { min-height:100vh; display:grid; place-items:center; padding:16px; }
+.login form { width:min(380px, 100%); display:grid; gap:10px; }
+.login h1 { font-size:18px; margin:0 0 4px; }
+.login label { display:grid; gap:4px; }
+.tabs { display:flex; gap:4px; padding:8px 16px 0; flex-wrap:wrap; max-width:1500px; margin:0 auto; }
+.tabs button { border-radius:7px 7px 0 0; border-bottom:0; }
+.tabs button[aria-selected="true"] { background:var(--acc); border-color:var(--acc); color:#fff; }
+.cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:10px; }
+.cards .card h3 { margin:0 0 6px; font-size:15px; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; }
+.kv span:nth-child(odd) { color:var(--mut); }
+.filter { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 16px 0; max-width:1500px; margin:0 auto; }
+.chip { display:inline-flex; gap:4px; align-items:center; padding:2px 8px; border:1px solid var(--line); border-radius:999px; background:var(--card); font-size:13px; }
+.grid { display:grid; gap:8px; }
+textarea { width:100%; resize:vertical; }
+input.narrow { width:84px; }
+.card:has(> pre:empty) { display:none; }
+/* the network graph */
+.graph-wrap { display:grid; grid-template-columns:minmax(0, 1fr) 300px; gap:12px; align-items:start; }
+@media (max-width: 900px) { .graph-wrap { grid-template-columns:1fr; } }
+svg.graph { width:100%; height:min(70vh, 720px); background:var(--bg); border:1px solid var(--line); border-radius:10px; touch-action:none; direction:ltr; }
+.graph .frame rect { fill:var(--soft); fill-opacity:.55; stroke:var(--line); stroke-width:2; }
+.graph .frame text { fill:var(--mut); font-size:15px; font-weight:600; }
+.graph .edge { stroke-width:3; }
+.graph .edge.family.up { stroke:var(--good); }
+.graph .edge.family.down { stroke:var(--bad); stroke-dasharray:8 6; }
+.graph .edge.manual { stroke:#8b5cf6; }
+.graph .edge.partner { stroke:#f59e0b; }
+.graph .edge.partner.down { stroke-dasharray:8 6; }
+.graph .edge.via { stroke:#f59e0b; stroke-dasharray:2 6; }
+.graph .node { cursor:grab; }
+.graph .node circle, .graph .node rect { stroke:var(--card); stroke-width:3; }
+.graph .node.selected circle:not(.gw-ring), .graph .node.selected rect { stroke:var(--text); }
+.graph .node.unreachable circle:not(.gw-ring) { stroke:var(--bad); stroke-dasharray:4 3; }
+.graph .node .label { fill:var(--text); font-size:14px; font-weight:600; text-anchor:middle; }
+.graph .node .sub { fill:var(--mut); font-size:11px; text-anchor:middle; }
+.graph .gw-ring { fill:none; stroke:#f59e0b !important; stroke-width:3; }
+.graph .gw-num { fill:#f59e0b; font-size:13px; font-weight:700; }
+.graph .lock { font-size:13px; }
+.graph .c0 circle:not(.gw-ring) { fill:#3b82f6; } .graph .c1 circle:not(.gw-ring) { fill:#10b981; } .graph .c2 circle:not(.gw-ring) { fill:#ef4444; } .graph .c3 circle:not(.gw-ring) { fill:#8b5cf6; }
+.graph .c4 circle:not(.gw-ring) { fill:#06b6d4; } .graph .c5 circle:not(.gw-ring) { fill:#ec4899; } .graph .c6 circle:not(.gw-ring) { fill:#84cc16; } .graph .c7 circle:not(.gw-ring) { fill:#64748b; }
+.graph .partner rect { fill:#f59e0b; } .graph .external circle { fill:var(--mut); }
+.legend { font-size:12px; gap:12px; }
+.edge-key::before { content:''; display:inline-block; width:22px; height:0; border-top:3px solid; vertical-align:middle; margin-inline-end:5px; }
+.edge-key.family.up::before { border-color:var(--good); } .edge-key.family.down::before { border-color:var(--bad); border-top-style:dashed; }
+.edge-key.manual::before { border-color:#8b5cf6; } .edge-key.partner::before { border-color:#f59e0b; } .edge-key.via::before { border-color:#f59e0b; border-top-style:dotted; }
+.gw-list { padding-inline-start:0; list-style:none; display:grid; gap:6px; }
+.gw-list li { display:flex; gap:6px; align-items:center; padding:5px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); cursor:grab; }

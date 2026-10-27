@@ -14,7 +14,7 @@ Version 3.33 · مستقل از نسخهٔ برنامه، فقط روی سرور
 | دوم | `https://YOUR-SERVER-2:8585/Monitor_Server` |
 
 - **نام کاربری**: `admin` (پیش‌فرض؛ با متغیر `MONITOR_USER` قابل تغییر)
-- **رمز عبور**: همان `MONITOR_PASSWORD` در فایل `.env` سرور
+- **رمز عبور**: همان `MONITOR_PASSWORD` در فایل `.env` سرور. اگر خالی باشد (نصب آمادهٔ Docker)، رله در اولین اجرا یک رمز تصادفی می‌سازد و یک بار نشانش می‌دهد: در `docker logs` و در `data/chat-signal/initial-monitor-password`. فقط hash آن نگه داشته می‌شود و با تغییر رمز از داشبورد، آن فایل پاک می‌شود (از 2.98.84).
 - ورود با قفل سه‌مرحله‌ای: ۳ تلاش ناموفق = ۱۰ دقیقه قفل
 - سشن با هر درخواست معتبر تمدید می‌شود (Sliding TTL)
 - صفحهٔ ورود از نسخهٔ 2.91.22 به بعد فیلد نام کاربری دارد
@@ -188,6 +188,12 @@ records what was done and whether it was signed, never a password. The page
 opens only with the one-time link the panel prints, and only from this
 computer's browser.
 
+**In the browser, with a login (from 2.98.79).** The same panel, much fuller —
+every section of this dashboard for all your servers, the network as a graph,
+and clusters — runs in Docker and opens in your browser behind a password and an
+authenticator code, with each browser holding its own signing key:
+[CONTROL-PANEL.md](CONTROL-PANEL.md).
+
 ## پنل مرکزی برای همهٔ سرورها (از نسخهٔ 2.98.78)
 
 `node tools/control-panel.mjs` فقط روی کامپیوتر خود شما اجرا می‌شود. سرورها را از
@@ -224,15 +230,56 @@ Gatewayها، ری‌استارت، به‌روزرسانی، پشتیبان) ا
 شد و با امضا بود یا نه، هرگز رمز. صفحه فقط با لینک یک‌بارمصرفی که پنل چاپ می‌کند و
 فقط از مرورگر همین کامپیوتر باز می‌شود.
 
+**در مرورگر، با ورود (از نسخهٔ 2.98.79).** همین پنل، بسیار کامل‌تر (همهٔ بخش‌های این
+داشبورد برای همهٔ سرورها، شبکه به صورت گراف، و خوشه‌ها)، در داکر اجرا می‌شود و در
+مرورگر پشت رمز و کد دومرحله‌ای باز می‌شود و هر مرورگر کلید امضای خودش را دارد:
+[CONTROL-PANEL.md](CONTROL-PANEL.md).
+
+## Alerts in Telegram (from 2.98.81)
+
+One relay of the family holds the bot (`TELEGRAM_BOT_TOKEN` and
+`CHAT_ALERT_TELEGRAM_CHAT_ID`); every other relay hands it its alerts over
+the family's links, preferring a member that said it has the bot. Each message
+is a card: how serious it is, the server named in full (its name, address,
+whether it is inside or outside Iran, its cluster and gateway place, version,
+build, and relay id — for a relayed card, the id its link proved), what
+happened, and that server's state at the moment the card is sent: people
+online, queued messages, processor, memory, the relay's own memory, disk,
+relay links and how many are post-quantum, TURN, and uptime.
+
+The bot also answers, in the operator's chat only: `/status` (every server's
+state right now, grouped by cluster, the ones with a problem marked, the ones
+that did not answer by name), `/servers` (each server's full name and place),
+and `/help`. Once a day at `CHAT_STATUS_REPORT_AT` (09:00 Tehran time) the same
+summary arrives on its own. If the bot has a webhook, or something else reads
+its updates, the commands are left to that.
+
+## هشدار در تلگرام (از نسخهٔ 2.98.81)
+
+یکی از رله‌های خانواده ربات را دارد (`TELEGRAM_BOT_TOKEN` و
+`CHAT_ALERT_TELEGRAM_CHAT_ID`) و بقیه هشدارهایشان را از لینک‌های خانواده به آن
+می‌دهند، اول به عضوی که گفته ربات دارد. هر پیام یک کارت است: شدت آن، نام کامل سرور
+(نام، نشانی، داخل یا خارج ایران، خوشه و جایگاه Gateway، نسخه، build و شناسهٔ رله؛ در
+کارتی که از رلهٔ دیگری رسیده، شناسه‌ای که لینک آن را تأیید کرده)، چه اتفاقی افتاده، و
+وضعیت همان سرور در لحظهٔ فرستادن کارت: کاربران آنلاین، پیام‌های صف، پردازنده، حافظه،
+حافظهٔ خود رله، دیسک، لینک رله‌ها و تعداد post-quantum، TURN و مدت روشن بودن.
+
+ربات فقط در چت اپراتور جواب هم می‌دهد: `/status` (وضعیت همهٔ سرورها همین لحظه،
+گروه‌بندی‌شده بر اساس خوشه، با علامت سرورهای مشکل‌دار و نام سرورهایی که جواب ندادند)،
+`/servers` (نام و جای کامل هر سرور) و `/help`. هر روز ساعت `CHAT_STATUS_REPORT_AT`
+(۹ صبح به وقت تهران) همین خلاصه خودش می‌آید. اگر ربات webhook داشته باشد یا چیز دیگری
+پیام‌هایش را بخواند، دستورها به همان سپرده می‌شوند.
+
 ## متغیرهای محیطی
 
 | متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `MONITOR_PASSWORD` | — | رمز ورود (الزامی ≥۱۲) |
+| `MONITOR_PASSWORD` | — | رمز ورود (≥۱۲). اگر خالی باشد، اولین اجرا رمزی تصادفی می‌سازد |
+| `CHAT_ENV_FILE` | `.env` کنار مخزن | فایل `.env` اجرای بدون Docker؛ `none` یعنی هیچ فایلی |
 | `MONITOR_USER` | admin | نام کاربری |
 | `OPS_INSTALL_DIR` | — | مسیر نصب روی host (برای bind mounts) |
 | `OPS_BACKUP_DIR` | `$INSTALL/backups` | محل بکاپ‌ها |
-| `OPS_JOB_IMAGE` | node:26.12.0-alpine | ایمیج job containerها |
+| `OPS_JOB_IMAGE` | node:26.12.1-alpine | ایمیج job containerها |
 | `OPS_DOCKER_SOCKET` | /var/run/docker.sock | سوکت داکر |
 | `CHAT_BOOTSTRAP_PORT` | 9080 | پورت نصب‌کنندهٔ خام |
 | `OPS_HUB_MIRROR` | https://hub.docker.com | میرور داکر هاب (برای ایران) |
@@ -240,8 +287,11 @@ Gatewayها، ری‌استارت، به‌روزرسانی، پشتیبان) ا
 | `APP_VERSION` | — | نسخهٔ جاری (برای تشخیص تگ stale) |
 | `OPS_DATA_DIR` | `$INSTALL/data/chat-signal` | دادهٔ رله روی host (تحویل فایل دانلود پشتیبان و bundle) |
 | `CHAT_ALERT_TELEGRAM_CHAT_ID` | — | چت تلگرامی که هشدارها به آن می‌رود (با `TELEGRAM_BOT_TOKEN`)؛ رلهٔ بدون این دو، هشدار را از لینک transit به رلهٔ دیگر می‌دهد |
-| `CHAT_ALERT_PEERS` | — | شناسهٔ رله‌هایی که هشدار به آن‌ها فرستاده یا از آن‌ها پذیرفته می‌شود (با کاما)؛ خالی یعنی هیچ‌کدام |
-| `CHAT_ALERT_LABEL` | نام میزبان | نام این رله در پیام‌های هشدار |
+| `CHAT_ALERT_PEERS` | — | شناسهٔ رله‌هایی که هشدار به آن‌ها فرستاده یا از آن‌ها پذیرفته می‌شود (با کاما)؛ خالی یعنی همهٔ اعضای خانوادهٔ امضاشده |
+| `CHAT_ALERT_LABEL` | نام میزبان | نام این رله روی کارت‌های تلگرام (کنار نشانی، خوشه، نسخه و شناسهٔ آن) |
+| `CHAT_STATUS_REPORT_AT` | 09:00 | ساعت گزارش روزانهٔ همهٔ سرورها به وقت تهران؛ `off` برای خاموش |
+| `CHAT_TELEGRAM_COMMANDS` | 1 | `0`: ربات به دستورهای `/status`، `/servers` و `/help` جواب نمی‌دهد |
+| `CHAT_FAMILY_LINKS_MS` | 60000 | هر چند وقت رله به اعضای خانواده می‌گوید با کدام اعضا لینک دارد |
 | `CHAT_GATEWAY_STABLE_MS` | 60000 | مدتی که لینک یک Gateway باید پایدار بماند تا دوباره ترافیک ببرد |
 | `CHAT_GATEWAY_HANDOFF_MS` | 120000 | مدتی که Gateway کنارگذاشته‌شده لینک‌های شریک‌ها را تا بالا آمدن Gateway تازه نگه می‌دارد |
 | `CHAT_JOIN_PER_HOUR` | 10 | سقف درخواست اتصال از هر نشانی در ساعت |

@@ -232,6 +232,9 @@ function forwardRule({ from, fromOperator = '', selfGateway, target = {}, hop = 
      negative one would never reach the limit, and a loop with it never ends. */
   if (!Number.isSafeInteger(hop) || hop < 0 || hop >= HOP_LIMIT) return { action: 'reject', reason: 'hop-limit' };
   if (from === 'family') {
+    /* Two members whose own path is closed meet through this one, once: it
+       hands the frame on only over its own link to the member it is for. */
+    if (target.family === 'self' && hop === 0) return { action: 'family' };
     if (target.family === 'partner' && selfGateway && target.operator) return { action: 'partner', operator: target.operator };
     return { action: 'reject', reason: 'not-carried' };
   }

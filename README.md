@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.98.78-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.98.84-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -200,7 +200,17 @@ End-to-end encrypted messaging that keeps working when the other person is not t
 
 ### Quick install — server
 
-One line on a fresh Debian, Ubuntu, Fedora or Arch machine:
+**With Docker alone (from 2.98.84).** Ready-made images on Docker Hub, nothing
+to clone or build: the installer asks for a domain (or uses the server's IP),
+starts everything and prints the dashboard login. See [docs/DOCKER.md](docs/DOCKER.md).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/docker-install.sh | bash
+```
+
+The central panel on your own computer is one command too: `bash scripts/panel.sh`.
+
+**From source.** One line on a fresh Debian, Ubuntu, Fedora or Arch machine:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/quick-install.sh | bash
@@ -403,15 +413,15 @@ The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA.Cryptography_2.98.78_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA.Cryptography_2.98.78_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA.Cryptography_2.98.84_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA.Cryptography_2.98.84_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.98.78-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.98.84-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
 A native install has no origin to learn a relay from — the web app does, because
@@ -820,6 +830,14 @@ bash scripts/deploy.sh --reconfigure   # ask again
 bash scripts/deploy.sh --where         # print the settings path
 ```
 
+**Build once, run the same everywhere** (from 2.98.81):
+`bash scripts/deploy.sh --prebuilt` builds every image on this machine for
+linux/amd64 and has each server pull them, only the layers it lacks, through an
+SSH tunnel from a registry on this machine's 127.0.0.1. Every server then runs
+the same image digests (the run ends by comparing them), and a server whose
+npm or Docker Hub stalls never has to reach either. `<NAME>_JUMP='<other>'` in
+the settings sends a slow server's connections through a faster one.
+
 Key authentication only, deliberately: a password on a command line lands in
 the process table and in shell history. It refuses to deploy into a backup or a
 git checkout, snapshots the server before it overwrites anything, and verifies
@@ -1023,7 +1041,17 @@ modified relay as a service for other people, they are entitled to your source.
 
 ### نصب سریع — سرور
 
-یک خط، روی یک ماشین تازهٔ دبیان، اوبونتو، فدورا یا آرچ:
+**فقط با Docker (از 2.98.84).** ایمیج‌های آماده روی Docker Hub؛ نه کلون لازم
+است و نه build. نصب‌کننده دامنه را می‌پرسد (یا از IP سرور استفاده می‌کند)، همه
+را بالا می‌آورد و ورود داشبورد را نشان می‌دهد. جزئیات در [docs/DOCKER.md](docs/DOCKER.md).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/docker-install.sh | bash
+```
+
+پنل مرکزی روی کامپیوتر خودتان هم یک فرمان است: `bash scripts/panel.sh`.
+
+**از سورس.** یک خط، روی یک ماشین تازهٔ دبیان، اوبونتو، فدورا یا آرچ:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/scripts/quick-install.sh | bash
@@ -1229,15 +1257,15 @@ sudo bash scripts/setup.sh --quick --domain chat.example.com \
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA.Cryptography_2.98.78_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA.Cryptography_2.98.78_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA.Cryptography_2.98.84_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA.Cryptography_2.98.84_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.98.78-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.98.84-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
 نصب نیتیو مبدأیی ندارد که از رویش رله را یاد بگیرد — برنامهٔ وب دارد، چون از
@@ -1559,6 +1587,14 @@ bash scripts/deploy.sh --edit          # باز کردن تنظیمات ذخیر
 bash scripts/deploy.sh --reconfigure   # پرسیدن دوباره
 bash scripts/deploy.sh --where         # نشانی فایل تنظیمات
 ```
+
+**یک بار ساختن، همه‌جا یکسان اجرا کردن** (از نسخهٔ 2.98.81):
+`bash scripts/deploy.sh --prebuilt` همهٔ ایمیج‌ها را روی همین کامپیوتر برای linux/amd64
+می‌سازد و هر سرور آن‌ها را، فقط لایه‌هایی که ندارد، از راه یک تونل SSH از registry‌ای
+روی 127.0.0.1 همین کامپیوتر می‌گیرد. همهٔ سرورها ایمیج‌هایی با digest یکسان اجرا
+می‌کنند (اجرا با مقایسهٔ آن‌ها تمام می‌شود)، و سروری که npm یا Docker Hub برایش گیر
+می‌کند هرگز لازم نیست به آن‌ها برسد. `<NAME>_JUMP='<سرور دیگر>'` در تنظیمات، اتصال
+سرور کند را از راه سروری سریع‌تر می‌برد.
 
 فقط احراز هویت با کلید، عمداً: رمزی که روی خط فرمان بیاید در جدول پروسه‌ها و در
 تاریخچهٔ شل می‌نشیند. اسکریپت از دیپلوی روی پشتیبان یا روی یک مخزن گیت خودداری

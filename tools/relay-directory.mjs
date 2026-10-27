@@ -23,6 +23,7 @@
  *   node tools/relay-directory.mjs remove <server|id>       # out, not revoked
  *   node tools/relay-directory.mjs admin-add <name> <public key>   # a computer that may sign dashboard actions
  *   node tools/relay-directory.mjs admin-remove <name>
+ *   node tools/relay-directory.mjs cluster <server> <name|-> [--inside URL,URL]
  *   node tools/relay-directory.mjs show
  *   node tools/relay-directory.mjs sign
  *   node tools/relay-directory.mjs publish [server…]
@@ -134,6 +135,9 @@ export function applyEdit(draft, edit) {
       origins: (relay.origins || []).map(String).filter(Boolean),
       region: String(relay.region || ''),
       gateway: Math.max(0, Math.floor(Number(relay.gateway) || 0)),
+      /* Only when set, so a family without clusters signs what it always did. */
+      ...(relay.cluster ? { cluster: String(relay.cluster).slice(0, 40) } : {}),
+      ...((relay.inside || []).length ? { inside: relay.inside.map(String).filter(Boolean).slice(0, 4) } : {}),
     };
     const at = next.relays.findIndex((existing) => existing.id === entry.id || (entry.name && existing.name === entry.name));
     if (at >= 0) next.relays[at] = entry; else next.relays.push(entry);
@@ -242,8 +246,8 @@ function sameList(a, b) {
 }
 const say = (line) => process.stdout.write(`${line}\n`);
 
-function saveDraft(dir, draft) { writePrivate(path.join(dir, DRAFT_FILE), draft); }
-function saveSigned(dir, doc) { writePrivate(path.join(dir, SIGNED_FILE), doc); }
+export function saveDraft(dir, draft) { writePrivate(path.join(dir, DRAFT_FILE), draft); }
+export function saveSigned(dir, doc) { writePrivate(path.join(dir, SIGNED_FILE), doc); }
 
 export function serverEntry(conf, name, existing, flags = {}) {
   return {
@@ -254,7 +258,35 @@ export function serverEntry(conf, name, existing, flags = {}) {
     /* A lone server is its own gateway: without one it could never link
        with another operator's family. */
     gateway: flags.gateway ?? (conf.fields(name, 'GATEWAY') || existing?.gateway || (conf.servers.length === 1 ? 1 : 0)),
+    /* deploy.conf gives a server its first cluster and inside addresses; a
+       change made since (in the panel, or with the cluster command) stays. */
+    cluster: flags.cluster || existing?.cluster || conf.fields(name, 'CLUSTER') || '',
+    inside: flags.inside ? String(flags.inside).split(/[,\s]+/).filter(Boolean)
+      : (existing?.inside || []).length ? existing.inside
+        : String(conf.fields(name, 'INSIDE') || '').split(/[,\s]+/).filter(Boolean),
   };
+}
+
+/* One relay of the draft with its cluster, inside addresses or gateway place
+   changed; an empty cluster or list takes it out. What the panel and the
+   cluster command both do. */
+export function editRelay(draft, name, changes = {}) {
+  const entry = (draft?.relays || []).find((relay) => relay.name === name || relay.id === name);
+  if (!entry) throw new Error(`no relay called ${name} in the draft`);
+  const next = { ...entry };
+  if (changes.cluster !== undefined) next.cluster = String(changes.cluster || '').trim().slice(0, 40);
+  if (changes.inside !== undefined) {
+    const inside = (Array.isArray(changes.inside) ? changes.inside : String(changes.inside || '').split(/[,\s]+/)).map((origin) => String(origin).trim()).filter(Boolean);
+    if (inside.length > 4) throw new Error('at most four inside addresses');
+    for (const origin of inside) {
+      let url;
+      try { url = new URL(origin); } catch (_error) { throw new Error(`${origin} is not an address`); }
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(`${origin} is not an http(s) address`);
+    }
+    next.inside = inside.map((origin) => new URL(origin).origin);
+  }
+  if (changes.gateway !== undefined) next.gateway = Math.max(0, Math.min(9, Math.floor(Number(changes.gateway) || 0)));
+  return applyEdit(draft, { op: 'add', relay: next });
 }
 
 function publishAll(dir, names, doc) {
@@ -357,11 +389,21 @@ function main(argv) {
       say(`admin ${name} removed in the draft; sign and publish to apply it`);
       return 0;
     }
+    case 'cluster': {
+      const state = loadState(dir);
+      const [name, cluster] = positional;
+      if (!name || cluster === undefined) throw new Error('cluster <server> <name> [--inside URL,URL]   (a name of - takes it out of any cluster)');
+      const next = editRelay(state.draft, name, { cluster: cluster === '-' ? '' : cluster, ...(flags.inside !== undefined ? { inside: flags.inside === '-' ? [] : flags.inside } : {}) });
+      saveDraft(dir, next);
+      const entry = next.relays.find((relay) => relay.name === name || relay.id === name);
+      say(`${name}: cluster ${entry.cluster || '(none)'}${entry.inside ? `, inside ${entry.inside.join(' ')}` : ''} in the draft; sign and publish to apply it`);
+      return 0;
+    }
     case 'show': {
       const state = loadState(dir);
       say(`operator: ${state.key ? `${state.key.name} ${state.key.id.slice(0, 16)}…` : 'none yet (run init)'}`);
       say(`signed: ${state.signed ? `serial ${state.signed.body.serial}, ${state.signed.body.issuedAt}` : 'nothing yet'}`);
-      for (const relay of state.draft?.relays || []) say(`  ${relay.name.padEnd(8)} ${relay.id.slice(0, 16)}…  ${relay.region || '-'}  gateway ${relay.gateway || '-'}  ${relay.origins.join(' ') || '(dials out)'}`);
+      for (const relay of state.draft?.relays || []) say(`  ${relay.name.padEnd(8)} ${relay.id.slice(0, 16)}…  ${relay.region || '-'}  gateway ${relay.gateway || '-'}  ${relay.cluster ? `cluster ${relay.cluster}  ` : ''}${relay.origins.join(' ') || '(dials out)'}${relay.inside ? `  inside ${relay.inside.join(' ')}` : ''}`);
       for (const admin of state.draft?.admins || []) say(`  admin ${admin.name} ${admin.id.slice(0, 16)}…`);
       for (const id of state.draft?.revoked || []) say(`  revoked  ${id.slice(0, 16)}…`);
       if (state.signed && !sameList(state.draft, state.signed.body)) say('the draft differs from what is signed: run sign');
@@ -382,7 +424,7 @@ function main(argv) {
     case 'sync':
       return sync(dir) ? 1 : 0;
     default:
-      say('usage: node tools/relay-directory.mjs init|add|revoke|remove|show|sign|publish|sync (see the top of this file)');
+      say('usage: node tools/relay-directory.mjs init|add|revoke|remove|admin-add|admin-remove|cluster|show|sign|publish|sync (see the top of this file)');
       return command ? 2 : 0;
   }
 }

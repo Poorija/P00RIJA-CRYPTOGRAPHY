@@ -139,7 +139,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
     </div>
     <nav class="nav" id="nav">
       <button data-tab="over" class="on"><i class="fas fa-gauge-high"></i><span data-t>نمای کلی</span></button>
-      <button data-tab="queues"><i class="fas fa-envelopes"></i><span data-t>صف‌های پیام</span></button>
+      <button data-tab="queues"><i class="fas fa-envelopes-bulk"></i><span data-t>صف‌های پیام</span></button>
       <button data-tab="users"><i class="fas fa-users"></i><span data-t>کاربران</span></button>
       <button data-tab="relays"><i class="fas fa-diagram-project"></i><span data-t>رله‌ها</span></button>
       <button data-tab="traffic"><i class="fas fa-chart-line"></i><span data-t>ترافیک</span></button>
@@ -196,7 +196,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
     <!-- ============ queues ============ -->
     <section class="tab" data-tab="queues">
       <div class="card">
-        <h3><i class="fas fa-envelopes"></i><span data-t>میل‌باکس‌های آفلاین — پیام‌های نگه‌داشته برای گیرندگان</span></h3>
+        <h3><i class="fas fa-envelopes-bulk"></i><span data-t>میل‌باکس‌های آفلاین — پیام‌های نگه‌داشته برای گیرندگان</span></h3>
         <div class="row" style="margin-bottom:10px">
           <button class="btn acc" id="qFlush"><i class="fas fa-bolt"></i><span data-t>تحویل فوری به متصل‌ها</span></button>
           <button class="btn warn" id="qClearAll"><i class="fas fa-trash-can"></i><span data-t>پاک‌کردن کل صف آفلاین</span></button>
@@ -279,7 +279,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
         <h3><i class="fas fa-sitemap"></i><span data-t="family">خانوادهٔ رله‌ها</span> <span class="tag mut" id="tFamilyStatus"></span></h3>
         <div class="hint" style="margin-bottom:10px"><span data-t="familyHint">رله‌هایی که اپراتور این رله در فهرست امضاشده‌اش آورده؛ خودکار با هم لینک می‌شوند و فهرست تازه بدون ری‌استارت اعمال می‌شود.</span></div>
         <div style="overflow:auto"><table id="tFamilyTable"><thead><tr>
-          <th data-t="colName">نام</th><th data-t="colId">شناسه</th><th data-t="colRegion">منطقه</th><th>Gateway</th><th data-t="colState">وضعیت</th>
+          <th data-t="colName">نام</th><th data-t="colId">شناسه</th><th data-t="colRegion">منطقه</th><th data-t="colCluster">خوشه</th><th>Gateway</th><th data-t="colState">وضعیت</th>
         </tr></thead><tbody></tbody></table></div>
         <div class="hint mono" id="tFamilyRevoked" style="margin-top:8px"></div>
         <div class="row" style="margin-top:10px;gap:8px;align-items:center">
@@ -408,7 +408,7 @@ pre.logs{background:#050a14;border:1px solid var(--line);border-radius:12px;padd
         <div class="card"><h3><i class="fas fa-clock-rotate-left"></i><span data-t>ساعت آخر</span></h3><div class="big" id="rpHourMsgs">—</div><div class="sub" id="rpHourBytes"></div></div>
       </div>
       <div class="card">
-        <h3><i class="fas fa-users-phone"></i><span data-t>تماس‌های زنده و فعالیت بین‌رله‌ای</span></h3>
+        <h3><i class="fas fa-phone-volume"></i><span data-t>تماس‌های زنده و فعالیت بین‌رله‌ای</span></h3>
         <div style="overflow:auto"><table id="rpCalls"><thead><tr>
           <th data-t>کاربر</th><th data-t>مقصد</th><th data-t>نوع</th><th data-t>شروع</th>
         </tr></thead><tbody></tbody></table></div>
@@ -500,7 +500,7 @@ const T = {
     kick:'اخراج', suspend:'تعلیق', resume:'رفع تعلیق', unkick:'لغو اخراج', del:'حذف', restore:'ری‌استور', download:'دانلود',
     empty:'چیزی برای نمایش نیست', linked:'متصل', down:'قطع', dialer:'شماره‌گیر', answerer:'پاسخ‌گو', none2:'—',
     family:'خانوادهٔ رله‌ها', familyHint:'رله‌هایی که اپراتور این رله در فهرست امضاشده‌اش آورده؛ خودکار با هم لینک می‌شوند و فهرست تازه بدون ری‌استارت اعمال می‌شود.',
-    colName:'نام', colId:'شناسه', colRegion:'منطقه', colState:'وضعیت', insideIran:'داخل ایران', outsideIran:'خارج از ایران',
+    colName:'نام', colId:'شناسه', colRegion:'منطقه', colCluster:'خوشه', colState:'وضعیت', insideIran:'داخل ایران', outsideIran:'خارج از ایران',
     thisRelay:'همین رله', revokedIds:'باطل‌شده', serial:'نسخه', operator:'اپراتور',
     partners:'اپراتورهای دیگر', partnersHint:'خانواده‌های رلهٔ اپراتورهای دیگر که با تأیید ادمین، فقط از راه Gatewayها با این خانواده لینک می‌شوند. هر دکمه روی همهٔ رله‌های خانواده اعمال می‌شود.',
     partnersNoFamily:'این رله کلید اپراتور یا فهرست خانواده ندارد؛ با scripts/deploy.sh مستقر کنید تا خانواده ساخته شود.',
@@ -527,7 +527,7 @@ const T = {
     kick:'Kick', suspend:'Suspend', resume:'Resume', unkick:'Unkick', del:'Delete', restore:'Restore', download:'Download',
     empty:'Nothing to show', linked:'linked', down:'down', dialer:'dialer', answerer:'answerer', none2:'—',
     family:'Relay family', familyHint:'The relays in the signed directory of this relay’s operator; they link with each other by themselves, and a new directory applies without a restart.',
-    colName:'Name', colId:'Id', colRegion:'Region', colState:'State', insideIran:'inside Iran', outsideIran:'outside Iran',
+    colName:'Name', colId:'Id', colRegion:'Region', colCluster:'Cluster', colState:'State', insideIran:'inside Iran', outsideIran:'outside Iran',
     thisRelay:'this relay', revokedIds:'revoked', serial:'serial', operator:'operator',
     partners:'Other operators', partnersHint:'Other operators’ relay families, linked with this family only through gateways and only once an admin approves. Every button here holds on every relay of the family.',
     partnersNoFamily:'This relay has no operator key or family directory; deploy with scripts/deploy.sh to make one.',
@@ -714,7 +714,7 @@ async function loadHealth() {
         return card('fa-memory', t('ram'), heapPct + '%', fmtBytes((data.memory?.heapUsed || 0) * 1024 * 1024) + ' / ' + fmtBytes((data.memory?.heapTotal || 0) * 1024 * 1024) + bar(heapPct, heapPct > 85), true);
       })(),
       card('fa-hard-drive', t('disk'), diskPct + '%', fmtBytes(diskUsed * 1024 * 1024) + ' / ' + fmtBytes((data.storage?.total || 0) * 1024 * 1024) + bar(diskPct, diskPct > 85), true),
-      card('fa-envelopes', t('queue'), data.queuedMessages ?? 0, (data.relay?.mailboxes?.count ?? 0) + ' ' + (LANG === 'fa' ? 'میل‌باکس' : 'mailboxes')),
+      card('fa-envelopes-bulk', t('queue'), data.queuedMessages ?? 0, (data.relay?.mailboxes?.count ?? 0) + ' ' + (LANG === 'fa' ? 'میل‌باکس' : 'mailboxes')),
       card('fa-tower-broadcast', 'Transit', (data.transit?.up ?? 0) + ' / ' + (data.transit?.allowed ?? 0), t('linked')),
     ].join('');
 
@@ -1052,6 +1052,7 @@ function renderFamily(directory, self) {
   $('tFamilyTable').querySelector('tbody').innerHTML = (directory.relays || []).map((relay) =>
     '<tr><td>' + esc(relay.name || '—') + '</td><td class="mono">' + esc(String(relay.id).slice(0, 16)) + '…</td>' +
     '<td>' + esc(relay.region === 'inside-iran' ? t('insideIran') : relay.region === 'outside-iran' ? t('outsideIran') : (relay.region || '—')) + '</td>' +
+    '<td>' + esc(relay.cluster || '—') + '</td>' +
     '<td>' + gatewaySelect(relay) + '</td>' +
     '<td>' + (relay.self ? '<span class="tag mut">' + t('thisRelay') + '</span>' : relay.linked ? '<span class="tag good">' + t('linked') + '</span>' : '<span class="tag bad">' + t('down') + '</span>') + '</td></tr>'
   ).join('');
@@ -1102,7 +1103,7 @@ async function loadTransit() {
     '<td>' + (peer.linked ? '<span class="tag good">' + t('linked') + '</span>' : '<span class="tag bad">' + t('down') + '</span>') + '</td>' +
     '<td><span class="tag mut">' + t(peer.role === 'dialer' ? 'dialer' : peer.role === 'answerer' ? 'answerer' : 'none2') + '</span></td>' +
     '<td>' + (peer.traffic?.carried ?? 0) + '</td><td>' + fmtBytes(peer.traffic?.bytes) + '</td>' +
-    '<td><button class="btn bad" data-t-remove="' + esc(peer.id) + '"><i class="fas fa-unlink"></i></button></td></tr>'
+    '<td><button class="btn bad" data-t-remove="' + esc(peer.fullId || peer.id) + '"><i class="fas fa-unlink"></i></button></td></tr>'
   );
   $('tTable').querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">' + t('empty') + '</td></tr>';
 }

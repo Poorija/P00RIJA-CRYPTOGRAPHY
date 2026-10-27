@@ -1,0 +1,32 @@
+# The central panel, in Docker on the admin's own computer (docs/CONTROL-PANEL.md).
+# scripts/panel.sh does all of this with a few questions (port, address, start
+# with Docker or not) and is the easier way; this file is for doing it by hand.
+#
+#   docker compose -f config/control-panel.compose.yaml run --rm -it control-panel setup-login
+#   docker compose -f config/control-panel.compose.yaml up -d --build
+#   open http://127.0.0.1:8686/
+#
+# It answers on 127.0.0.1 only. Settings (all optional):
+#   POORIJA_CONFIG_DIR     where deploy.conf is (default ~/.config/p00rija-cryptography)
+#   POORIJA_CONFIG_ACCESS  ro (default), or rw where the operator key is, so the
+#                          panel can sign the family list (clusters, inside addresses)
+#   POORIJA_SSH_DIR        the SSH keys deploy.conf names as ~/.ssh/... (default ~/.ssh)
+#   POORIJA_PANEL_PORT     the port on 127.0.0.1 (default 8686)
+services:
+  control-panel:
+    build:
+      context: ../
+      dockerfile: config/Dockerfile.control-panel
+    image: poorija/p00rija-panel:${APP_VERSION:-latest}
+    container_name: Poorija-Cryptography_ControlPanel
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POORIJA_PANEL_PORT:-8686}:8686"
+    environment:
+      POORIJA_PANEL_ORIGINS: "http://127.0.0.1:${POORIJA_PANEL_PORT:-8686},http://localhost:${POORIJA_PANEL_PORT:-8686}"
+    volumes:
+      - "${POORIJA_CONFIG_DIR:-${HOME}/.config/p00rija-cryptography}:/config:${POORIJA_CONFIG_ACCESS:-ro}"
+      - "${POORIJA_SSH_DIR:-${HOME}/.ssh}:/ssh-src:ro"
+      - panel-state:/state
+volumes:
+  panel-state:

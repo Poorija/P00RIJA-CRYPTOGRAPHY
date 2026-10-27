@@ -574,6 +574,62 @@ only traffic and news about its own family; nothing it sends changes your
 family. A partner's directory is never followed to a private, loopback or
 link-local address.
 
+### Clusters (from 2.98.79)
+
+A cluster is a named group of one family's relays, for example *Iran* for the
+relays inside Iran and *Outside* for the rest. The family stays one mesh:
+every relay still links with every other, and a user of one cluster reaches a
+user of the other as before. What a cluster adds is one promise: **if the
+international internet is cut, a cluster keeps working on its own.**
+
+**Inside addresses.** Each relay in the signed list may carry up to four
+*inside* addresses besides its public ones: an address its cluster mates can
+reach when nothing beyond the country can, such as a domain registered at
+home or a plain IP. A relay dials its cluster mates at their inside addresses
+first and everybody else at their public ones first. When an inside address is
+an IP, the certificate's name is not checked for it, and only for a relay the
+signed family list names: the link between relays carries its own identity
+(the handshake with each relay's key) and its own encryption, so the name on a
+certificate adds nothing there.
+
+**Setting them.** In `deploy.conf`, per server:
+
+```bash
+IR3_CLUSTER='Iran'
+IR3_INSIDE='https://185.0.0.10:8585'
+```
+
+The next deploy signs them into the list. Later changes are made in the
+central panel ([CONTROL-PANEL.md](CONTROL-PANEL.md)), or by hand:
+
+```bash
+node tools/relay-directory.mjs cluster ir3 Iran --inside https://185.0.0.10:8585
+node tools/relay-directory.mjs sign && node tools/relay-directory.mjs publish
+```
+
+A cluster set since stays when the next deploy reads `deploy.conf` again;
+`cluster <server> -` takes a relay out of every cluster. Without clusters, the
+panel groups relays by region.
+
+**Why it matters in Iran.** A relay inside Iran whose only address is a
+domain abroad will most likely not be found from inside the country when the
+international internet is cut, neither by its cluster mates nor by its users.
+Give each such relay an inside address (a domain registered in Iran, or its
+IP); the central panel warns about every relay inside Iran that has none, and
+shows for each cluster whether it is independent (every member linked to every
+other) and whether it reaches the other clusters.
+
+Relays from before 2.98.79 take the same list and ignore these two fields.
+
+**When two members cannot link (from 2.98.80).** A network can close the path
+between two servers while each still reaches everybody else (a route filtered
+between two providers, say). Each relay tells the members it is linked to which
+members it has links with, every minute and whenever a link comes or goes
+(`CHAT_FAMILY_LINKS_MS`). A relay with no link of its own to a member then hands
+what it has for that member to one that has a link, of the same cluster where
+there is one. It goes one step only, and stays sealed to the relay it is for:
+the member in between carries it and cannot open it.
+
 ---
 
 ## 6. What each machine sees
@@ -1091,6 +1147,57 @@ Gateway خودش است. شریک‌ها خودشان با تغییر هماهن
 خانوادهٔ خودش را می‌تواند بفرستد و هیچ‌چیزی که بفرستد خانوادهٔ شما را تغییر
 نمی‌دهد. نشانی‌های شبکهٔ خصوصی، loopback یا link-local در فهرست یک شریک هرگز دنبال
 نمی‌شوند.
+
+### خوشه‌ها (از نسخهٔ 2.98.79)
+
+خوشه گروهی نام‌دار از رله‌های یک خانواده است، مثلاً *ایران* برای رله‌های داخل ایران و
+*خارج* برای بقیه. خانواده همچنان یک شبکهٔ کامل است: هر رله با همهٔ رله‌های دیگر لینک
+دارد و کاربر یک خوشه مثل قبل به کاربر خوشهٔ دیگر می‌رسد. خوشه یک تضمین اضافه می‌کند:
+**اگر اینترنت بین‌الملل قطع شود، هر خوشه به‌تنهایی کار می‌کند.**
+
+**نشانی‌های داخلی.** هر رله در فهرست امضاشده، کنار نشانی‌های عمومی‌اش، می‌تواند تا
+چهار نشانی *داخلی* داشته باشد: نشانی‌ای که هم‌خوشه‌هایش وقتی به بیرون از کشور
+دسترسی نیست به آن می‌رسند، مثل دامنه‌ای که داخل کشور ثبت شده یا یک IP. رله اول با
+نشانی داخلی به هم‌خوشه‌هایش وصل می‌شود و با بقیه اول با نشانی عمومی. اگر نشانی داخلی
+یک IP باشد، نام گواهی برای آن بررسی نمی‌شود، و فقط برای رله‌ای که فهرست امضاشدهٔ
+خانواده نام برده: لینک بین رله‌ها هویت خودش (دست‌دهی با کلید هر رله) و رمزنگاری خودش
+را دارد و نام روی گواهی آنجا چیزی اضافه نمی‌کند.
+
+**تعیین آن‌ها.** در `deploy.conf`، برای هر سرور:
+
+```bash
+IR3_CLUSTER='Iran'
+IR3_INSIDE='https://185.0.0.10:8585'
+```
+
+استقرار بعدی آن‌ها را در فهرست امضا می‌کند. تغییرهای بعدی در پنل مرکزی
+([CONTROL-PANEL.md](CONTROL-PANEL.md)) یا دستی انجام می‌شود:
+
+```bash
+node tools/relay-directory.mjs cluster ir3 Iran --inside https://185.0.0.10:8585
+node tools/relay-directory.mjs sign && node tools/relay-directory.mjs publish
+```
+
+خوشه‌ای که بعداً تعیین شده، با خوانده شدن دوبارهٔ `deploy.conf` در استقرار بعدی سر جایش
+می‌ماند؛ `cluster <server> -` رله را از هر خوشه‌ای بیرون می‌برد. بدون خوشه، پنل رله‌ها
+را بر اساس منطقه گروه می‌کند.
+
+**چرا در ایران مهم است.** رله‌ای داخل ایران که تنها نشانی‌اش دامنه‌ای خارجی است، با
+قطع اینترنت بین‌الملل به احتمال زیاد از داخل کشور پیدا نمی‌شود، نه برای هم‌خوشه‌هایش و
+نه برای کاربرانش. به هر رله‌ای از این دست یک نشانی داخلی بدهید (دامنهٔ ثبت‌شده در ایران
+یا IP آن)؛ پنل مرکزی برای هر رلهٔ داخل ایران که نشانی داخلی ندارد هشدار می‌دهد و برای
+هر خوشه نشان می‌دهد که مستقل است یا نه (همهٔ اعضا با هم لینک دارند) و به خوشه‌های
+دیگر می‌رسد یا نه.
+
+رله‌های پیش از 2.98.79 همین فهرست را می‌پذیرند و این دو فیلد را نادیده می‌گیرند.
+
+**وقتی دو عضو نمی‌توانند به هم لینک شوند (از نسخهٔ 2.98.80).** گاهی شبکه مسیر بین دو
+سرور را می‌بندد در حالی که هر کدام هنوز به بقیه می‌رسد (مثلاً مسیری که بین دو
+ارائه‌دهنده فیلتر شده است). هر رله هر دقیقه و هر بار که لینکی وصل یا قطع شود به
+اعضایی که با آن‌ها لینک دارد می‌گوید با کدام اعضا لینک دارد (`CHAT_FAMILY_LINKS_MS`).
+رله‌ای که خودش به عضوی لینک ندارد، آنچه برای آن عضو دارد را به عضوی می‌دهد که لینک
+دارد، و اگر بشود از همان خوشه. فقط یک گام می‌رود و تا رلهٔ مقصد مهروموم می‌ماند:
+عضوِ وسط آن را حمل می‌کند و نمی‌تواند بازش کند.
 
 ### ۶. هر ماشین چه می‌بیند
 

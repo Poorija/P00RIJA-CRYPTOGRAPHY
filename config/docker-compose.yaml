@@ -210,7 +210,7 @@ services:
     restart: unless-stopped
 
   coturn:
-    image: coturn/coturn:4.6-alpine
+    image: coturn/coturn:4.18.0-alpine
     container_name: Poorija-Cryptography_Coturn
     logging: *default-logging
     network_mode: host
@@ -247,7 +247,8 @@ services:
       - $$( [ -n "$$TURN_SECRET" ] && echo --use-auth-secret || echo --lt-cred-mech )
       - $$( [ -n "$$TURN_SECRET" ] && echo --static-auth-secret=$$TURN_SECRET || echo --user=$$TURN_USER:$$TURN_PASSWORD )
       - --fingerprint
-      - --no-cli
+      # No --no-cli: coturn 4.18 keeps its telnet CLI off unless --cli asks
+      # for it, and logs the old flag as an error.
       - --no-multicast-peers
       - --min-port=${TURN_MIN_PORT:-49152}
       - --max-port=${TURN_MAX_PORT:-50152}

@@ -63,6 +63,9 @@ const sick = alerts.evaluate({
 check('every kind of trouble is named, with how bad it is', keys(sick) === `disk:warn memory:critical relay-memory:warn files:warn turn-down:critical turn-ports:warn bandwidth:warn peer:${'f'.repeat(64)}:critical`, keys(sick));
 check('and said in words the operator reads', /دیسک تقریباً پر است/.test(sick[0].text) && /TURN/.test(sick.find((problem) => problem.key === 'turn-ports').text), sick[0].text);
 check('the bandwidth alert stays off without a link speed', !alerts.evaluate({ network: { mbps: 900 } }, { ...limits, linkMbps: 0 }).length);
+const around = alerts.evaluate({ peersDown: [{ id: 'e'.repeat(64), forMs: 15 * 60000, name: 'se', via: 'fl' }] }, limits);
+check('a member with no link of its own but reached through another is a warning that says through which',
+  around.length === 1 && around[0].key === `peer-via:${'e'.repeat(64)}` && around[0].level === 'warn' && /«se»/.test(around[0].text) && /از راه «fl»/.test(around[0].text), JSON.stringify(around));
 
 const udp = [
   '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
@@ -93,7 +96,7 @@ clock = 1500;
 check('and as a reminder while it lasts', state.update(crit).length === 1);
 check('one good reading is not yet the end of it', state.update([]).length === 0);
 const over = state.update([]);
-check('two are, and that is announced', over.length === 1 && /برطرف شد/.test(over[0]), over[0]);
+check('two are, and that is announced', over.length === 1 && over[0].level === 'ok' && over[0].text === 'very low', JSON.stringify(over[0]));
 check('nothing is left active', state.active().length === 0);
 
 section('two relays, one Telegram');
@@ -143,15 +146,16 @@ try {
       CHAT_ALERT_DISK_FREE_PCT: '100',
     },
   });
-  check('the relay with the bot announces its start', await waitFor(() => texts().some((text) => text.startsWith('🔄 relay-a'))), texts().join(' | ').slice(0, 300));
-  const fromB = `[${stacks.b.identity.id.slice(0, 12)}] `;
-  check('so does the one without, by way of the other', await waitFor(() => texts().some((text) => text.startsWith(`${fromB}🔄 relay-b`))), texts().join(' | ').slice(0, 300));
-  check('opened with the id the link proved, so no relay can pass itself off as another', texts().filter((text) => text.includes('relay-b')).every((text) => text.startsWith(fromB)), texts().filter((text) => text.includes('relay-b')).join(' | ').slice(0, 300));
-  check('a problem on the relay without Telegram reaches the chat', await waitFor(() => texts().some((text) => /relay-b: دیسک تقریباً پر است/.test(text))), texts().filter((text) => text.includes('relay-b')).join(' | ').slice(0, 300));
+  check('the relay with the bot announces its start', await waitFor(() => texts().some((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-a</b>'))), texts().join(' | ').slice(0, 300));
+  const fromB = `<code>${stacks.b.identity.id.slice(0, 12)}</code>`;
+  check('so does the one without, by way of the other', await waitFor(() => texts().some((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-b</b>'))), texts().join(' | ').slice(0, 300));
+  check('carrying the id the link proved, so no relay can pass itself off as another', texts().filter((text) => text.includes('relay-b')).every((text) => text.includes(fromB)), texts().filter((text) => text.includes('relay-b')).join(' | ').slice(0, 300));
+  check('a problem on the relay without Telegram reaches the chat', await waitFor(() => texts().some((text) => /^<b>(⚠️ هشدار|🚨 بحرانی) · relay-b<\/b>/.test(text) && text.includes('دیسک تقریباً پر است'))), texts().filter((text) => text.includes('relay-b')).join(' | ').slice(0, 300));
   check('everything goes to that one chat', sent.length > 0 && sent.every((message) => String(message.chat_id) === CHAT), [...new Set(sent.map((message) => message.chat_id))].join(','));
-  const disks = texts().filter((text) => /relay-b: دیسک/.test(text)).length;
+  const diskCards = () => texts().filter((text) => text.includes('relay-b') && text.includes('📝 <b>دیسک')).length;
+  const disks = diskCards();
   await sleep(11000);
-  check('and a lasting problem is not repeated every check', texts().filter((text) => /relay-b: دیسک/.test(text)).length === disks, `${disks} → ${texts().filter((text) => /relay-b: دیسک/.test(text)).length}`);
+  check('and a lasting problem is not repeated every check', diskCards() === disks, `${disks} → ${diskCards()}`);
 
   const before = sent.length;
   const testA = await fetch(`http://127.0.0.1:${stacks.a.signal}/Monitor_Server/alert-test`, { method: 'POST', headers: AUTH, body: '{}' }).then((r) => r.json());
@@ -179,7 +183,7 @@ try {
       CHAT_ALERT_DISK_FREE_PCT: '100',
     },
   });
-  await waitFor(() => texts().some((text) => text.startsWith('🔄 relay-a')));
+  await waitFor(() => texts().some((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-a</b>')));
   await sleep(15000);
   check('its alerts are not taken by a relay that does not name it', !texts().some((text) => text.includes('relay-b')), texts().join(' | ').slice(0, 300));
   const unheard = await fetch(`http://127.0.0.1:${stacks.b.signal}/healthz`, { headers: AUTH }).then((r) => r.json());

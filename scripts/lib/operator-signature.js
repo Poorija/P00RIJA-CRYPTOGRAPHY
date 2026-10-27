@@ -71,6 +71,10 @@ const signedFields = ({ method, path, body, relay, at, nonce }) => ({
   relay,
 });
 
+/* The exact text a signature covers. A browser builds the same text and signs
+   it with WebCrypto (tools/panel/web/sign.js). */
+const requestText = (fields) => canonicalJson(signedFields(fields));
+
 /* `v1.<keyId>.<at>.<nonce>.<signature>`, for the X-Operator-Signature header. */
 function signRequest({ method, path, body, relay, at = Date.now(), nonce = crypto.randomBytes(16).toString('hex') }, { keyId, privateKey }) {
   const fields = signedFields({ method, path, body, relay, at, nonce });
@@ -94,7 +98,10 @@ function verifyRequest(header, { method, path, body, relay, now = Date.now(), ke
   let holds = false;
   try {
     const publicKey = crypto.createPublicKey({ key: Buffer.from(signer.key, 'base64'), format: 'der', type: 'spki' });
-    holds = crypto.verify('sha256', Buffer.from(canonicalJson(signedFields({ method, path, body, relay, at, nonce })), 'utf8'), publicKey, Buffer.from(signature, 'base64'));
+    const raw = Buffer.from(signature, 'base64');
+    /* 64 bytes is the raw r||s WebCrypto gives; anything else is DER. */
+    holds = crypto.verify('sha256', Buffer.from(requestText({ method, path, body, relay, at, nonce }), 'utf8'),
+      raw.length === 64 ? { key: publicKey, dsaEncoding: 'ieee-p1363' } : publicKey, raw);
   } catch (_error) {
     holds = false;
   }
@@ -119,4 +126,4 @@ function signingKeys(directoryBody, operatorKey) {
   return keys;
 }
 
-module.exports = { DANGEROUS_PATHS, WINDOW_MS, normalizePath, isDangerous, bodyHash, signRequest, verifyRequest, signingKeys };
+module.exports = { DANGEROUS_PATHS, WINDOW_MS, normalizePath, isDangerous, bodyHash, requestText, signRequest, verifyRequest, signingKeys };

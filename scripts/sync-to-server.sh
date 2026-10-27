@@ -12,6 +12,8 @@
 #   bash scripts/sync-to-server.sh                 # rebuild, restart, verify
 #   bash scripts/sync-to-server.sh --check         # verify only, change nothing
 #   bash scripts/sync-to-server.sh --skip-bump     # when the tag is already right
+#   bash scripts/sync-to-server.sh --prebuilt      # images built elsewhere and pulled here
+#                                                  # (scripts/deploy.sh --prebuilt does both)
 #
 # Two containers matter. `poorija-cryptography` is the nginx that serves the web
 # app, so it is what a PWA user actually loads. `chat-signal` is the relay in
@@ -56,10 +58,12 @@ APP_CONTAINER="Poorija-Cryptography_App"
 RELAY_CONTAINER="Poorija-Cryptography_ChatSignal"
 CHECK_ONLY=0
 SKIP_BUMP=0
+PREBUILT=0
 for arg in "$@"; do
     case "$arg" in
         --check) CHECK_ONLY=1 ;;
         --skip-bump) SKIP_BUMP=1 ;;
+        --prebuilt) PREBUILT=1 ;;
         *) fail "Unknown option: $arg"; exit 2 ;;
     esac
 done
@@ -250,8 +254,8 @@ fi
 TURN_KEY_PATH="$(sed -n 's/^SSL_KEY_PATH=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
 [ -n "$TURN_KEY_PATH" ] || TURN_KEY_PATH="$ROOT/certs/key.pem"
 case "$TURN_KEY_PATH" in /*) ;; *) TURN_KEY_PATH="$ROOT/config/$TURN_KEY_PATH" ;; esac
-if [ -f "$TURN_KEY_PATH" ] || docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.6-alpine -c "test -f /c/$(basename "$TURN_KEY_PATH")" >/dev/null 2>&1; then
-    if docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.6-alpine \
+if [ -f "$TURN_KEY_PATH" ] || docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.18.0-alpine -c "test -f /c/$(basename "$TURN_KEY_PATH")" >/dev/null 2>&1; then
+    if docker run --rm -v "$(dirname "$TURN_KEY_PATH")":/c --user 0 --entrypoint sh coturn/coturn:4.18.0-alpine \
         -c "chown 65534:65534 /c/$(basename "$TURN_KEY_PATH") && chmod 400 /c/$(basename "$TURN_KEY_PATH")" >/dev/null 2>&1; then
         ok "coturn can read its TLS key"
     else
@@ -269,19 +273,39 @@ if ! "${COMPOSE_CMD[@]}" config --quiet 2>/tmp/poorija-compose-config.err; then
 fi
 ok "compose file resolves"
 
-log "Building images (no cache)"
 # The image tag is the app version, so containers and images say what they
 # run instead of a number frozen in 2024. Read from package.json, the one
 # place the version already lives.
 APP_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
-# The version goes to the build as well as to `up`: without it the build
-# tagged its image with the compose file's default, `up` then found no image
-# for this version and built the app a second time, and every deploy left a
-# stale extra tag behind.
-APP_VERSION="$APP_VERSION" "${COMPOSE_CMD[@]}" build --no-cache poorija-cryptography chat-signal || {
-    fail "The image build failed; the running stack was left alone."
-    exit 1
-}
+UP_FLAGS=()
+if [ "$PREBUILT" -eq 1 ]; then
+    # Built once, on the machine that deployed, and pulled here layer by layer
+    # (scripts/deploy.sh --prebuilt): every server runs the same images, and a
+    # server whose npm or Docker Hub stalls never has to reach either. The
+    # relay and the renewer go by the names compose gives the services it
+    # builds, so nothing else about the stack changes.
+    log "Using the images built for $APP_VERSION elsewhere (nothing is built here)"
+    for ref in "poorija-crypto:$APP_VERSION" "poorija-chat-signal:$APP_VERSION" "poorija-cert-renewer:$APP_VERSION"; do
+        docker image inspect "$ref" >/dev/null 2>&1 || {
+            fail "$ref is not on this server; deploy with --prebuilt from the machine that built it."
+            exit 1
+        }
+    done
+    docker tag "poorija-chat-signal:$APP_VERSION" "$PROJECT_NAME-chat-signal:latest"
+    docker tag "poorija-cert-renewer:$APP_VERSION" "$PROJECT_NAME-cert-renewer:latest"
+    ok "images: app $(docker image inspect --format '{{.Id}}' "poorija-crypto:$APP_VERSION" | cut -c8-19), relay $(docker image inspect --format '{{.Id}}' "poorija-chat-signal:$APP_VERSION" | cut -c8-19), renewer $(docker image inspect --format '{{.Id}}' "poorija-cert-renewer:$APP_VERSION" | cut -c8-19)"
+    UP_FLAGS=(--no-build)
+else
+    log "Building images (no cache)"
+    # The version goes to the build as well as to `up`: without it the build
+    # tagged its image with the compose file's default, `up` then found no image
+    # for this version and built the app a second time, and every deploy left a
+    # stale extra tag behind.
+    APP_VERSION="$APP_VERSION" "${COMPOSE_CMD[@]}" build --no-cache poorija-cryptography chat-signal || {
+        fail "The image build failed; the running stack was left alone."
+        exit 1
+    }
+fi
 
 log "Restarting the stack"
 # The monitor's machine half needs the install and backups directories as
@@ -289,7 +313,7 @@ log "Restarting the stack"
 # Handed in on the command line rather than written into .env: they are this
 # machine's facts, not settings a person should be able to get wrong.
 OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION" \
-"${COMPOSE_CMD[@]}" up -d --force-recreate poorija-cryptography chat-signal || {
+"${COMPOSE_CMD[@]}" up -d ${UP_FLAGS[@]+"${UP_FLAGS[@]}"} --force-recreate poorija-cryptography chat-signal || {
     fail "Bringing the stack up failed."
     exit 1
 }
@@ -300,7 +324,7 @@ OPS_INSTALL_DIR="$ROOT" OPS_BACKUP_DIR="$ROOT/backups" APP_VERSION="$APP_VERSION
 # does not drop the TURN sessions of calls in progress. The TURN server is
 # always restarted, though, when its key had to be repaired above: coturn
 # reads the key only at start.
-"${COMPOSE_CMD[@]}" up -d coturn cert-renewer || warn "coturn or the certificate renewer did not come up"
+"${COMPOSE_CMD[@]}" up -d ${UP_FLAGS[@]+"${UP_FLAGS[@]}"} coturn cert-renewer || warn "coturn or the certificate renewer did not come up"
 # The renewer runs scripts/cert-renewer.sh from this tree through a file bind
 # mount, and a file mount holds the inode it was started with. rsync replaces
 # a changed file with a new one, so the running renewer went on executing the
@@ -380,13 +404,18 @@ verify_through_nginx || status=1
 # Only images nothing runs are removed, and only this stack's own tags.
 if [ "$status" -eq 0 ]; then
     log "Removing what earlier deployments left behind"
-    keep_previous="$(docker images --format '{{.Tag}}' poorija-crypto 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -vFx "$APP_VERSION" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
-    docker images --format '{{.Repository}}:{{.Tag}}' poorija-crypto 2>/dev/null | while read -r ref; do
-        tag="${ref##*:}"
-        [ "$tag" = "$APP_VERSION" ] && continue
-        [ -n "$keep_previous" ] && [ "$tag" = "$keep_previous" ] && continue
-        docker rmi "$ref" >/dev/null 2>&1 && printf "  removed %s\n" "$ref"
+    # The relay's and the renewer's versioned images too, which a --prebuilt
+    # deploy brings.
+    for repo in poorija-crypto poorija-chat-signal poorija-cert-renewer; do
+        keep_previous="$(docker images --format '{{.Tag}}' "$repo" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -vFx "$APP_VERSION" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+        docker images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null | while read -r ref; do
+            tag="${ref##*:}"
+            [ "$tag" = "$APP_VERSION" ] && continue
+            [ -n "$keep_previous" ] && [ "$tag" = "$keep_previous" ] && continue
+            docker rmi "$ref" >/dev/null 2>&1 && printf "  removed %s\n" "$ref"
+        done
     done
+    keep_previous="$(docker images --format '{{.Tag}}' poorija-crypto 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -vFx "$APP_VERSION" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
     docker image prune -f >/dev/null 2>&1 || true
     docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
     ok "kept poorija-crypto:$APP_VERSION${keep_previous:+ and :$keep_previous}"

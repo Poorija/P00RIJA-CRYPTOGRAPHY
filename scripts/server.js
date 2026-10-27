@@ -31,17 +31,19 @@ const { linkPreview } = require('./lib/link-preview.js');
 const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
-const { verifyDirectory, planChanges } = require('./lib/relay-directory.js');
+const { verifyDirectory, planChanges, verifyTlsFor } = require('./lib/relay-directory.js');
 const partnerRules = require('./lib/relay-partners.js');
 const signatureRules = require('./lib/operator-signature.js');
 const {
-  alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram,
+  alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram, telegramCall,
 } = require('./lib/relay-alerts.js');
+const relayReport = require('./lib/relay-report.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
-// Simple .env loader for native runs
-const envPath = path.join(__dirname, '..', '.env');
-if (fs.existsSync(envPath)) {
+// Simple .env loader for native runs. CHAT_ENV_FILE names another file, or
+// "none" for no file at all (a test of a relay started with nothing set).
+const envPath = process.env.CHAT_ENV_FILE || path.join(__dirname, '..', '.env');
+if (envPath !== 'none' && fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
   envContent.split('\n').forEach((line) => {
     const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
@@ -203,14 +205,17 @@ const relayPeers = createRelayPeers({
   WebSocketImpl: RelayLinkSocket,
   fetchIdentity: makeIdentityFetcher({ verifyTls: TRANSIT_VERIFY_TLS }),
   verifyTls: TRANSIT_VERIFY_TLS,
+  /* A family relay's inside IP address is dialled without the certificate
+     name check: the link proves the relay's key whatever the transport says. */
+  verifyTlsFor: (peerId, origin) => verifyTlsFor({ origin, familyMember: isFamilyPeer(peerId), verifyTls: TRANSIT_VERIFY_TLS }),
   onFrame: (payload, link) => {
     if (partnerFrameRefused(payload, link)) return;
     if (frontDoor?.onFrame(payload, link)) return;
     handleTransitFrame(payload, link);
   },
-  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); partnersLinkUp(link); },
+  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); partnersLinkUp(link); shareFamilyLinks(); },
   /* Function declarations below are hoisted, so this resolves at call time. */
-  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); partnersLinkDown(link); },
+  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); partnersLinkDown(link); familyLinksFrom.delete(link?.peerId); shareFamilyLinks(); },
 });
 /* CHAT_FRONTS on the relay people can reach: `<relay id>@<public origin>` for
    each relay it answers for (nginx hands that origin's connections to
@@ -572,6 +577,39 @@ function saveServerConfig() {
 
 loadServerConfig();
 
+/* A relay started with no monitor password at all — the ready-made Docker
+   install leaves it unset — makes a random one rather than run with none (no
+   login would ever work) or with a default everyone knows. Only its hash is
+   kept; the password itself is shown once, on stdout and in a file only the
+   relay's user can read, for the installer to hand to whoever is setting the
+   server up. A change from the dashboard removes that file. */
+const INITIAL_PASSWORD_PATH = path.join(path.dirname(CONFIG_PATH), 'initial-monitor-password');
+function ensureFirstPassword() {
+  if (MONITOR_PASSWORD || MONITOR_PASSWORD_HASH) return;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 20; i += 1) password += alphabet[crypto.randomInt(alphabet.length)];
+  MONITOR_PASSWORD = password;
+  saveServerConfig();
+  try {
+    fs.writeFileSync(INITIAL_PASSWORD_PATH, `${password}\n`, { mode: 0o600 });
+    fs.chmodSync(INITIAL_PASSWORD_PATH, 0o600);
+  } catch (error) {
+    console.error('Failed to write the first monitor password file:', error.message);
+  }
+  const user = process.env.MONITOR_USER || 'admin';
+  console.log([
+    '',
+    '================================================================',
+    `  Monitor user: ${user}`,
+    `  Monitor password (first start): ${password}`,
+    '  Shown once. Change it in the dashboard: /Monitor_Server',
+    '================================================================',
+    '',
+  ].join('\n'));
+}
+ensureFirstPassword();
+
 /* Everything this relay keeps on disk is either a secret or somebody's queued
    ciphertext, and none of it should be world-readable. New files are created
    0600 by writeJsonAtomic, but a relay upgraded in place still has the 0644
@@ -752,7 +790,7 @@ app.use((req, res, next) => {
   signedNonces.set(verdict.nonce, Date.now() + 10 * 60 * 1000);
   req.signedBy = verdict.name;
   monitorLog(`Signed by ${verdict.name}: ${req.path}`);
-  queueAlert(`🔐 ${ALERT_LABEL}: کار حساس «${req.path}» با امضای «${verdict.name}» انجام شد.`);
+  queueReport({ level: 'security', title: 'کار حساس با امضا انجام شد', body: `«${req.path}» با امضای «${verdict.name}».` });
   flushAlerts().catch(() => {});
   return next();
 });
@@ -1929,6 +1967,8 @@ app.post('/admin/change-password', authMiddleware, (req, res) => {
 
   MONITOR_PASSWORD = String(newPassword);
   saveServerConfig();
+  /* The password shown at first start is no longer the password. */
+  fs.rm(INITIAL_PASSWORD_PATH, { force: true }, () => {});
   /* Only the hash stays; the plain value lived long enough to be hashed. */
   if (MONITOR_PASSWORD !== (process.env.MONITOR_PASSWORD || '')) MONITOR_PASSWORD = '';
   monitorVerifyCache.clear();
@@ -5159,6 +5199,8 @@ function directorySummary() {
       name: String(relay.name || ''),
       region: String(relay.region || ''),
       gateway: Number(relay.gateway || 0),
+      cluster: String(relay.cluster || ''),
+      inside: Array.isArray(relay.inside) ? relay.inside.map(String) : [],
       self: relay.id === relayIdentity.id,
       linked: relay.id === relayIdentity.id || Boolean(relayPeers.linkFor(relay.id)),
     })),
@@ -5406,7 +5448,7 @@ function notePartnerGatewayChange(operatorId, beforeIds) {
   const last = gatewayNoticeAt.get(operatorId) || 0;
   if (Date.now() - last >= GATEWAY_NOTICE_GAP_MS) {
     gatewayNoticeAt.set(operatorId, Date.now());
-    partnerNotice(`🔀 ${ALERT_LABEL}: اپراتور «${entry?.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…) Gatewayهای خود را تغییر داد؛ اتصال خودکار با Gatewayهای تازه هماهنگ شد.`);
+    partnerNotice('Gatewayهای یک شریک عوض شد', `اپراتور «${entry?.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…) Gatewayهای خود را تغییر داد؛ اتصال خودکار با Gatewayهای تازه هماهنگ شد.`);
   }
 }
 function retainedPartnerGateways(operatorId) {
@@ -5437,12 +5479,12 @@ function familyGatewayReaches(operatorId) {
   return false;
 }
 
-function partnerNotice(text) {
+function partnerNotice(title, body) {
   const now = Date.now();
   while (partnerNoticeTimes.length && now - partnerNoticeTimes[0] > 3600000) partnerNoticeTimes.shift();
   if (partnerNoticeTimes.length >= PARTNER_NOTICES_PER_HOUR) return;
   partnerNoticeTimes.push(now);
-  queueAlert(text);
+  queueReport({ level: 'partner', title, body });
   flushAlerts().catch(() => {});
 }
 /* The host people know a relay by, never a bare address: an IP goes to
@@ -5500,7 +5542,7 @@ function partnersLinkUp(link) {
      that they said yes. */
   if (entry.state === 'requested') {
     changePartner(operatorId, { state: 'approved' }, 'linked');
-    partnerNotice(`🔗 ${ALERT_LABEL}: اتصال با اپراتور «${entry.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…) برقرار شد.`);
+    partnerNotice('اتصال با یک شریک برقرار شد', `اپراتور «${entry.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…).`);
   }
 }
 function partnersLinkDown(link) {
@@ -5680,6 +5722,48 @@ function shareReach() {
   }, 200);
   reachTimer.unref?.();
 }
+/* Which members of the family each member has a link to, as each says over
+   its own link. A path between two servers can close while each still
+   reaches the rest (a route filtered between two providers); with this a
+   relay reaches a member it has no link to through one that has. */
+const FAMILY_LINKS_MS = Math.max(1000, Number(process.env.CHAT_FAMILY_LINKS_MS || 60000));
+const familyLinksFrom = new Map();
+let familyLinksTimer = null;
+function shareFamilyLinks() {
+  if (familyLinksTimer) return;
+  familyLinksTimer = setTimeout(() => {
+    familyLinksTimer = null;
+    const members = directoryMembers();
+    const ids = members.filter((id) => relayPeers.linkFor(id)?.isOpen?.());
+    for (const id of ids) {
+      try { relayPeers.linkFor(id).send({ kind: 'family-links', ids, telegram: alertsByTelegram() }); } catch (_error) { /* the link went */ }
+    }
+  }, 200);
+  familyLinksTimer.unref?.();
+}
+setInterval(shareFamilyLinks, FAMILY_LINKS_MS).unref?.();
+function receiveFamilyLinks(payload, link) {
+  const id = link?.peerId;
+  if (!isFamilyPeer(id)) return;
+  const family = familyIds();
+  const ids = (Array.isArray(payload.ids) ? payload.ids : []).slice(0, 2048).map(String).filter((other) => family.has(other));
+  familyLinksFrom.set(id, { ids: new Set(ids), at: Date.now(), telegram: payload.telegram === true });
+  /* A relay that has just said it has the bot may be the one alerts were waiting for. */
+  if (payload.telegram === true && alertOutbox.length && !alertsByTelegram()) flushAlerts().catch(() => {});
+}
+/* The member to go through: one heard from lately that has a link to the
+   one wanted, of the same cluster when there is one. */
+function familyDetour(toRelay) {
+  const fresh = Date.now() - 3 * FAMILY_LINKS_MS;
+  const clusterOf = (id) => directoryState.doc?.body?.relays?.find((relay) => relay.id === id)?.cluster || '';
+  const wanted = clusterOf(toRelay);
+  const through = Array.from(familyLinksFrom)
+    .filter(([id, view]) => view.at >= fresh && view.ids.has(toRelay) && relayPeers.linkFor(id))
+    .map(([id]) => id)
+    .sort((a, b) => Number(Boolean(wanted) && clusterOf(b) === wanted) - Number(Boolean(wanted) && clusterOf(a) === wanted) || a.localeCompare(b));
+  return through.length ? relayPeers.linkFor(through[0]) : null;
+}
+
 function receiveReach(payload, link) {
   const id = link?.peerId;
   if (!isFamilyPeer(id) || !ownGatewaySet().some((gateway) => gateway.id === id)) return;
@@ -5894,7 +5978,7 @@ app.post('/relay-join', (req, res) => {
   if (waiting >= JOIN_WAITING_MAX) return res.status(409).json({ ok: false, reason: 'too-many-waiting' });
   changePartner(operatorId, { ...about, state: 'incoming', since: now, mutedUntil: 0 }, 'asks to link');
   const host = contactHost(contact);
-  partnerNotice(`🔗 ${ALERT_LABEL}: درخواست اتصال از اپراتور «${verdict.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…)${host ? ` از ${host}` : ''}. در پنل مدیریت، «رله‌ها ← اپراتورهای دیگر»، تأیید یا رد کنید.`);
+  partnerNotice('درخواست اتصال از اپراتوری دیگر', `اپراتور «${verdict.name || operatorId.slice(0, 12)}» (${operatorId.slice(0, 12)}…)${host ? ` از ${host}` : ''}. در پنل مدیریت، «رله‌ها ← اپراتورهای دیگر»، تأیید یا رد کنید.`);
   return res.status(202).json({ ok: true, requestId, state: 'incoming' });
 });
 
@@ -6239,6 +6323,8 @@ app.post('/Monitor_Server/transit', authMiddleware, (req, res) => {
     partners: partnerSummary(),
     peers: relayPeers.peerEntries().map((entry) => ({
       id: entry.id.slice(0, 16),
+      /* In full too: removing a link takes the whole id. */
+      fullId: entry.id,
       origin: entry.origin,
       linked: entry.linked,
       role: entry.role,
@@ -6706,7 +6792,7 @@ async function imagesInUse() {
    Telegram, over the link to the one with it, and on. */
 app.post('/Monitor_Server/alert-test', authMiddleware, async (req, res) => {
   const via = alertsByTelegram() ? 'telegram' : (Array.from(alertPeers()).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none');
-  queueAlert(`🔔 ${ALERT_LABEL}: پیام آزمایشی هشدار، از پنل مدیریت.`);
+  queueReport({ level: 'test', title: 'پیام آزمایشی هشدار', body: 'از پنل مدیریت فرستاده شد؛ راه هشدارهای این سرور تا تلگرام برقرار است.' });
   await flushAlerts();
   res.json({ ok: via !== 'none', via, waiting: alertOutbox.length });
 });
@@ -6901,7 +6987,7 @@ const OPS_DOCKER_SOCKET = process.env.OPS_DOCKER_SOCKET || '/var/run/docker.sock
 const INSTALL_HOST_DIR = process.env.OPS_INSTALL_DIR || '';
 /* The relay's own base image, which every machine running it already holds:
    a job never waits on a registry. */
-const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:26.12.0-alpine';
+const OPS_JOB_IMAGE = process.env.OPS_JOB_IMAGE || 'node:26.12.1-alpine';
 const OPS_BACKUP_HOST_DIR = process.env.OPS_BACKUP_DIR || (INSTALL_HOST_DIR ? `${INSTALL_HOST_DIR}/backups` : '');
 /* Where this relay's own /data lives on the host — the compose file mounts
    data/chat-signal there. A file a job hands to this process (a backup on
@@ -7764,16 +7850,103 @@ let alertsChecking = false;
 let alertsFlushing = false;
 const alertsByTelegram = () => Boolean(TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID);
 
-function queueAlert(text, fromPeer = '') {
+/* What each kind of problem is called on its card. */
+const ALERT_TITLES = {
+  disk: 'دیسک تقریباً پر است', memory: 'حافظهٔ سرور تقریباً پر است', 'relay-memory': 'حافظهٔ رله نزدیک سقف است', files: 'فایل‌های باز نزدیک سقف است',
+  'turn-down': 'سرویس TURN اجرا نمی‌شود', 'turn-ports': 'ظرفیت TURN رو به پایان است', bandwidth: 'پهنای باند نزدیک سقف است', peer: 'لینک یک رلهٔ دیگر قطع است',
+  'peer-via': 'لینک مستقیم برقرار نیست؛ از راه دیگر',
+};
+
+/* An event for the operator: { level, title, body }. The card is drawn when
+   it is sent, with the server's state of that moment. fromPeer and report
+   are for a card another relay of the family sent over its link. */
+function queueReport({ level = 'info', title = '', body = '' }, fromPeer = '', report = null) {
   if (fromPeer && alertOutbox.filter((entry) => entry.fromPeer).length >= ALERT_PEER_SHARE) return;
-  alertOutbox.push({ id: crypto.randomBytes(8).toString('hex'), text: String(text), fromPeer, sentAt: 0 });
+  alertOutbox.push({ id: crypto.randomBytes(8).toString('hex'), level, title: String(title), body: String(body), report, fromPeer, at: Date.now(), sentAt: 0 });
   /* Full: the oldest of a peer's go first, then the oldest of this relay's. */
   while (alertOutbox.length > ALERT_OUTBOX_LIMIT) {
     const peerIndex = alertOutbox.findIndex((entry) => entry.fromPeer);
     alertOutbox.splice(peerIndex >= 0 ? peerIndex : 0, 1);
   }
-  console.log(`[Alerts] ${text}`);
+  console.log(`[Alerts] ${fromPeer ? `[${fromPeer.slice(0, 12)}] ` : ''}${title || report?.title || ''}${body || report?.body ? `: ${body || report?.body}` : ''}`);
 }
+/* A plain line, from a relay before 2.98.81 or anywhere else that has only text. */
+const queueAlert = (text, fromPeer = '') => queueReport({ level: fromPeer ? 'peer' : 'info', body: String(text) }, fromPeer);
+
+/* The name this relay goes by, in full, and how it is right now. */
+/* A name people know the relay by, never a bare address: an IP goes to
+   nobody's Telegram. */
+function publicHost() {
+  let host = String(process.env.DOMAIN || '').trim();
+  if (!host) {
+    try { host = new URL(String(process.env.CHAT_ALLOWED_ORIGINS || '').split(',')[0].trim()).hostname; } catch (_error) { host = ''; }
+  }
+  return host && !net.isIP(host.replace(/^\[|\]$/g, '')) && host !== 'localhost' ? host : '';
+}
+function directoryIdentity(id) {
+  const entry = directoryState.doc?.body?.relays?.find((relay) => relay.id === id) || {};
+  const gateway = (typeof ownGatewaySet === 'function' ? ownGatewaySet() : []).find((candidate) => candidate.id === id);
+  return { label: String(entry.name || ''), region: entry.region || '', cluster: entry.cluster || '', gateway: gateway ? gateway.priority : Number(entry.gateway) || 0, relayId: id };
+}
+function selfIdentity() {
+  return { ...directoryIdentity(relayIdentity.id), label: ALERT_LABEL, host: publicHost(), version: RELAY_BUILD?.version || '', build: RELAY_BUILD?.buildTag || '' };
+}
+function liveUserCount() {
+  const now = Date.now();
+  let count = 0;
+  for (const record of presence.values()) {
+    if (record.ws?.readyState === WebSocket.OPEN && now - (record.lastSeenAt || 0) <= PRESENCE_TTL_MS && hasUsableIdentity(record) && !getRestrictionForIdentity(record)) count += 1;
+  }
+  return count;
+}
+async function liveSnapshot() {
+  const stat = await fsp.statfs(defaultDataDir).catch(() => null);
+  const memory = readMeminfo();
+  const status = relayPeers.status();
+  let turnRunning = null;
+  if (TURN_URLS.length && dockerAvailable()) {
+    const state = await dockerEngineJson('GET', `/v1.44/containers/${encodeURIComponent(COTURN_CONTAINER)}/json`);
+    if (state.ok) turnRunning = Boolean(state.data?.State?.Running);
+  }
+  const boxes = typeof offlineBoxes === 'undefined' ? null : offlineBoxes;
+  return {
+    users: liveUserCount(),
+    queued: boxes ? Array.from(boxes.values()).reduce((sum, box) => sum + box.length, 0) : null,
+    mailboxes: boxes ? boxes.size : null,
+    cpu: Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100),
+    memory: memory ? { used: memory.total - memory.available, total: memory.total } : null,
+    relay: { rss: process.memoryUsage.rss(), limit: MEMORY_LIMIT_BYTES < os.totalmem() ? MEMORY_LIMIT_BYTES : 0 },
+    disk: stat ? { used: (Number(stat.blocks) - Number(stat.bavail)) * Number(stat.bsize), total: Number(stat.blocks) * Number(stat.bsize) } : null,
+    links: { up: status.up, allowed: status.allowed, hybrid: status.hybrid },
+    turn: TURN_URLS.length ? { running: turnRunning, used: turnPortsInUse(TURN_PORT_MIN, TURN_PORT_MAX), size: TURN_PORT_MAX - TURN_PORT_MIN + 1 } : null,
+    uptime: process.uptime(),
+    hostUptime: os.uptime(),
+  };
+}
+const activeProblems = () => alertState.active().map(({ level, text }) => ({ level, text }));
+async function ownReport(entry = {}) {
+  return { level: entry.level || 'info', title: entry.title || '', body: entry.body || '', at: entry.at || Date.now(), identity: selfIdentity(), snapshot: await liveSnapshot(), problems: activeProblems() };
+}
+/* The card for one queued event: a peer's from the fields it sent, with the
+   id its link proved; this relay's own with its state as it is sent. */
+async function cardFor(entry) {
+  if (entry.fromPeer) {
+    const fields = entry.report || { level: 'peer', body: entry.body, at: entry.at, identity: directoryIdentity(entry.fromPeer) };
+    const cleaned = relayReport.cleanReport(fields);
+    if (!cleaned.identity.label) cleaned.identity.label = directoryIdentity(entry.fromPeer).label;
+    return relayReport.renderCard({ ...cleaned, provenId: entry.fromPeer });
+  }
+  return relayReport.renderCard({ ...relayReport.cleanReport(await ownReport(entry)), provenId: relayIdentity.id });
+}
+const sendCard = (html) => sendTelegram(TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, html, { html: true });
+
+/* The link to hand alerts to: a named or family relay that said it has the
+   bot, else the first linked one. */
+function alertLink() {
+  const linked = Array.from(alertPeers()).map((id) => relayPeers.linkFor(id)).filter((candidate) => candidate?.isOpen());
+  return linked.find((link) => familyLinksFrom.get(link.peerId)?.telegram) || linked[0] || null;
+}
+
 /* Oldest first, stopping at the first that cannot go yet: order is kept, and
    nothing is lost to a Telegram or a link that is down for a while. */
 async function flushAlerts() {
@@ -7783,15 +7956,16 @@ async function flushAlerts() {
     while (alertOutbox.length) {
       const entry = alertOutbox[0];
       if (alertsByTelegram()) {
-        if (!await sendTelegram(TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, entry.text)) return;
+        if (!await sendCard(await cardFor(entry))) return;
         alertOutbox.shift();
         continue;
       }
       /* Sent and not yet acknowledged: wait a minute before sending it again. */
       if (entry.sentAt && Date.now() - entry.sentAt < 60000) return;
-      const link = Array.from(alertPeers()).map((id) => relayPeers.linkFor(id)).find((candidate) => candidate?.isOpen());
+      const link = alertLink();
       if (!link) return;
-      link.send({ kind: 'alert', id: entry.id, text: entry.text });
+      const report = await ownReport(entry);
+      link.send({ kind: 'alert', id: entry.id, text: [report.title, report.body].filter(Boolean).join(': '), report });
       entry.sentAt = Date.now();
       return;
     }
@@ -7799,12 +7973,12 @@ async function flushAlerts() {
     alertsFlushing = false;
   }
 }
-/* From a linked relay named in CHAT_ALERT_PEERS, authenticated by the link:
+/* From a linked relay named in CHAT_ALERT_PEERS (or of the family), authenticated by the link:
    sent on only from a relay that can, never passed along again (no loops),
-   at most thirty an hour per link, on one line, and opened with the id the
-   link proved — the text after it is the peer's own word for itself, and on
-   its own it could claim to be any relay. Acknowledged even when already
-   seen: the sender resends until it hears back. */
+   at most thirty an hour per link, and drawn here from its fields with the
+   id the link proved — what a relay says of itself on its own could claim
+   to be any relay. Acknowledged even when already seen: the sender resends
+   until it hears back. */
 function receiveRelayAlert(payload, link) {
   if (!alertPeers().has(link.peerId) || !alertsByTelegram()) return;
   const id = /^[a-f0-9]{16}$/.test(String(payload.id || '')) ? payload.id : '';
@@ -7820,9 +7994,14 @@ function receiveRelayAlert(payload, link) {
   tally.count += 1;
   alertsFromPeers.set(link.peerId, tally);
   if (tally.count > 30) return;
-  const text = String(payload.text || '').replace(/[\u0000-\u001f\u2028\u2029]+/g, ' ').trim().slice(0, 1500);
-  if (!text) return;
-  queueAlert(`[${link.peerId.slice(0, 12)}] ${text}`, link.peerId);
+  if (payload.report && typeof payload.report === 'object') {
+    const report = relayReport.cleanReport(payload.report);
+    queueReport({ level: report.level, title: report.title, body: report.body }, link.peerId, report);
+  } else {
+    const text = String(payload.text || '').replace(/[\u0000-\u001f\u2028\u2029]+/g, ' ').trim().slice(0, 1500);
+    if (!text) return;
+    queueAlert(text, link.peerId);
+  }
   flushAlerts().catch(() => {});
 }
 /* The far relay has it: the next one may go. */
@@ -7832,6 +8011,123 @@ function receiveRelayAlertAck(payload, link) {
   alertOutbox.shift();
   flushAlerts().catch(() => {});
 }
+
+/* ---- every server's state, for /status and the daily summary ------------- */
+
+const STATUS_WAIT_MS = Math.max(1000, Number(process.env.CHAT_STATUS_WAIT_MS || 6000));
+const statusWaits = new Map();
+function receiveStatusRequest(payload, link) {
+  if (!isFamilyPeer(link.peerId) && !alertPeers().has(link.peerId)) return;
+  const id = /^[a-f0-9]{16}$/.test(String(payload.id || '')) ? payload.id : '';
+  if (!id) return;
+  ownReport({ level: 'info' }).then((report) => { try { link.send({ kind: 'status-report', id, report }); } catch (_error) { /* the link went */ } }).catch(() => {});
+}
+function receiveStatusReport(payload, link) {
+  const wait = statusWaits.get(String(payload.id || ''));
+  if (!wait || !wait.asked.has(link.peerId)) return;
+  wait.entries.set(link.peerId, relayReport.cleanReport(payload.report || {}));
+  if (wait.entries.size >= wait.asked.size) wait.done();
+}
+/* This relay and every member of its family, in the directory's order: each
+   that answered with its state, each that did not by name. */
+async function fleetStatus() {
+  const members = directoryMembers();
+  const asked = new Set(members.filter((id) => relayPeers.linkFor(id)?.isOpen?.()));
+  const id = crypto.randomBytes(8).toString('hex');
+  const entries = new Map();
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, STATUS_WAIT_MS);
+    timer.unref?.();
+    statusWaits.set(id, { asked, entries, done: () => { clearTimeout(timer); resolve(); } });
+    for (const member of asked) {
+      try { relayPeers.linkFor(member).send({ kind: 'status-request', id }); } catch (_error) { /* the link went */ }
+    }
+    if (!asked.size) { clearTimeout(timer); resolve(); }
+  });
+  statusWaits.delete(id);
+  const own = { answered: true, provenId: relayIdentity.id, report: relayReport.cleanReport(await ownReport()) };
+  const order = (directoryState.doc?.body?.relays || []).map((relay) => relay.id);
+  const others = members.map((member) => {
+    const report = entries.get(member);
+    if (report && !report.identity.label) report.identity.label = directoryIdentity(member).label;
+    return report ? { answered: true, provenId: member, report } : { answered: false, provenId: member, report: relayReport.cleanReport({ identity: directoryIdentity(member) }) };
+  });
+  return [own, ...others].sort((a, b) => {
+    const ia = order.indexOf(a.provenId); const ib = order.indexOf(b.provenId);
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+  });
+}
+
+/* ---- the bot's commands, on the relay that has it ------------------------
+   Only the operator's own chat is answered, and only when no webhook is set
+   for the bot and nothing else is reading its updates. */
+const TELEGRAM_COMMANDS = [
+  { command: 'status', description: 'وضعیت همهٔ سرورها، همین لحظه' },
+  { command: 'servers', description: 'فهرست سرورها با نام، نشانی، خوشه و نسخه' },
+  { command: 'help', description: 'راهنمای ربات' },
+];
+async function answerTelegram(update) {
+  const message = update?.message;
+  if (!message || String(message.chat?.id) !== ALERT_TELEGRAM_CHAT_ID) return;
+  const command = String(message.text || '').trim().split(/\s+/)[0].replace(/@.*$/, '').toLowerCase();
+  if (command === '/status') await sendCard(relayReport.renderFleet({ entries: await fleetStatus() }));
+  else if (command === '/servers') await sendCard(relayReport.renderServers({ entries: await fleetStatus() }));
+  else if (command === '/help' || command === '/start') await sendCard(relayReport.renderHelp({ label: ALERT_LABEL }));
+}
+async function readTelegramCommands() {
+  const hook = await telegramCall(TELEGRAM_BOT_TOKEN, 'getWebhookInfo', {});
+  if (hook.json?.result?.url) { console.warn('[Telegram] the bot has a webhook; its commands are left to it'); return; }
+  await telegramCall(TELEGRAM_BOT_TOKEN, 'setMyCommands', { commands: TELEGRAM_COMMANDS });
+  /* What was sent while the relay was down is not answered now. */
+  let offset = 0;
+  const last = await telegramCall(TELEGRAM_BOT_TOKEN, 'getUpdates', { offset: -1, timeout: 0 });
+  if (Array.isArray(last.json?.result) && last.json.result.length) offset = last.json.result[last.json.result.length - 1].update_id + 1;
+  for (;;) {
+    const answer = await telegramCall(TELEGRAM_BOT_TOKEN, 'getUpdates', { offset, timeout: 25, allowed_updates: ['message'] }, 40000);
+    if (answer.status === 409) { console.warn('[Telegram] something else reads this bot’s updates; its commands stay with it'); return; }
+    if (!answer.json?.ok || !Array.isArray(answer.json.result)) { await new Promise((resolve) => setTimeout(resolve, 15000)); continue; }
+    for (const update of answer.json.result) {
+      offset = Math.max(offset, Number(update.update_id) + 1);
+      await answerTelegram(update).catch((error) => console.warn('[Telegram] a command failed:', error?.message || error));
+    }
+  }
+}
+if (alertsByTelegram() && process.env.CHAT_TELEGRAM_COMMANDS !== '0' && process.env.CHAT_ALERTS !== '0') {
+  setTimeout(() => readTelegramCommands().catch((error) => console.warn('[Telegram] commands stopped:', error?.message || error)), 3000).unref?.();
+}
+
+/* Once a day, at CHAT_STATUS_REPORT_AT (Tehran time, "09:00" unless set;
+   "off" for none), every server's state. The day it went out is kept, so a
+   restart after that hour does not send it twice. */
+const STATUS_REPORT_AT = (() => {
+  const wanted = String(process.env.CHAT_STATUS_REPORT_AT ?? '09:00').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(wanted) ? wanted : '';
+})();
+const STATUS_REPORT_FILE = process.env.CHAT_STATUS_REPORT_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'status-report-day.txt');
+const tehranClock = () => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+    .formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return { day: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour === '24' ? '00' : parts.hour}:${parts.minute}` };
+};
+let statusReportBusy = false;
+async function maybeSendStatusReport() {
+  if (statusReportBusy || !STATUS_REPORT_AT || !alertsByTelegram()) return;
+  const { day, time } = tehranClock();
+  if (time < STATUS_REPORT_AT) return;
+  let sentDay = '';
+  try { sentDay = fs.readFileSync(STATUS_REPORT_FILE, 'utf8').trim(); } catch (_error) { /* never sent */ }
+  if (sentDay === day) return;
+  statusReportBusy = true;
+  try {
+    if (await sendCard(relayReport.renderFleet({ entries: await fleetStatus(), title: 'گزارش روزانهٔ سرورها' }))) fs.writeFileSync(STATUS_REPORT_FILE, `${day}\n`);
+  } finally {
+    statusReportBusy = false;
+  }
+}
+if (process.env.CHAT_ALERTS !== '0') {
+  setInterval(() => { maybeSendStatusReport().catch(() => {}); }, Math.max(1000, Number(process.env.CHAT_STATUS_REPORT_CHECK_MS || 30000))).unref?.();
+}
+
 async function alertReadings() {
   const reading = {};
   const stat = await fsp.statfs(defaultDataDir).catch(() => null);
@@ -7862,7 +8158,11 @@ async function alertReadings() {
     if (relayPeers.linkFor(id)) { alertPeerDownSince.delete(id); continue; }
     if (!alertPeerDownSince.has(id)) alertPeerDownSince.set(id, now);
     const forMs = now - alertPeerDownSince.get(id);
-    if (forMs >= alertLimits.peerDownMs) reading.peersDown.push({ id, forMs });
+    if (forMs >= alertLimits.peerDownMs) {
+      const nameOf = (relayId) => directoryState.doc?.body?.relays?.find((relay) => relay.id === relayId)?.name || '';
+      const through = familyIds().has(id) ? familyDetour(id) : null;
+      reading.peersDown.push({ id, forMs, name: nameOf(id), via: through ? (nameOf(through.peerId) || through.peerId.slice(0, 12)) : '' });
+    }
   }
   return reading;
 }
@@ -7876,10 +8176,14 @@ async function checkAlerts() {
      operator hears of it. */
   if (!alertsAnnounced) {
     alertsAnnounced = true;
-    queueAlert(`🔄 ${ALERT_LABEL}: رله راه‌اندازی شد (نسخهٔ ${RELAY_BUILD?.version || 'نامعلوم'}). هشدار دیسک، حافظه و TURN فعال است.`);
+    queueReport({ level: 'start', title: 'رله راه‌اندازی شد', body: 'پایش دیسک، حافظه، TURN و لینک رله‌ها روشن است.' });
   }
   try {
-    alertState.update(evaluateAlerts(await alertReadings(), alertLimits)).forEach(queueAlert);
+    alertState.update(evaluateAlerts(await alertReadings(), alertLimits)).forEach((message) => queueReport({
+      level: message.level,
+      title: message.level === 'ok' ? `برطرف شد: ${ALERT_TITLES[message.key.split(':')[0]] || 'هشدار'}` : `${ALERT_TITLES[message.key.split(':')[0]] || 'هشدار'}${message.reminder ? ' (هنوز ادامه دارد)' : ''}`,
+      body: message.text,
+    }));
     await flushAlerts();
   } catch (error) {
     console.warn('[Alerts] the check failed:', error?.message || error);
@@ -8032,11 +8336,12 @@ function carryTransitEnvelope(envelope, { clientId, tag, reply }) {
 
 /* The next link toward a relay: a link to it, or, for a relay of a partner's
    family, the best of the gateways on the way. A relay of this family is
-   only ever reached over its own link. */
-function nextLinkToward(toRelay, { viaAllowed = true } = {}) {
+   reached over its own link, or, when there is none, through one member
+   that has one (only for the first hop, so a frame never wanders). */
+function nextLinkToward(toRelay, { viaAllowed = true, detour = false } = {}) {
   const direct = relayPeers.linkFor(toRelay);
   if (direct) return direct;
-  if (familyIds().has(toRelay)) return null;
+  if (familyIds().has(toRelay)) return detour ? familyDetour(toRelay) : null;
   const operatorId = partnerOperatorOf(toRelay);
   if (operatorId && selfIsGateway()) {
     const route = routeToPartner(operatorId, { viaAllowed });
@@ -8051,7 +8356,8 @@ function nextLinkToward(toRelay, { viaAllowed = true } = {}) {
 }
 
 function carryToward(envelope, facts, { clientId, tag, reply, hop, viaAllowed = true }) {
-  const link = nextLinkToward(facts.toRelay, { viaAllowed });
+  const detour = hop === undefined;
+  const link = nextLinkToward(facts.toRelay, { viaAllowed, detour });
   if (link) {
     carryOverLink(link, envelope, facts, { clientId, tag, reply, hop });
     return;
@@ -8069,7 +8375,7 @@ function carryToward(envelope, facts, { clientId, tag, reply, hop, viaAllowed = 
      one carried on. */
   const parkDeadline = Date.now() + TRANSIT_PARK_MS;
   const parkTimer = setInterval(() => {
-    const revived = nextLinkToward(facts.toRelay, { viaAllowed });
+    const revived = nextLinkToward(facts.toRelay, { viaAllowed, detour });
     if (revived) {
       clearInterval(parkTimer);
       carryOverLink(revived, envelope, facts, { clientId, tag, reply, hop });
@@ -8179,6 +8485,10 @@ function handleTransitFrame(payload, link) {
     receiveReach(payload, link);
     return;
   }
+  if (payload?.kind === 'family-links') {
+    receiveFamilyLinks(payload, link);
+    return;
+  }
   if (payload?.kind === 'directory') {
     acceptDirectory(payload.doc, 'push');
     return;
@@ -8189,6 +8499,14 @@ function handleTransitFrame(payload, link) {
   }
   if (payload?.kind === 'alert-ack') {
     receiveRelayAlertAck(payload, link);
+    return;
+  }
+  if (payload?.kind === 'status-request') {
+    receiveStatusRequest(payload, link);
+    return;
+  }
+  if (payload?.kind === 'status-report') {
+    receiveStatusReport(payload, link);
     return;
   }
   if (payload?.kind === 'transit') {

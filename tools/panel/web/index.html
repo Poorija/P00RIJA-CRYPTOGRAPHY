@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  P00RIJA Cryptography — offline-first encryption suite and E2EE messenger.
+  Copyright (C) 2026 Poorija <p00rija@tutamail.com>
+  https://github.com/Poorija/P00RIJA-Cryptography
+  Licensed under the GNU Affero General Public License, version 3 only.
+
+  The page of the web panel (tools/panel/server.mjs). It carries no inline
+  script or style: everything comes from the panel's own address.
+-->
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P00RIJA · Control panel</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<section id="loginView" class="login">
+  <form id="loginForm" class="card" autocomplete="on">
+    <h1 data-t="title">پنل مرکزی سرورها</h1>
+    <label><span data-t="username">نام کاربری</span><input id="loginUser" name="username" autocomplete="username" required></label>
+    <label><span data-t="password">رمز</span><input id="loginPassword" name="password" type="password" autocomplete="current-password" required></label>
+    <label><span data-t="code">کد دومرحله‌ای</span><input id="loginCode" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required class="mono"></label>
+    <button class="acc" id="loginButton" type="submit" data-t="login">ورود</button>
+    <div id="loginError" class="bad-text" role="alert"></div>
+    <button type="button" class="link" data-lang-toggle>EN</button>
+  </form>
+</section>
+
+<div id="appView" hidden>
+  <header>
+    <h1 data-t="title">پنل مرکزی سرورها</h1>
+    <span id="deviceState" class="tag"></span>
+    <span id="userName" class="mut"></span>
+    <button data-lang-toggle>EN</button>
+    <button id="logoutButton" data-t="logout">خروج</button>
+  </header>
+  <nav id="tabs" class="tabs"></nav>
+  <div class="filter">
+    <label><span data-t="cluster">خوشه</span> <select id="filterCluster"></select></label>
+    <div id="filterServers" class="row"></div>
+    <button id="refreshButton" data-t="refresh">تازه‌سازی</button>
+  </div>
+  <main id="content">
+    <section class="card" id="trustBox" hidden>
+      <div data-t="trustNeeded">پیش از هر کار حساس، شناسهٔ اپراتور خانواده را که اپراتور به شما داده تأیید کنید.</div>
+      <div class="mono mut pre" id="operatorCandidates"></div>
+      <div class="row">
+        <input type="text" id="operatorId" class="mono wide" data-ph="operatorIdLabel" placeholder="شناسهٔ اپراتور">
+        <button class="acc" id="trustButton" data-t="trust">تأیید اپراتور</button>
+      </div>
+    </section>
+    <div id="sections"></div>
+    <section class="card"><pre id="results"></pre></section>
+  </main>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

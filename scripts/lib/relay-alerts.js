@@ -41,7 +41,6 @@ const https = require('https');
 
 const GiB = 1024 ** 3;
 const LEVELS = { warn: 1, critical: 2 };
-const ICONS = { warn: '⚠️', critical: '🚨' };
 
 function numberEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -158,17 +157,25 @@ function evaluate(reading, limits) {
     found.push({ key: 'bandwidth', level: network.mbps >= limits.linkMbps * 0.95 ? 'critical' : 'warn', text: `پهنای باند سرور: ${Math.round(network.mbps)} مگابیت بر ثانیه، ${percent(network.mbps, limits.linkMbps)}٪ ظرفیت ${limits.linkMbps} مگابیتی. تماس‌های تصویری از مسیر TURN کیفیت از دست می‌دهند.` });
   }
   for (const peer of peersDown || []) {
-    found.push({ key: `peer:${peer.id}`, level: 'critical', text: `ارتباط با رلهٔ دیگر (${peer.id.slice(0, 12)}) ${Math.round(peer.forMs / 60000)} دقیقه است که قطع است. پیام‌ها و تماس‌های بین دو رله برقرار نمی‌شوند.` });
+    const who = `${peer.name ? `«${peer.name}» ` : ''}(${peer.id.slice(0, 12)})`;
+    /* Reached through another member of the family: nothing is cut off, but
+       the direct path is closed and the operator should know it. */
+    if (peer.via) {
+      found.push({ key: `peer-via:${peer.id}`, level: 'warn', text: `لینک مستقیم با رلهٔ ${who} ${Math.round(peer.forMs / 60000)} دقیقه است که برقرار نیست؛ پیام‌ها و تماس‌ها از راه «${peer.via}» می‌روند.` });
+      continue;
+    }
+    found.push({ key: `peer:${peer.id}`, level: 'critical', text: `ارتباط با رلهٔ ${who} ${Math.round(peer.forMs / 60000)} دقیقه است که قطع است. پیام‌ها و تماس‌های بین دو رله برقرار نمی‌شوند.` });
   }
   return found;
 }
 
 /* ---- when to say so ------------------------------------------------------ */
 
-/* Problems in, messages out. A problem is announced when it starts or gets
-   worse, reminded about every remindMs while it lasts, and announced over
-   once it has been absent for two checks in a row — one reading under the
-   line on a disk hovering at it would otherwise be a message a minute. */
+/* Problems in, messages out ({ key, level, text }; level "ok" when one is
+   over). A problem is announced when it starts or gets worse, reminded about
+   every remindMs while it lasts, and announced over once it has been absent
+   for two checks in a row — one reading under the line on a disk hovering at
+   it would otherwise be a message a minute. */
 function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
   const active = new Map();
   return {
@@ -181,7 +188,7 @@ function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
         const worse = previous && LEVELS[problem.level] > LEVELS[previous.level];
         const due = previous && now() - previous.notifiedAt >= remindMs;
         if (!previous || worse || due) {
-          messages.push(`${ICONS[problem.level]} ${label}: ${problem.text}`);
+          messages.push({ key: problem.key, level: problem.level, text: problem.text, reminder: Boolean(due && !worse) });
           active.set(problem.key, { ...problem, since: previous?.since || now(), notifiedAt: now(), clear: 0 });
         } else {
           active.set(problem.key, { ...previous, text: problem.text, clear: 0 });
@@ -192,7 +199,7 @@ function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
         previous.clear += 1;
         if (previous.clear < 2) continue;
         active.delete(key);
-        messages.push(`✅ ${label}: برطرف شد — ${previous.text}`);
+        messages.push({ key, level: 'ok', text: previous.text });
       }
       return messages;
     },
@@ -205,23 +212,41 @@ function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
 function apiBase() {
   return String(process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/+$/, '');
 }
-function sendTelegram(token, chatId, text) {
+/* One Bot API method: { status, json }, status 0 when Telegram could not be
+   reached. Never throws. */
+function telegramCall(token, method, payload = {}, timeoutMs = 15000) {
   return new Promise((resolve) => {
-    const body = JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 3500), disable_web_page_preview: true });
-    const target = new URL(`${apiBase()}/bot${token}/sendMessage`);
+    const body = JSON.stringify(payload);
+    const target = new URL(`${apiBase()}/bot${token}/${method}`);
     const client = target.protocol === 'http:' ? http : https;
     const request = client.request(target, {
       method: 'POST',
-      timeout: 15000,
+      timeout: timeoutMs,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
     }, (response) => {
-      response.resume();
-      response.on('end', () => resolve(response.statusCode >= 200 && response.statusCode < 300));
+      const chunks = [];
+      response.on('data', (chunk) => { if (chunks.length < 4096) chunks.push(chunk); });
+      response.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (_error) { /* not JSON */ }
+        resolve({ status: response.statusCode, json });
+      });
     });
     request.on('timeout', () => request.destroy(new Error('timeout')));
-    request.on('error', () => resolve(false));
+    request.on('error', () => resolve({ status: 0, json: null }));
     request.end(body);
   });
+}
+/* A message to the operator's chat: Telegram's HTML when asked for, and the
+   same words without markup if Telegram refuses the HTML. */
+async function sendTelegram(token, chatId, text, { html = false } = {}) {
+  const send = (payload) => telegramCall(token, 'sendMessage', { chat_id: chatId, disable_web_page_preview: true, ...payload });
+  let answer = await send(html ? { text: String(text).slice(0, 4000), parse_mode: 'HTML' } : { text: String(text).slice(0, 4000) });
+  if (html && answer.status === 400) {
+    const plain = String(text).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    answer = await send({ text: plain.slice(0, 4000) });
+  }
+  return answer.status >= 200 && answer.status < 300;
 }
 
 module.exports = {
@@ -232,5 +257,6 @@ module.exports = {
   networkBytes,
   evaluate,
   createAlertState,
+  telegramCall,
   sendTelegram,
 };

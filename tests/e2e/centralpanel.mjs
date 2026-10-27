@@ -109,6 +109,20 @@ try {
     check('creating a backup is on the list too, since it prunes old ones', sig.isDangerous('/Monitor_Server/ops-backup-create'));
     const variant = verify(signed({ path: '/MONITOR_SERVER/transit-add/' }));
     check('a signature made over one spelling of a path holds for another spelling of it', variant.ok === true, JSON.stringify(variant));
+    /* A browser signs with WebCrypto: ECDSA P-256, the signature raw r||s. */
+    const subtle = globalThis.crypto.subtle;
+    const browserPair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    const browserKey = Buffer.from(await subtle.exportKey('spki', browserPair.publicKey)).toString('base64');
+    const browserId = dirlib.operatorIdFor(browserKey);
+    const browserKeys = sig.signingKeys({ admins: [{ id: browserId, key: browserKey, name: 'browser' }] }, operatorKey);
+    const fields = { method: 'POST', path: '/Monitor_Server/transit-add', body, relay, at: now, nonce: crypto.randomBytes(16).toString('hex') };
+    const raw = Buffer.from(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, browserPair.privateKey, Buffer.from(sig.requestText(fields), 'utf8')));
+    const browserHeader = `v1.${browserId}.${fields.at}.${fields.nonce}.${raw.toString('base64')}`;
+    const fromBrowser = sig.verifyRequest(browserHeader, { method: 'POST', path: '/Monitor_Server/transit-add', body, relay, now, keys: browserKeys, nonceSeen: () => false });
+    check('a signature made in a browser with WebCrypto verifies', raw.length === 64 && fromBrowser.ok === true && fromBrowser.name === 'browser', JSON.stringify(fromBrowser));
+    const tamperedBrowser = sig.verifyRequest(browserHeader, { method: 'POST', path: '/Monitor_Server/transit-add', body: { ...body, origin: 'x' }, relay, now, keys: browserKeys, nonceSeen: () => false });
+    check('and one whose body was changed does not', tamperedBrowser.ok === false && tamperedBrowser.reason === 'bad-signature');
+
     const made = adminKey.makeAdminKey('my laptop');
     const sealed = adminKey.sealAdminKey(made, 'correct horse battery staple');
     const opened = adminKey.openAdminKey(sealed, 'correct horse battery staple');
