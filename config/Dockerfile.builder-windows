@@ -35,5 +35,13 @@ RUN rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc \
     && cargo install --locked cargo-xwin \
     && rm -rf /root/.cargo/registry
 
+# The Tauri CLI's installer template includes Win\RestartManager.nsh (from
+# 2.12), to close a running copy before replacing it, and bookworm's NSIS 3.08
+# has none: makensis stopped there after the whole compile. Upstream NSIS's
+# header is copied in, only where Debian's NSIS has no file of that name, and
+# last, so the slow layers above stay cached.
+COPY config/nsis/Include/ /tmp/nsis-include/
+RUN cp -Rn /tmp/nsis-include/. /usr/share/nsis/Include/ && rm -rf /tmp/nsis-include
+
 WORKDIR /app
 ENTRYPOINT ["/bin/bash", "-c"]
