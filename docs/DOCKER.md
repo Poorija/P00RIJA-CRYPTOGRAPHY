@@ -121,6 +121,24 @@ It works the same on macOS and Linux:
   - whether to listen on this computer only (`127.0.0.1`) or on the LAN;
   - whether the panel should **start by itself whenever Docker starts**;
   - where your `deploy.conf` and SSH keys are.
+- **Where things are.** It looks for them itself, from wherever it is run, and
+  prints the folders it chose:
+  - `deploy.conf`: `--config-dir`, then `POORIJA_CONFIG_DIR`, then the saved
+    answer, then `~/.config/p00rija-cryptography` (moved by `XDG_CONFIG_HOME`,
+    as for `deploy.sh`). A `deploy.conf` in the folder you run it from, or
+    beside the script, is asked about at a terminal and used only if you type
+    `yes` (the default is no); never with `--yes` or through a pipe, since
+    that file names the servers the panel connects to. The launcher reads
+    `deploy.conf` as data, as the panel does, and never runs it;
+  - the SSH keys: `--ssh-dir`, then the saved answer, then the narrowest
+    folder in `~/.ssh` holding every key `deploy.conf` names, then `~/.ssh`.
+    A folder anywhere else reaches the container only through `--ssh-dir`;
+  - its own checkout: where the script file really is, through any symlink,
+    so `bash /any/path/scripts/panel.sh`, or a link to it in your `PATH`,
+    builds from the right place.
+
+  A `backup` with no file named goes to the folder you run it from, never
+  inside the checkout.
 - **Remembered answers.** They are kept in
   `~/.config/p00rija-cryptography/panel.env`: settings only, never a password.
   `--reconfigure` asks again.
@@ -132,7 +150,8 @@ It works the same on macOS and Linux:
   FILE`) so the login is sent over HTTPS. Without one it warns, every time,
   that the login crosses the network unencrypted.
 - **Other commands:** `stop`, `status`, `logs`, `update` (new image,
-  same settings), and `login` (a new login, or `--new-code` for a new app code).
+  same settings), `login` (a new login, or `--new-code` for a new app code),
+  `doctor`, `backup`, `restore`, and `uninstall`.
 
 The script pulls `poorija/p00rija-panel`. Run from a checkout whose version is
 not on Docker Hub yet, or with `--build`, it builds the same image from source.
@@ -284,6 +303,24 @@ bash scripts/panel.sh
   - اینکه فقط روی همین کامپیوتر (`127.0.0.1`) باز باشد یا روی شبکهٔ محلی؛
   - اینکه **با روشن شدن Docker خودش بالا بیاید** یا نه؛
   - جای `deploy.conf` و کلیدهای SSH.
+- **جای فایل‌ها.** از هر پوشه‌ای که اجرا شود، خودش آن‌ها را پیدا می‌کند و
+  پوشه‌هایی را که انتخاب کرده چاپ می‌کند:
+  - `deploy.conf`: اول `--config-dir`، بعد `POORIJA_CONFIG_DIR`، بعد جواب
+    ذخیره‌شده، و در آخر `~/.config/p00rija-cryptography` (که `XDG_CONFIG_HOME`
+    مثل `deploy.sh` جابه‌جایش می‌کند). دربارهٔ `deploy.conf` در پوشه‌ای که از آن
+    اجرا می‌کنید، یا کنار خود اسکریپت، در ترمینال سؤال می‌شود و فقط اگر `yes`
+    تایپ کنید به کار می‌رود (پیش‌فرض «نه»)؛ با `--yes` یا از راه pipe هرگز، چون
+    همین فایل تعیین می‌کند پنل به کدام سرورها وصل شود. لانچر هم مثل خود پنل
+    `deploy.conf` را فقط به‌عنوان داده می‌خواند و هرگز اجرایش نمی‌کند؛
+  - کلیدهای SSH: اول `--ssh-dir`، بعد جواب ذخیره‌شده، بعد تنگ‌ترین پوشه در
+    `~/.ssh` که همهٔ کلیدهای نام‌برده در `deploy.conf` در آن است، و در آخر
+    `~/.ssh`. پوشه‌ای بیرون از آن فقط با `--ssh-dir` به کانتینر داده می‌شود؛
+  - مخزن خودش: جایی که فایل اسکریپت واقعاً هست، حتی از راه symlink؛ پس
+    `bash /any/path/scripts/panel.sh` یا لینکی به آن در `PATH` از جای درست
+    می‌سازد.
+
+  `backup` بدون نام فایل، فایل را در پوشه‌ای که از آن اجرا می‌کنید می‌گذارد،
+  هرگز داخل مخزن.
 - **جواب‌ها.** در `~/.config/p00rija-cryptography/panel.env` می‌مانند؛ فقط
   تنظیمات، هرگز رمز. `--reconfigure` دوباره می‌پرسد.
 - **ورود.** بار اول، ورود پنل داخل کانتینر ساخته می‌شود. نام و رمز را خودتان
@@ -294,7 +331,8 @@ bash scripts/panel.sh
   FILE`) تا ورود روی HTTPS فرستاده شود. بدون گواهی، هر بار هشدار می‌دهد که ورود
   بدون رمزنگاری از شبکه می‌گذرد.
 - **فرمان‌های دیگر:** `stop`، `status`، `logs`، `update` (ایمیج تازه با همان
-  تنظیمات) و `login` (ورود تازه، یا `--new-code` برای کد تازهٔ برنامه).
+  تنظیمات)، `login` (ورود تازه، یا `--new-code` برای کد تازهٔ برنامه)، `doctor`،
+  `backup`، `restore` و `uninstall`.
 
 اسکریپت `poorija/p00rija-panel` را می‌کشد. اگر از نسخه‌ای از مخزن اجرا شود که
 هنوز روی Docker Hub نیست، یا با `--build`، همان ایمیج را از سورس می‌سازد.

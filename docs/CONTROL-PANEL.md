@@ -37,8 +37,8 @@ What the container is given:
 
 | | Default | |
 |---|---|---|
-| `/config` | `~/.config/p00rija-cryptography`, read-only | `deploy.conf`, and the operator's files if this is the operator's computer |
-| `/ssh-src` | `~/.ssh`, read-only | the SSH keys `deploy.conf` names as `~/.ssh/…` |
+| `/config` | `~/.config/p00rija-cryptography`, read-only (`panel.sh` asks about one it finds where it is run, and uses it only on a typed yes) | `deploy.conf`, and the operator's files if this is the operator's computer |
+| `/ssh-src` | `~/.ssh`, read-only (`panel.sh` takes the folder in `~/.ssh` that `deploy.conf`'s keys are in) | the SSH keys `deploy.conf` names |
 | `/state` | a Docker volume | the login, the operator you confirmed, the graph layout, and the audit log |
 
 Settings for the compose file, all optional: `POORIJA_CONFIG_DIR`,
@@ -359,8 +359,8 @@ docker compose -f config/control-panel.compose.yaml up -d --build
 
 | | پیش‌فرض | |
 |---|---|---|
-| `/config` | `~/.config/p00rija-cryptography`، فقط‌خواندنی | `deploy.conf`، و فایل‌های اپراتور اگر این کامپیوتر اپراتور است |
-| `/ssh-src` | `~/.ssh`، فقط‌خواندنی | کلیدهای SSH که `deploy.conf` به شکل `~/.ssh/…` نام برده |
+| `/config` | `~/.config/p00rija-cryptography`، فقط‌خواندنی (`panel.sh` دربارهٔ یکی که در پوشهٔ جاری یا کنار اسکریپت پیدا کند می‌پرسد، و فقط با `yes` تایپ‌شده برش می‌دارد) | `deploy.conf`، و فایل‌های اپراتور اگر این کامپیوتر اپراتور است |
+| `/ssh-src` | `~/.ssh`، فقط‌خواندنی (`panel.sh` پوشه‌ای در `~/.ssh` را برمی‌دارد که کلیدهای `deploy.conf` در آن است) | کلیدهای SSH که `deploy.conf` نام برده |
 | `/state` | یک volume داکر | ورود، اپراتوری که تأیید کرده‌اید، چیدمان گراف، و گزارش کارها |
 
 تنظیمات اختیاری فایل compose: `POORIJA_CONFIG_DIR`، `POORIJA_SSH_DIR`،

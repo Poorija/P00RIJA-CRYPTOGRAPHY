@@ -82,6 +82,43 @@ Each section is Persian first, English after. Earlier changes follow below.
 - For upkeep, `panel.sh doctor`, `backup`, `restore`, and `uninstall` were
   added.
 
+## لانچر پنل از هر جایی · The panel launcher, from anywhere
+
+- `panel.sh` جای خودش را خودش پیدا می‌کند: از هر پوشه‌ای، از راه symlink (مثلاً
+  لینکی در `PATH`)، و حتی وقتی به bash پایپ شود. هیچ مسیری در آن ثابت نیست. از
+  داخل مخزن ایمیج را از سورس همان مخزن می‌سازد، و نسخهٔ تنهای اسکریپت آن را از
+  Docker Hub می‌کشد.
+- `deploy.conf` را در `~/.config/p00rija-cryptography` می‌جوید و
+  `POORIJA_CONFIG_DIR` و `XDG_CONFIG_HOME` را مثل `deploy.sh` رعایت می‌کند. اگر
+  یکی در پوشهٔ جاری یا کنار اسکریپت پیدا کند، در ترمینال جداگانه می‌پرسد و فقط با
+  `yes` تایپ‌شده برش می‌دارد، چون همین فایل تعیین می‌کند پنل به کدام سرورها وصل
+  شود.
+- پوشهٔ کلیدهای SSH از روی کلیدهای `deploy.conf` انتخاب می‌شود، ولی فقط داخل
+  `~/.ssh`. پوشه‌ای بیرون از آن تنها با `--ssh-dir` به کانتینر داده می‌شود.
+- لانچر هم مثل خود پنل `deploy.conf` را فقط به‌عنوان داده می‌خواند و هرگز اجرایش
+  نمی‌کند.
+- مسیر نسبی یا `~` (مثل `--config-dir .`) کامل می‌شود تا Docker آن را نام یک volume
+  نگیرد. راهنمایی‌ها فرمان را همان‌طور نشان می‌دهند که اجرایش کرده‌اید، و backup
+  بدون نام فایل در پوشهٔ جاری ذخیره می‌شود، هرگز داخل مخزن.
+
+- `panel.sh` finds its own place: from any folder, through a symlink (one in
+  your `PATH`, say), and even piped into bash. No path is written into it.
+  From a checkout it builds the image from that checkout's source, and a copy
+  of the script on its own pulls it from Docker Hub.
+- It looks for `deploy.conf` in `~/.config/p00rija-cryptography`, and follows
+  `POORIJA_CONFIG_DIR` and `XDG_CONFIG_HOME` as `deploy.sh` does. One found in
+  the folder it is run from, or beside the script, is asked about separately
+  at a terminal and taken only on a typed `yes`, since that file decides which
+  servers the panel connects to.
+- The SSH folder follows the keys `deploy.conf` names, but only inside
+  `~/.ssh`. A folder anywhere else reaches the container only through
+  `--ssh-dir`.
+- Like the panel, the launcher reads `deploy.conf` as data and never runs it.
+- A relative path or a `~` (`--config-dir .`, say) is made whole, so Docker
+  does not take it for a volume's name. Its hints show the command the way you
+  ran it, and a backup with no file named goes to the folder it is run from,
+  never inside the checkout.
+
 ---
 
 # P00RIJA Cryptography 2.98.84
