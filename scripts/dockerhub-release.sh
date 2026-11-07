@@ -34,6 +34,8 @@
 #   --load | --push         local build (default) or publish
 #   --prefix P              repository prefix (default poorija/)
 #   --only a,b              some of: panel,app,relay,cert-renewer
+#   --platform P            the platform of a local build (default this machine's;
+#                           linux/amd64 for the servers)
 #   --scan-only IMAGE...    check these images (or OCI tars) and stop
 #   --private-file FILE     more strings to look for, one per line
 # ---------------------------------------------------------------------------
@@ -48,7 +50,7 @@ warn() { printf '! %s\n' "$*" >&2; }
 die()  { printf '✗ %s\n' "$*" >&2; exit 1; }
 usage() { sed -n '/^# Builds the four images/,/^# ------/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^-----/d'; }
 
-MODE=load PREFIX=poorija/ ONLY="panel,app,relay,cert-renewer"
+MODE=load PREFIX=poorija/ ONLY="panel,app,relay,cert-renewer" PLATFORM=""
 SCAN_ONLY=() EXTRA_FILES=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -56,6 +58,7 @@ while [ $# -gt 0 ]; do
     --push) MODE=push ;;
     --prefix) PREFIX="${2:?--prefix needs a value}"; shift ;;
     --only) ONLY="${2:?--only needs a list}"; shift ;;
+    --platform) PLATFORM="${2:?--platform needs a value}"; shift ;;
     --private-file) EXTRA_FILES+=("${2:?--private-file needs a file}"); shift ;;
     --scan-only) MODE=scan; shift; while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do SCAN_ONLY+=("$1"); shift; done; continue ;;
     -h|--help) usage; exit 0 ;;
@@ -140,7 +143,7 @@ dockerfile_of() {
     *) die "unknown image: $1 (panel, app, relay or cert-renewer)" ;;
   esac
 }
-native="linux/$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+native="${PLATFORM:-linux/$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"
 BUILDER=p00rija-multi
 if [ "$MODE" = push ]; then
   # A multi-platform image needs a docker-container builder; made once, kept.

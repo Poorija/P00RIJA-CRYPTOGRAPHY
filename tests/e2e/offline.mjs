@@ -115,10 +115,7 @@ await page.waitForTimeout(3500);
 
 await page.evaluate(() => {
   window.__toasts = [];
-  const orig = window.PoorijaApp?.showNotification?.bind(window.PoorijaApp);
-  if (window.PoorijaApp) {
-    window.PoorijaApp.showNotification = (m, t) => { window.__toasts.push(`${t}: ${m}`); return orig?.(m, t); };
-  }
+  Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
   document.getElementById('mobileInstallGate')?.classList.add('hidden');
   window.switchTab?.('chat');
 });

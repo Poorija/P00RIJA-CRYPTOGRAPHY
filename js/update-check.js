@@ -27,12 +27,14 @@
  *
  * WHAT IT DOES NOT DO
  *
- * It downloads nothing by itself and installs nothing, ever. Neither Android
+ * It installs nothing, ever, and runs nothing it downloaded. Neither Android
  * nor iOS permits an app to replace itself, and on the desktop a self-updater
  * that fetches and executes a binary is a remote code execution channel into a
  * cryptography app -- worth avoiding even when it is convenient. Accepting the
- * offer opens the release asset for this platform in the system browser; the
- * download lands wherever downloads land, and the person installs it.
+ * offer downloads the file for this machine -- the same kind as the one
+ * installed -- through the app's own proxy, checks it against the release's
+ * SHA256SUMS, and leaves it in Downloads for the person to open (js/app.js
+ * offerUpdate); on a phone, or where that fails, the browser gets the link.
  */
 
 (function () {
@@ -96,40 +98,76 @@
 
   function arm() {
     const ua = navigator.userAgent || '';
-    // Apple Silicon reports as Intel in the webview, so the universal build is
-    // offered on macOS rather than guessing wrong in either direction.
     return /aarch64|arm64|aarch/i.test(ua);
   }
 
+  /* What this build is, as the shell says it (desktop_platform_info): the
+     operating system, the architecture it was built for, how it was
+     installed (Tauri marks the bundle into the binary: deb, rpm, appimage,
+     nsis, msi, app), whether the Mac binary is universal, and on Linux the
+     distribution. The webview's user agent calls an Apple Silicon Mac Intel
+     and Windows on ARM x64, so it is only the last resort. */
+  const ARCH = { x86_64: 'x86_64', amd64: 'x86_64', x64: 'x86_64', aarch64: 'aarch64', arm64: 'aarch64' };
+  function machine(info) {
+    const os = info?.os === 'darwin' ? 'macos' : String(info?.os || '') || platform();
+    return {
+      os,
+      arch: ARCH[String(info?.arch || '').toLowerCase()] || (arm() ? 'aarch64' : 'x86_64'),
+      bundle: String(info?.bundle || '').toLowerCase() || null,
+      universal: Boolean(info?.universal),
+      distro: String(info?.distro || '').toLowerCase(),
+      known: Boolean(info),
+    };
+  }
+
   /**
-   * Picks the asset a person on this machine should be given.
+   * Picks the file a person on this machine should be given: the same kind
+   * as the one installed, for the same architecture.
    *
-   * Returns the releases page when nothing matches, which is the honest answer
-   * for iOS -- where there is nothing to side-load -- and for any platform
-   * whose artefact did not make it into a particular release.
+   * Null when the release has nothing for it, which is the honest answer for
+   * iOS -- where there is nothing to side-load -- and for any platform whose
+   * file did not make it into a particular release; the page is offered then.
    */
-  function pickAsset(assets) {
+  function pickAsset(assets, info = null) {
     const names = (assets || []).map((asset) => ({
       name: String(asset.name || ''),
       url: String(asset.browser_download_url || ''),
     })).filter((asset) => asset.url);
-    const find = (pattern) => names.find((asset) => pattern.test(asset.name));
-    switch (platform()) {
+    const find = (pattern) => names.find((asset) => pattern.test(asset.name)) || null;
+    const m = machine(info);
+    const words = m.arch === 'aarch64' ? '(?:aarch64|arm64)' : '(?:x86_64|amd64|x64)';
+    switch (m.os) {
       case 'android':
         return find(/\.apk$/i);
       case 'macos':
-        return find(/universal.*\.dmg$/i) || find(/\.dmg$/i);
-      case 'windows':
-        return arm() ? find(/arm64.*\.exe$/i) || find(/\.exe$/i)
-                     : find(/x64.*\.exe$/i) || find(/\.exe$/i);
-      case 'linux':
-        return arm() ? find(/(aarch64|arm64).*\.(deb|rpm|tar\.gz)$/i)
-                     : find(/(x86_64|amd64).*\.(deb|rpm|tar\.gz)$/i);
+        // A universal install, or a machine that could not say, keeps to the
+        // universal build; otherwise the build for its own chip.
+        if (!m.known || m.universal) return find(/universal\.dmg$/i) || find(/\.dmg$/i);
+        return find(new RegExp(`[._-]${words}\\.dmg$`, 'i')) || find(/universal\.dmg$/i);
+      case 'windows': {
+        if (m.bundle === 'msi') {
+          const msi = find(new RegExp(`${words}[^/]*\\.msi$`, 'i'));
+          if (msi) return msi;
+        }
+        // Windows on ARM runs the x64 installer when there is no arm64 one.
+        return find(new RegExp(`[._-]${words}-setup\\.exe$`, 'i'))
+          || (m.arch === 'aarch64' ? find(/[._-](?:x86_64|amd64|x64)-setup\.exe$/i) : null);
+      }
+      case 'linux': {
+        const ending = { deb: '\\.deb', rpm: '\\.rpm', appimage: '\\.AppImage' }[m.bundle];
+        if (ending) return find(new RegExp(`[._-]${words}${ending}$`, 'i'));
+        if (/^(arch|manjaro|endeavouros|garuda|artix)$/.test(m.distro)) return find(new RegExp(`-${words}\\.pkg\\.tar\\.zst$`, 'i'));
+        return find(new RegExp(`linux-${words}\\.tar\\.gz$`, 'i'));
+      }
       default:
-        // iOS included: the App Store is the only route, so send them to the
-        // page rather than to a file they cannot open.
         return null;
     }
+  }
+
+  /** The release's checksums, which a download is checked against. */
+  function sumsAsset(assets) {
+    const found = (assets || []).find((asset) => /^SHA256SUMS(\.txt)?$/i.test(String(asset.name || '')));
+    return found ? { name: String(found.name), url: String(found.browser_download_url || '') } : null;
   }
 
   /**
@@ -140,7 +178,7 @@
    * someone because it could not reach the internet is worse than one that
    * says nothing.
    */
-  async function fetchLatest() {
+  async function fetchLatest(info = null) {
     try {
       const response = await fetch(LATEST, {
         headers: { Accept: 'application/vnd.github+json' },
@@ -154,7 +192,8 @@
         version,
         notes: String(release?.body || '').trim(),
         page: String(release?.html_url || RELEASES_PAGE),
-        asset: pickAsset(release?.assets),
+        asset: pickAsset(release?.assets, info),
+        sums: sumsAsset(release?.assets),
       };
     } catch (_error) {
       return null;
@@ -195,7 +234,10 @@
        button, and stay quiet otherwise -- announcing an update on the strength
        of a version we could not read is how this went wrong the first time. */
     if (!running) return manual ? { error: true } : null;
-    const latest = await fetchLatest();
+    /* The shell's own word on what it is, so the file offered is the one installed. */
+    let info = null;
+    try { info = window.PoorijaDesktop?.platformInfo ? await window.PoorijaDesktop.platformInfo() : null; } catch (_error) { info = null; }
+    const latest = await fetchLatest(info);
     try { localStorage.setItem(LAST_SEEN_KEY, String(Date.now())); } catch (_error) { /* ignore */ }
     if (!latest) return manual ? { error: true } : null;
     if (!isNewer(latest.version, running)) {
@@ -211,6 +253,7 @@
     eligible,
     isNewer,
     pickAsset,
+    sumsAsset,
     platform,
     releasesPage: RELEASES_PAGE,
     t,

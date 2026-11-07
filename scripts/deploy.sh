@@ -21,6 +21,12 @@
 #   bash scripts/deploy.sh --reconfigure   # ask for the server details again
 #   bash scripts/deploy.sh --edit          # open the saved settings in $EDITOR
 #   bash scripts/deploy.sh --where         # print where the settings are kept
+#
+# A server with no .env yet is installed first: the domain, the certificate
+# (one already on the server, a new one from Let's Encrypt, or self-signed)
+# and the email are asked here, or given with --domain, --email, --cert
+# found|found-owner|letsencrypt|self-signed and --cert-dir DIR (--yes takes
+# the defaults without asking).
 #   bash scripts/deploy.sh --help
 #
 # Settings live OUTSIDE this repository, in
@@ -101,6 +107,7 @@ MODE="deploy"
 SKIP_BUMP=""
 PREBUILT=""
 WANT_RECONFIGURE=0
+FIRST_DOMAIN="" FIRST_EMAIL="" FIRST_CERT="" FIRST_CERT_DIR="" FIRST_YES=0
 ONLY_SERVER=""
 # A while loop rather than `for arg in "$@"`, because --server takes a value
 # and `shift` inside a for loop does not move what the for loop is walking:
@@ -118,6 +125,11 @@ while [ $# -gt 0 ]; do
             [ -n "$ONLY_SERVER" ] || { fail "--server needs a name."; exit 2; }
             shift ;;
         --server=*) ONLY_SERVER="${1#*=}" ;;
+        --domain) FIRST_DOMAIN="${2:-}"; shift ;;
+        --email) FIRST_EMAIL="${2:-}"; shift ;;
+        --cert) FIRST_CERT="${2:-}"; shift ;;
+        --cert-dir) FIRST_CERT_DIR="${2:-}"; shift ;;
+        --yes|-y) FIRST_YES=1 ;;
         --edit) MODE="edit" ;;
         --where|--config) MODE="where" ;;
         --help|-h) usage; exit 0 ;;
@@ -343,6 +355,11 @@ if [ -n "${SERVERS:-}" ] && [ -z "${POORIJA_SERVER_NAME:-}" ]; then
     [ "$MODE" = "dry-run" ] && ARGS+=(--dry-run)
     [ -n "$SKIP_BUMP" ] && ARGS+=("$SKIP_BUMP")
     [ -n "$PREBUILT" ] && ARGS+=("$PREBUILT")
+    [ -n "$FIRST_DOMAIN" ] && ARGS+=(--domain "$FIRST_DOMAIN")
+    [ -n "$FIRST_EMAIL" ] && ARGS+=(--email "$FIRST_EMAIL")
+    [ -n "$FIRST_CERT" ] && ARGS+=(--cert "$FIRST_CERT")
+    [ -n "$FIRST_CERT_DIR" ] && ARGS+=(--cert-dir "$FIRST_CERT_DIR")
+    [ "$FIRST_YES" = 1 ] && ARGS+=(--yes)
     if [ -n "$PREBUILT" ] && [ "$MODE" = "deploy" ]; then
         prebuilt_build || exit 1
         export POORIJA_PREBUILT_DONE=1
@@ -461,6 +478,17 @@ HOST="${POORIJA_SSH_HOST:-$SSH_HOST}"
 USER_NAME="${POORIJA_SSH_USER:-${SSH_USER:-$USER}}"
 PORT="${POORIJA_SSH_PORT:-${SSH_PORT:-22}}"
 KEY="${POORIJA_SSH_KEY:-${SSH_KEY:-}}"
+# A key written as ~/.ssh/<name> (the central panel writes it so, the same
+# path on this computer and in its container) is quoted in deploy.conf, so
+# the shell never expanded the ~: the file test below failed, -i was left out
+# without a word, and ssh offered only its default keys, which the server
+# refused although the right key was in its authorized_keys.
+case "$KEY" in "~/"*) KEY="$HOME/${KEY#\~/}" ;; "~") KEY="$HOME" ;; esac
+if [ -n "$KEY" ] && [ ! -f "$KEY" ]; then
+    fail "The SSH key $KEY named in deploy.conf is not there."
+    echo "  Fix the path with: bash scripts/deploy.sh --edit"
+    exit 2
+fi
 REMOTE_DIR="${POORIJA_REMOTE_DIR:-${REMOTE_DIR:-}}"
 PUBLIC_URL="${POORIJA_PUBLIC_URL:-${PUBLIC_URL:-https://$HOST:8585}}"
 # What this server is FOR, which decides what gets copied to it and what is
@@ -503,6 +531,7 @@ SSH_OPTS=(-p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyCheck
 JUMP_OPTS=()
 if [ -n "${POORIJA_SSH_JUMP:-}" ]; then
     jump_target="${POORIJA_SSH_JUMP%%|*}"; jump_key="${POORIJA_SSH_JUMP#*|}"
+    case "$jump_key" in "~/"*) jump_key="$HOME/${jump_key#\~/}" ;; esac
     jump_port="${jump_target##*:}"; jump_target="${jump_target%:*}"
     # ssh hands ProxyCommand to a shell: every part that came from deploy.conf
     # is quoted for it, so a key path with a space (or anything worse) stays
@@ -753,9 +782,22 @@ for tool in audit-dom audit-i18n audit-handlers check-nginx-routes; do
     fi
 done
 
-log "Checking key-based access to $USER_NAME@$HOST:$PORT"
-if ! remote 'echo ok' >/dev/null 2>&1; then
-    fail "Cannot log in without a password."
+log "Checking key-based access to $USER_NAME@$HOST:$PORT${KEY:+ with $KEY}"
+ACCESS_ERR="$(remote 'echo ok' 2>&1 >/dev/null)" && ACCESS_OK=1 || ACCESS_OK=0
+# Only a refused key is a missing key: anything else (the server not
+# answering, a changed host key) is said for what it is, since copying the key
+# again would not fix it.
+if [ "$ACCESS_OK" = 0 ] && ! printf '%s' "$ACCESS_ERR" | grep -qi 'permission denied'; then
+    fail "Cannot reach $USER_NAME@$HOST:$PORT over SSH:"
+    printf '%s\n' "$ACCESS_ERR" | grep -v '^Warning: Permanently added' | tail -n 3 | sed 's/^/    /'
+    if printf '%s' "$ACCESS_ERR" | grep -qi 'host key verification failed\|REMOTE HOST IDENTIFICATION HAS CHANGED'; then
+        echo "  The server's host key is not the one this computer knows. If the server was reinstalled, remove the old one:"
+        echo "      ssh-keygen -R '$HOST'"
+    fi
+    exit 2
+fi
+if [ "$ACCESS_OK" = 0 ]; then
+    fail "Cannot log in without a password (the server refused ${KEY:-the default keys})."
     echo
     echo "  Authorise this machine's key once — you type your own password,"
     echo "  it is never handled by anything else:"
@@ -960,6 +1002,96 @@ if ! remote 'docker ps >/dev/null 2>&1'; then
     echo "      bash scripts/deploy.sh --check"
     exit 1
 fi
+
+# ------------------------------------------------------- a server's first install
+#
+# A server that has never run this stack has no .env, and compose cannot start
+# without one (the domain, the certificate, the secrets). It is written once,
+# on the server, by the same unattended installer a hand install uses
+# (scripts/setup.sh --quick): only the answers come from here. The secrets are
+# made on the server and stay in its .env (mode 600); none of them travels.
+ask_here() { # ask_here VAR "question" default — from the terminal, or the default with --yes / no terminal
+    local var="$1" question="$2" default="${3:-}" answer=""
+    if [ "$FIRST_YES" != 1 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '  %s%s: ' "$question" "${default:+ [$default]}" > /dev/tty
+        IFS= read -r answer < /dev/tty || answer=""
+    fi
+    printf -v "$var" '%s' "${answer:-$default}"
+}
+if [ "$ROLE" = "app" ] && [ "$MODE" = "deploy" ] && ! remote "test -f '$REMOTE_DIR/.env'" 2>/dev/null; then
+    log "$HOST has no .env yet: installing it for the first time"
+    default_domain="$(printf '%s' "$PUBLIC_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
+    domain="$FIRST_DOMAIN"
+    [ -n "$domain" ] || ask_here domain "Domain (or IP) this server answers at" "$default_domain"
+    printf '%s' "$domain" | grep -Eq '^[A-Za-z0-9.-]{1,253}$' || { fail "Not a domain or an address: $domain"; exit 2; }
+
+    # A certificate already on the server — 3X-UI's /root/cert/<domain>/,
+    # certbot's live/<domain>/, acme.sh's — is looked for with the same
+    # helper the installer uses (it reads root's folders through docker).
+    log "Looking for a certificate already on the server for $domain"
+    found="$(remote 'bash -s' 2>/dev/null <<FIND
+cd '$REMOTE_DIR' 2>/dev/null || exit 0
+. scripts/lib/cert-folder.sh 2>/dev/null || exit 0
+want='$FIRST_CERT_DIR'
+for dir in \${want:+"\$want"} /root/cert/$domain /etc/letsencrypt/live/$domain "\$HOME/.acme.sh/${domain}_ecc" "\$HOME/.acme.sh/$domain" /root/.acme.sh/${domain}_ecc /root/.acme.sh/$domain /root/cert; do
+  if cert_find_pair "\$dir" '$domain' 2>/dev/null; then
+    printf '%s|%s|%s|%s\n' "\$dir" "\$CERT_PAIR_END" "\$CERT_PAIR_COVERS" "\$CERT_PAIR_SELF_SIGNED"
+    exit 0
+  fi
+done
+FIND
+)"
+    found_dir="${found%%|*}"
+    if [ -n "$found_dir" ]; then
+        rest="${found#*|}"; found_end="${rest%%|*}"; rest="${rest#*|}"; found_covers="${rest%%|*}"
+        ok "certificate found in $found_dir (expires $found_end)$( [ "$found_covers" = no ] && printf ' — it does not name %s' "$domain")"
+    else
+        dim "  none found"
+    fi
+    public=0
+    case "$domain" in localhost|127.*|10.*|192.168.*|169.254.*) ;; *) public=1 ;; esac
+    cert="$FIRST_CERT"
+    if [ -z "$cert" ]; then
+        if [ -n "$found_dir" ]; then default_cert=found; elif [ "$public" = 1 ]; then default_cert=letsencrypt; else default_cert=self-signed; fi
+        if [ "$FIRST_YES" != 1 ] && [ -r /dev/tty ]; then
+            {
+                echo "  The certificate:"
+                [ -n "$found_dir" ] && echo "    found        the one in $found_dir, renewed by this server in that folder"
+                [ -n "$found_dir" ] && echo "    found-owner  the one in $found_dir, renewed by whoever already renews it"
+                [ "$public" = 1 ] && echo "    letsencrypt  a new one from Let's Encrypt (port 80 must reach this server)"
+                echo "    self-signed  made on the server; browsers warn about it"
+            } > /dev/tty
+        fi
+        ask_here cert "Which" "$default_cert"
+    fi
+    case "$cert" in
+        found|found-owner) [ -n "$found_dir" ] || { fail "No certificate was found on the server to use."; exit 2; } ;;
+        letsencrypt) [ "$public" = 1 ] || { fail "Let's Encrypt cannot certify $domain."; exit 2; } ;;
+        self-signed) ;;
+        *) fail "--cert takes found, found-owner, letsencrypt or self-signed (got $cert)"; exit 2 ;;
+    esac
+    email="$FIRST_EMAIL"
+    if [ "$cert" = letsencrypt ] || [ "$cert" = found ]; then
+        [ -n "$email" ] || ask_here email "Email for Let's Encrypt (renewal notices)" ""
+        [ -z "$email" ] || printf '%s' "$email" | grep -Eq '^[^[:space:]'"'"'"\\]+@[^[:space:]'"'"'"\\]+$' || { fail "Not an email address: $email"; exit 2; }
+    fi
+    quick=(--quick --domain "$domain" --no-start)
+    [ -n "$email" ] && quick+=(--email "$email")
+    case "$cert" in
+        found) quick+=(--cert-dir "$found_dir" --letsencrypt) ;;
+        found-owner) quick+=(--cert-dir "$found_dir") ;;
+        letsencrypt) quick+=(--letsencrypt) ;;
+        self-signed) quick+=(--self-signed) ;;
+    esac
+    log "Writing $REMOTE_DIR/.env on the server ($cert)"
+    if ! remote "cd '$REMOTE_DIR' && bash scripts/setup.sh $(printf '%q ' "${quick[@]}")" 2>&1 | sed 's/^/  /'; then
+        fail "The first install did not finish; nothing was started."
+        exit 1
+    fi
+    remote "test -f '$REMOTE_DIR/.env'" || { fail "setup.sh wrote no .env."; exit 1; }
+    ok ".env written (mode 600). The dashboard password is MONITOR_PASSWORD in it: the central panel asks for it once."
+fi
+
 # The images built here, pulled through a reverse tunnel to the registry on
 # this machine's 127.0.0.1: only the layers this server lacks travel.
 prebuilt_pull() {

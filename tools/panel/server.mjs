@@ -42,6 +42,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { configDir, loadState, editRelay, applyEdit, serverEntry, initKey, signDraft, saveDraft, saveSigned, parseDeployConf } from '../relay-directory.mjs';
 import { buildGraph } from './web/graphdata.js';
@@ -55,7 +56,12 @@ import { stepUp, changePassword, beginTotp, confirmTotp, history } from './accou
 import { qrSvg } from './qr.mjs';
 import { readServers, setServer, removeServer, setField, writeConf, validName, SERVER_KEYS } from './deployconf.mjs';
 import { clusterView, planClusterChange, rotateOperator } from './family.mjs';
-import { startJob, startTask, jobView } from './jobs.mjs';
+import { startTask, jobView } from './jobs.mjs';
+import { createUpdates } from './updates.mjs';
+import { createBuilds } from './builds.mjs';
+import { createProvision, validSudoPassword, ACCESS_OK } from './provision.mjs';
+import { createMetrics, readingFrom } from './metrics.mjs';
+import { run } from './run.mjs';
 
 const require = createRequire(import.meta.url);
 const signatures = require('../../scripts/lib/operator-signature.js');
@@ -74,6 +80,12 @@ const LOCK_PATH = '/control-panel/lock';
 const DIRECTORY_PATH = '/control-panel/directory';
 const LAYOUT_FILE = 'control-panel-layout.json';
 const SESSIONS_FILE = 'control-panel-sessions.json';
+const MIRRORS_FILE = 'control-panel-mirrors.json';
+/* Docker Hub mirrors inside Iran that answered from two Iranian providers on
+   2026-11-03, a user namespace (coturn/coturn) pulled by prefix, as the
+   installer pulls, and a layer fetched; quickest first. Those typed by hand
+   are kept beside them (MIRRORS_FILE). */
+const REGISTRY_MIRRORS = ['docker.mobinhost.com', 'mirror-docker.runflare.com', 'docker.abrha.net', 'focker.ir', 'registry.docker.ir', 'docker.iranserver.com'];
 
 const say = (line) => process.stdout.write(`${line}\n`);
 
@@ -85,6 +97,14 @@ let audit = () => {};
 let loginFile = '';
 let layoutFile = '';
 let sessionsFile = '';
+let mirrorsFile = '';
+let updates = null;
+let builds = null;
+let provision = null;
+let metrics = null;
+let notesFile = '';
+let bookFile = '';
+const accessTries = new Map();
 let auditFile = '';
 let configPath = '';
 let allowedOrigins = new Set();
@@ -280,6 +300,81 @@ printf 'version=%s\\n' "$(curl -sk --max-time 5 https://127.0.0.1:8585/ 2>/dev/n
 `;
 const shellArg = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 
+/* Registry mirrors typed by hand at an install, newest first. */
+function savedMirrors() {
+  const list = readJsonFile(mirrorsFile)?.mirrors;
+  return Array.isArray(list) ? list.filter((mirror) => typeof mirror === 'string' && /^[A-Za-z0-9.:/-]{1,200}$/.test(mirror)) : [];
+}
+
+/* The admin address book: other admins' public box keys. */
+const adminBook = () => { const list = readJsonFile(bookFile); return Array.isArray(list) ? list : []; };
+
+/* What another admin sent, opened in this browser and applied here. Every
+   part is checked again as if typed in the page; nothing is removed, a
+   server of the same name is replaced. */
+async function importShare(req, res, body, who) {
+  const parts = body.parts && typeof body.parts === 'object' ? body.parts : {};
+  const applied = {};
+  try {
+    if (parts.servers !== undefined) {
+      if (!Array.isArray(parts.servers) || parts.servers.length > 64) throw new Error('servers');
+      const existing = new Set(readServers(confText()).map((server) => server.name));
+      const replace = new Set(Array.isArray(body.replace) ? body.replace.map(String) : []);
+      for (const entry of parts.servers) {
+        if (!validName(String(entry?.name || ''))) throw new Error(`server name ${String(entry?.name || '').slice(0, 20)}`);
+        const fields = { ...(entry.fields || {}) };
+        if (!String(fields.SSH_USER || '').trim()) throw new Error(`${entry.name}: no SSH user`);
+        if (fields.SSH_KEY && !String(fields.SSH_KEY).includes('/')) fields.SSH_KEY = `~/.ssh/${fields.SSH_KEY}`;
+        cleanFields(fields);
+        /* A server this panel already has is replaced only when the admin
+           ticked it, after seeing what would change. */
+        if (existing.has(entry.name) && !replace.has(entry.name)) throw new Error(`${entry.name} is already here; tick it to replace it`);
+      }
+      if (!configWritable()) return sendJson(res, 409, { ok: false, reason: 'read-only' });
+    }
+    if (parts.mirrors !== undefined && (!Array.isArray(parts.mirrors) || parts.mirrors.length > 50)) throw new Error('mirrors');
+    if (parts.partnerNotes !== undefined && (typeof parts.partnerNotes !== 'object' || Array.isArray(parts.partnerNotes) || Object.keys(parts.partnerNotes).length > 200)) throw new Error('partnerNotes');
+    if (parts.layout !== undefined && (typeof parts.layout !== 'object' || Array.isArray(parts.layout))) throw new Error('layout');
+  } catch (error) { return sendJson(res, 400, { ok: false, reason: 'bad-share', detail: error.message }); }
+  if (!confirmCode(req, res, body.code)) return undefined;
+  if (parts.servers) {
+    let text = confText();
+    const here = Object.fromEntries(readServers(text).map((server) => [server.name, server.fields]));
+    for (const entry of parts.servers) {
+      const fields = { ...(entry.fields || {}) };
+      if (fields.SSH_KEY && !String(fields.SSH_KEY).includes('/')) fields.SSH_KEY = `~/.ssh/${fields.SSH_KEY}`;
+      /* A replaced server keeps this panel's own SSH key. */
+      if (here[entry.name]?.SSH_KEY) fields.SSH_KEY = here[entry.name].SSH_KEY;
+      text = setServer(text, entry.name, cleanFields(fields));
+    }
+    writeConf(configPath, text);
+    applied.servers = parts.servers.length;
+  }
+  if (parts.mirrors) {
+    const typed = parts.mirrors.map((mirror) => String(mirror).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')).filter((mirror) => /^[A-Za-z0-9.-]{1,200}(:[0-9]{1,5})?(\/[A-Za-z0-9._-]+)*$/.test(mirror) && !REGISTRY_MIRRORS.includes(mirror));
+    writePrivateJson(mirrorsFile, { mirrors: [...new Set([...typed, ...savedMirrors()])].slice(0, 12) });
+    applied.mirrors = typed.length;
+  }
+  if (parts.partnerNotes) {
+    const clean = (value, max) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
+    const notes = readJsonFile(notesFile) || {};
+    let count = 0;
+    for (const [key, note] of Object.entries(parts.partnerNotes)) {
+      if (!/^[0-9a-f]{16}$/.test(key) || !note || typeof note !== 'object') continue;
+      notes[key] = { label: clean(note.label, 60), contact: clean(note.contact, 120), notes: clean(note.notes, 1000), tags: clean(note.tags, 120), at: new Date().toISOString() };
+      count += 1;
+    }
+    writePrivateJson(notesFile, notes);
+    applied.partnerNotes = count;
+  }
+  if (parts.layout) {
+    const positions = Object.fromEntries(Object.entries(parts.layout).filter(([key]) => NODE_KEY.test(key)).slice(0, 500));
+    if (Object.keys(positions).length && saveLayout({ positions }).status === 200) applied.layout = Object.keys(positions).length;
+  }
+  audit(`${who.user} applied panel settings from ${String(body.from || '').slice(0, 64)}: ${Object.entries(applied).map(([part, count]) => `${part} ${count}`).join(', ')}`);
+  return sendJson(res, 200, { ok: true, applied });
+}
+
 async function serversRoute(req, res, url, body, who) {
   if (url.pathname === '/api/servers/test') {
     /* Each test is a login somewhere: a few a minute per session. */
@@ -293,6 +388,10 @@ async function serversRoute(req, res, url, body, who) {
     const keys = path.join(os.homedir(), '.ssh');
     if (ssh.key && !path.resolve(ssh.key).startsWith(`${keys}${path.sep}`)) return sendJson(res, 400, { ok: false, reason: 'key-outside-ssh-folder' });
     if (ssh.key && !fs.existsSync(ssh.key)) return sendJson(res, 200, { ok: false, problem: 'key-missing', detail: `no key ${path.basename(ssh.key)} in the SSH folder` });
+    /* An empty user is not "whoever runs the panel": in its container that is
+       `node`, which no server has, and the login it made was refused as a
+       wrong key. The form asks for the user; the server is told it is missing. */
+    if (!fields.SSH_USER) return sendJson(res, 200, { ok: false, problem: 'user-missing' });
     const run = await onServerAsync(ssh, PROBE, 30000);
     audit(`${who.user} tested ${fields.SSH_USER || ''}@${fields.SSH_HOST}: ${run.ok ? 'answered' : 'no answer'}`);
     if (!run.ok) return sendJson(res, 200, { ok: false, problem: sshFailure(run.err) || 'unreachable', detail: String(run.err).trim().split('\n').pop()?.slice(0, 200) || '' });
@@ -307,6 +406,8 @@ async function serversRoute(req, res, url, body, who) {
       fields = cleanFields(body.fields);
     } catch (error) { return sendJson(res, 400, { ok: false, reason: error.message }); }
     if (!configWritable()) return sendJson(res, 409, { ok: false, reason: 'read-only' });
+    /* Asked for, never filled in with the panel's own user (see the test route). */
+    if (!fields.SSH_USER) return sendJson(res, 400, { ok: false, reason: 'user-missing' });
     if (!confirmCode(req, res, body.code)) return undefined;
     try { writeConf(configPath, setServer(confText(), name, fields)); } catch (error) { return sendJson(res, 400, { ok: false, reason: error.message }); }
     audit(`${who.user} saved server ${name} in deploy.conf`);
@@ -321,34 +422,110 @@ async function serversRoute(req, res, url, body, who) {
     audit(`${who.user} removed server ${name} from deploy.conf`);
     return sendJson(res, 200, { ok: true });
   }
+  if (url.pathname === '/api/servers/access') {
+    /* What the SSH user may do there: one sudo attempt per click, a few a
+       minute per session (a wrong password tried again and again can lock
+       the account). The password is passed through, never kept or logged. */
+    const server = servers.find((candidate) => candidate.name === body.name);
+    if (!server?.ssh) return sendJson(res, 404, { ok: false, reason: 'no-such-server' });
+    if (SSH_FAILURES.has(server.sshState)) return sendJson(res, 409, { ok: false, reason: server.sshState });
+    const password = String(body.sudoPassword || '');
+    if (!validSudoPassword(password)) return sendJson(res, 400, { ok: false, reason: 'bad-sudo-password' });
+    /* At most three sudo tries per server in ten minutes, whoever asks; each
+       takes a current code, as installing does. */
+    const tries = (accessTries.get(server.name) || []).filter((at) => Date.now() - at < 10 * 60 * 1000);
+    if (password && tries.length >= 3) return sendJson(res, 429, { ok: false, reason: 'too-many-tests' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    if (password) accessTries.set(server.name, [...tries, Date.now()]);
+    const answer = await provision.access(server, password);
+    audit(`${who.user} checked access on ${server.name}: ${answer.facts.access || 'no answer'}`);
+    return sendJson(res, 200, { ok: answer.ok, access: answer.facts.access || '', user: answer.facts.user || '', dockerGroup: answer.facts.dockerGroup === '1' });
+  }
+  if (url.pathname === '/api/servers/check' || url.pathname === '/api/servers/prepare') {
+    const server = servers.find((candidate) => candidate.name === body.name);
+    if (!server?.ssh) return sendJson(res, 404, { ok: false, reason: 'no-such-server' });
+    if (SSH_FAILURES.has(server.sshState)) return sendJson(res, 409, { ok: false, reason: server.sshState });
+    if (url.pathname === '/api/servers/check') {
+      const recent = (testsBy.get(who.key) || []).filter((at) => Date.now() - at < 60000);
+      if (recent.length >= 10) return sendJson(res, 429, { ok: false, reason: 'too-many-tests' });
+      testsBy.set(who.key, [...recent, Date.now()]);
+      const answer = await provision.check(server);
+      return sendJson(res, 200, { ok: answer.ok, facts: answer.facts, reason: answer.ok ? '' : `exit-${answer.code}` });
+    }
+    const sudoPassword = String(body.sudoPassword || '');
+    if (!validSudoPassword(sudoPassword)) return sendJson(res, 400, { ok: false, reason: 'bad-sudo-password' });
+    if (!confirmCode(req, res, body.code)) return undefined;
+    const job = startTask(`prerequisites on ${server.name}`, async (line) => {
+      await provision.prepare(server, line, { sudoPassword });
+      audit(`prerequisites on ${server.name} ready`);
+    });
+    audit(`${who.user} prerequisites on ${server.name} started`);
+    return sendJson(res, 200, { ok: true, job });
+  }
   if (url.pathname === '/api/servers/install') {
     const server = servers.find((candidate) => candidate.name === body.name);
     if (!server?.ssh) return sendJson(res, 404, { ok: false, reason: 'no-such-server' });
-    const domain = String(body.domain || '');
-    const email = String(body.email || '');
-    const registry = String(body.registry || '');
-    if (!/^[A-Za-z0-9.-]{1,253}$/.test(domain) || (email && !/^[^\s'"\\]+@[^\s'"\\]+$/.test(email)) || (registry && !/^[A-Za-z0-9.:/-]{1,200}$/.test(registry))) {
-      return sendJson(res, 400, { ok: false, reason: 'bad-options' });
-    }
+    const domain = String(body.domain || '').trim();
+    const email = String(body.email || '').trim();
+    /* A mirror pasted as a link (https://focker.ir/) is its name. */
+    const registry = String(body.registry || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    /* A certificate the server already has — 3X-UI's /root/cert/<domain>/ —
+       is served where it is: the installer finds it, or serves the folder
+       named here, and this server renews it there (here) or its owner does. */
+    const certDir = String(body.certDir || '').trim();
+    const certRenew = String(body.certRenew || 'owner');
+    /* Each refusal names its field, so the page can say which one. An empty
+       domain is no refusal: the installer takes the server's public address. */
+    const refusal = (domain && !/^[A-Za-z0-9.-]{1,253}$/.test(domain) && 'bad-domain')
+      || (email && !/^[^\s'"\\]+@[^\s'"\\]+$/.test(email) && 'bad-email')
+      || (registry && !/^[A-Za-z0-9.-]{1,200}(:[0-9]{1,5})?(\/[A-Za-z0-9._-]+)*$/.test(registry) && 'bad-registry')
+      || (certDir && !/^\/[A-Za-z0-9._/@+-]{1,250}$/.test(certDir) && 'bad-cert-dir')
+      || (!['here', 'owner'].includes(certRenew) && 'bad-renew');
+    const sudoPassword = String(body.sudoPassword || '');
+    const saysSudo = body.sudo === true;
+    if (refusal) return sendJson(res, 400, { ok: false, reason: refusal });
+    if (!validSudoPassword(sudoPassword)) return sendJson(res, 400, { ok: false, reason: 'bad-sudo-password' });
     if (SSH_FAILURES.has(server.sshState)) return sendJson(res, 409, { ok: false, reason: server.sshState });
     if (!confirmCode(req, res, body.code)) return undefined;
     /* The panel's own copies of the installer and its compose file go with it,
        so a server installs the release the panel is. */
     const installer = fs.readFileSync(path.join(HERE, '..', '..', 'scripts', 'docker-install.sh')).toString('base64');
     const compose = fs.readFileSync(path.join(HERE, '..', '..', 'docker', 'compose.yaml')).toString('base64');
-    const options = [`--domain ${shellArg(domain)}`, ...(email ? [`--email ${shellArg(email)}`] : []), ...(registry ? [`--registry ${shellArg(registry)}`] : [])].join(' ');
+    const options = [...(domain ? [`--domain ${shellArg(domain)}`] : []), ...(email ? [`--email ${shellArg(email)}`] : []), ...(registry ? [`--registry ${shellArg(registry)}`] : []),
+      ...(body.newCert === true ? ['--new-cert'] : [...(certDir ? [`--cert-dir ${shellArg(certDir)}`] : []), ...(certRenew === 'here' ? ['--letsencrypt'] : [])])].join(' ');
     const script = `set -e
 mkdir -p ~/p00rija-installer/scripts ~/p00rija-installer/docker
 printf '%s' '${installer}' | base64 -d > ~/p00rija-installer/scripts/docker-install.sh
 printf '%s' '${compose}' | base64 -d > ~/p00rija-installer/docker/compose.yaml
 bash ~/p00rija-installer/scripts/docker-install.sh --yes ${options} < /dev/null
 `;
+    if (registry && !REGISTRY_MIRRORS.includes(registry)) {
+      const saved = savedMirrors().filter((mirror) => mirror !== registry);
+      writePrivateJson(mirrorsFile, { mirrors: [registry, ...saved].slice(0, 12) });
+    }
     const name = server.name;
-    const job = startJob(`install on ${name}`, ['ssh', ...sshArgs(server.ssh), 'bash -s'], {
-      input: script,
-      onDone: (done) => audit(`install on ${name} finished (exit ${done.code})`),
+    /* Docker and the rest first, where missing (provision.mjs): a fresh
+       server needs nothing done by hand before the panel installs on it. */
+    const prepare = body.prepare !== false;
+    const job = startTask(`install on ${name}`, async (line) => {
+      /* First: what this user may do there. Told it has sudo, it must; a sudo
+         that asks for a password needs the one typed in the dialog. */
+      line(`▶ ${name}: the SSH user's access`);
+      const access = await provision.access(server, sudoPassword);
+      const what = access.facts.access || '';
+      line(`  ${access.facts.user || '?'}: ${what || 'no answer'}${access.facts.dockerGroup === '1' ? ' (in the docker group)' : ''}`);
+      if (!access.ok) throw new Error('the server did not answer the access check');
+      if (saysSudo && !ACCESS_OK.has(what)) {
+        throw new Error(what === 'needs-password' ? 'this user’s sudo asks for a password: type it in the install dialog' : what === 'no-sudo' ? 'sudo is not installed on that server' : 'this user has no sudo there (and is not root)');
+      }
+      if (!ACCESS_OK.has(what)) line('  ! not root and no usable sudo: only what needs no root can be done (Docker must already be there, with this user in its group)');
+      if (prepare) await provision.prepare(server, line, { sudoPassword: ACCESS_OK.has(what) ? sudoPassword : '' });
+      line(`▶ ${name}: the installer`);
+      const code = await run(['ssh', ...sshArgs(server.ssh), 'bash -s'], { input: Readable.from([script]), line });
+      audit(`install on ${name} finished (exit ${code})`);
+      if (code !== 0) throw new Error(`the installer stopped (exit ${code})`);
     });
-    audit(`${who.user} install on ${name} started (${domain})`);
+    audit(`${who.user} install on ${name} started (${domain || 'its public address'})`);
     return sendJson(res, 200, { ok: true, job });
   }
   return sendJson(res, 404, { ok: false });
@@ -575,6 +752,10 @@ async function graphData() {
 /* Where the admin dragged the nodes: on this computer only, never on a server. */
 const NODE_KEY = /^(relay|partner):[a-f0-9]{16}$/;
 function saveLayout(body) {
+  if (body?.reset === true) {
+    fs.writeFileSync(layoutFile, '{}\n', { mode: 0o600 });
+    return { status: 200 };
+  }
   const positions = body?.positions;
   if (!positions || typeof positions !== 'object' || Array.isArray(positions)) return { status: 400, reason: 'bad-layout' };
   const entries = Object.entries(positions);
@@ -941,6 +1122,7 @@ async function api(req, res, url, who) {
       try { lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n').slice(-300).reverse(); } catch (_error) { lines = []; }
       return sendJson(res, 200, { ok: true, lines });
     }
+    if (url.pathname === '/api/updates' || url.pathname.startsWith('/api/updates/')) return updates.get(req, res, url);
     if (url.pathname === '/api/servers-config') {
       return sendJson(res, 200, { ok: true, writable: configWritable(), keys: sshKeysHere(), servers: readServers(confText()) });
     }
@@ -948,11 +1130,23 @@ async function api(req, res, url, who) {
       const view = jobView(url.searchParams.get('id'));
       return view ? sendJson(res, 200, view) : sendJson(res, 404, { ok: false });
     }
+    if (url.pathname === '/api/servers/mirrors') {
+      return sendJson(res, 200, { ok: true, mirrors: [...REGISTRY_MIRRORS, ...savedMirrors().filter((mirror) => !REGISTRY_MIRRORS.includes(mirror))] });
+    }
     if (url.pathname === '/api/servers/deploy-command') {
       const name = String(url.searchParams.get('name') || '');
       if (!validName(name)) return sendJson(res, 400, { ok: false });
       return sendJson(res, 200, { ok: true, command: `bash scripts/deploy.sh --skip-bump --prebuilt --server ${name}` });
     }
+    if (url.pathname === '/api/metrics') {
+      /* A page's own polling asks for the graphs too: that is someone looking. */
+      metrics.wanted(Number(url.searchParams.get('pace')) || undefined);
+      const fields = String(url.searchParams.get('fields') || '').split(',').filter((key) => /^[A-Za-z]{1,20}$/.test(key)).slice(0, 30);
+      return sendJson(res, 200, metrics.series(String(url.searchParams.get('range') || '1h'), { fields: fields.length ? fields : null, maxPoints: Number(url.searchParams.get('points')) || 400 }));
+    }
+    if (url.pathname === '/api/builds' || url.pathname.startsWith('/api/builds/')) return builds.get(req, res, url);
+    if (url.pathname === '/api/partner-notes') return sendJson(res, 200, { ok: true, notes: readJsonFile(notesFile) || {} });
+    if (url.pathname === '/api/admin-book') return sendJson(res, 200, { ok: true, book: adminBook() });
     if (url.pathname === '/api/account') {
       return sendJson(res, 200, {
         ok: true, user: who.user,
@@ -972,6 +1166,47 @@ async function api(req, res, url, who) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return sendJson(res, 400, { ok: false, reason: 'bad-json' });
   if (url.pathname.startsWith('/api/account/')) return account(req, res, url, body, who);
   if (url.pathname.startsWith('/api/servers/')) return serversRoute(req, res, url, body, who);
+  if (url.pathname.startsWith('/api/updates/')) return updates.post(req, res, url, body, who);
+  if (url.pathname.startsWith('/api/builds/')) return builds.post(req, res, url, body, who);
+  if (url.pathname === '/api/admin-book') {
+    /* Other admins' box keys, which shares are sealed to: public halves only. */
+    const book = adminBook();
+    if (body.remove !== undefined) {
+      const key = String(body.remove);
+      writePrivateJson(bookFile, book.filter((entry) => entry.keyId !== key && entry.id !== key));
+      audit(`${who.user} removed a box key from the admin book`);
+      return sendJson(res, 200, { ok: true });
+    }
+    const entry = body.entry || {};
+    const keyId = String(entry.keyId || '');
+    const name = String(entry.name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 64);
+    const box = String(entry.box || '').trim();
+    if ((keyId && !/^[0-9a-f]{64}$/.test(keyId)) || !name || !/^p00rija-box:v1:[A-Za-z0-9+/=]{80,300}$/.test(box) || !/^[0-9a-f]{32}$/.test(String(entry.fingerprint || ''))) return sendJson(res, 400, { ok: false, reason: 'bad-box-key' });
+    const next = book.filter((item) => !(keyId && item.keyId === keyId) && !(!keyId && item.name === name));
+    next.push({ id: crypto.randomBytes(8).toString('hex'), keyId, name, box, fingerprint: String(entry.fingerprint), at: new Date().toISOString() });
+    writePrivateJson(bookFile, next.slice(-64));
+    audit(`${who.user} set the box key of admin ${name} (${String(entry.fingerprint)})`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/share-note') {
+    audit(`${who.user} sealed panel settings for ${String(body.to || '').slice(0, 64)} (${(Array.isArray(body.parts) ? body.parts : []).map(String).join(' ').slice(0, 100)})`);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/import') return importShare(req, res, body, who);
+  if (url.pathname === '/api/partner-notes') {
+    /* The admin's own words about another operator: kept on this panel only,
+       never sent to a server, so changing them needs no code. */
+    const id = String(body.operatorId || '');
+    if (!/^[0-9a-f]{16,64}$/.test(id)) return sendJson(res, 400, { ok: false, reason: 'bad-operator' });
+    const clean = (value, max) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
+    const notes = readJsonFile(notesFile) || {};
+    const key = id.slice(0, 16);
+    if (body.remove === true) delete notes[key];
+    else notes[key] = { label: clean(body.label, 60), contact: clean(body.contact, 120), notes: clean(body.notes, 1000), tags: clean(body.tags, 120), at: new Date().toISOString() };
+    writePrivateJson(notesFile, notes);
+    audit(`${who.user} ${body.remove === true ? 'removed the notes on' : 'wrote notes on'} partner ${key}`);
+    return sendJson(res, 200, { ok: true, notes });
+  }
   if (url.pathname.startsWith('/api/operator/') || url.pathname === '/api/family/bootstrap-admin') return operatorRoute(req, res, url, body, who);
   if (url.pathname === '/api/logout') {
     sessions.delete(who.key);
@@ -1026,6 +1261,16 @@ const ASSETS = {
   '/graphdata.js': ['graphdata.js', 'application/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/admin.js': ['admin.js', 'application/javascript; charset=utf-8'],
+  '/updates.js': ['updates.js', 'application/javascript; charset=utf-8'],
+  '/telegram.js': ['telegram.js', 'application/javascript; charset=utf-8'],
+  '/charts.js': ['charts.js', 'application/javascript; charset=utf-8'],
+  '/overview.js': ['overview.js', 'application/javascript; charset=utf-8'],
+  '/reports.js': ['reports.js', 'application/javascript; charset=utf-8'],
+  '/ops.js': ['ops.js', 'application/javascript; charset=utf-8'],
+  '/build.js': ['build.js', 'application/javascript; charset=utf-8'],
+  '/clusters.js': ['clusters.js', 'application/javascript; charset=utf-8'],
+  '/help.js': ['help.js', 'application/javascript; charset=utf-8'],
+  '/share.js': ['share.js', 'application/javascript; charset=utf-8'],
 };
 /* The brand and the fonts, from the repository itself (CSP stays 'self'). */
 const BRAND = {
@@ -1061,6 +1306,13 @@ async function handle(req, res) {
   /* The version, for the login page's foot: nothing else is said before a login. */
   if (url.pathname === '/api/version' && req.method === 'GET') return sendJson(res, 200, { ok: true, version: VERSION });
   if (!url.pathname.startsWith('/api/')) return sendJson(res, 404, { ok: false });
+  /* An update's tree or package comes as bytes: application/octet-stream,
+     which a form on another site cannot send either. */
+  if (url.pathname === '/api/updates/upload' && req.method === 'POST' && /^application\/octet-stream(;|$)/i.test(String(req.headers['content-type'] || ''))) {
+    const who = sessionOf(req);
+    if (!who) return sendJson(res, 401, { ok: false, reason: 'login' });
+    return updates.upload(req, res, url, who);
+  }
   /* Writes come as JSON only: a form on another site can post, but not JSON. */
   if (req.method === 'POST' && !/^application\/json(;|$)/i.test(String(req.headers['content-type'] || ''))) return sendJson(res, 415, { ok: false, reason: 'json-only' });
   if (url.pathname === '/api/login' && req.method === 'POST') {
@@ -1120,6 +1372,11 @@ async function main() {
   const dir = configDir();
   const stateDir = env.POORIJA_PANEL_STATE_DIR || dir;
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  /* Host keys the panel learns (a server added from the page, met for the
+     first time) are kept beside its other state: in Docker ~/.ssh is a copy
+     made at every start, and a key remembered only there was forgotten, so
+     the pin a first login made would not have held. See sshArgs. */
+  if (!env.POORIJA_PANEL_KNOWN_HOSTS) env.POORIJA_PANEL_KNOWN_HOSTS = path.join(stateDir, 'known_hosts');
   loginFile = path.join(stateDir, LOGIN_FILE);
   layoutFile = path.join(stateDir, LAYOUT_FILE);
   configPath = dir;
@@ -1129,12 +1386,48 @@ async function main() {
   auditFile = path.join(stateDir, LOG_FILE);
   audit = makeAudit(auditFile);
   sessionsFile = path.join(stateDir, SESSIONS_FILE);
+  mirrorsFile = path.join(stateDir, MIRRORS_FILE);
+  updates = createUpdates({
+    stateDir, configDir: () => configPath, servers: () => servers, serverRequest, sshArgs,
+    audit: (line) => audit(line), startTask, confirmCode, sendJson,
+  });
+  builds = createBuilds({
+    stateDir, servers: () => servers, sshArgs, audit: (line) => audit(line), startTask, confirmCode, sendJson, updates,
+  });
+  provision = createProvision({
+    stateDir, sshArgs,
+    regionOf: (name) => readServers(confText()).find((entry) => entry.name === name)?.fields?.REGION || '',
+    registryMirrors: () => [...REGISTRY_MIRRORS, ...savedMirrors()],
+  });
+  notesFile = path.join(stateDir, 'control-panel-partner-notes.json');
+  bookFile = path.join(stateDir, 'control-panel-admin-book.json');
   loadSessions();
   servers = loadServers(dir);
   if (!servers.length) throw new Error('deploy.conf names no server');
   family = createFamily({ dir, trustFile: path.join(stateDir, TRUST_FILE), audit, servers: () => servers });
   await connect(servers);
   followDeployConf(dir);
+  /* The live graphs: every server read now and then, harder while someone looks. */
+  const heavyReads = new Map();
+  metrics = createMetrics({
+    servers: () => servers,
+    file: path.join(stateDir, 'control-panel-metrics.json'),
+    fineMs: Math.max(2000, Number(env.POORIJA_PANEL_METRICS_MS || 20000)),
+    read: async (server, { full = true } = {}) => {
+      if (server.lastReachable === false) return { up: 0 };
+      /* The heavy reads every few seconds at most; between them the last ones. */
+      const kept = heavyReads.get(server.name) || {};
+      const [health, traffic, queues, transit] = await Promise.all([
+        serverRequest(server, '/healthz', { timeout: 10000 }),
+        full || !kept.traffic ? serverRequest(server, '/Monitor_Server/traffic', { method: 'POST', body: {}, timeout: 10000 }) : kept.traffic,
+        full || !kept.queues ? serverRequest(server, '/Monitor_Server/queues', { method: 'POST', body: {}, timeout: 10000 }) : kept.queues,
+        full || !kept.transit ? serverRequest(server, '/Monitor_Server/transit', { method: 'POST', body: {}, timeout: 10000 }) : kept.transit,
+      ]);
+      heavyReads.set(server.name, { traffic, queues, transit });
+      return readingFrom({ health: health.status === 200 ? health.json : null, traffic: traffic.json, queues: queues.json, transit: transit.json });
+    },
+  });
+  metrics.start();
 
   const tls = env.POORIJA_PANEL_TLS_CERT && env.POORIJA_PANEL_TLS_KEY
     ? { cert: fs.readFileSync(env.POORIJA_PANEL_TLS_CERT), key: fs.readFileSync(env.POORIJA_PANEL_TLS_KEY) }
@@ -1152,7 +1445,7 @@ async function main() {
   audit('web panel started');
   say(`panel: ${scheme}://${host}:${port}/`);
   if (host !== '127.0.0.1' && host !== 'localhost') say('note: the panel answers beyond this computer; only the addresses in POORIJA_PANEL_ORIGINS get in');
-  const stop = () => { disconnect(servers); process.exit(0); };
+  const stop = () => { metrics?.stop(); disconnect(servers); process.exit(0); };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

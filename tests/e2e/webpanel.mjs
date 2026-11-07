@@ -44,6 +44,14 @@ const check = (name, ok, detail = '') => {
   results.push({ name, ok: Boolean(ok) });
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 };
+/* The panel stopped, and gone, before its folder is removed: it saves its
+   graphs' memory on the way out. */
+async function stopPanel(panel) {
+  if (!panel?.child || panel.child.exitCode !== null) return;
+  const gone = new Promise((resolve) => panel.child.once('exit', resolve));
+  panel.child.kill('SIGTERM');
+  await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 5000))]);
+}
 const section = (title) => console.log(`\n===== ${title} =====`);
 const subtle = globalThis.crypto.subtle;
 
@@ -179,7 +187,7 @@ try {
       const log = fs.readFileSync(path.join(home, 'control-panel.log'), 'utf8');
       check('the audit log has the logins and the failures, never a password', /login operator ok/.test(log) && /login failed/.test(log) && !log.includes('a long test password 42'), log.slice(-300));
     } finally {
-      panel?.child.kill('SIGTERM');
+      await stopPanel(panel);
       fs.rmSync(home, { recursive: true, force: true });
     }
   }
@@ -305,10 +313,12 @@ try {
 
       const log = fs.readFileSync(path.join(home, 'control-panel.log'), 'utf8');
       check('the audit log has who did what, and whether it was signed', /operator r2 POST \/Monitor_Server\/transit-add signed 200/.test(log) && /operator r2 POST \/Monitor_Server\/transit-add unsigned 403/.test(log), log.slice(-400));
-      const written = fs.readdirSync(home).map((name) => fs.readFileSync(path.join(home, name), 'utf8')).join('\n');
+      /* Every file, in the folders the panel makes too (updates/ among them). */
+      const filesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? filesIn(path.join(dir, entry.name)) : entry.isFile() ? [path.join(dir, entry.name)] : []));
+      const written = filesIn(home).map((file) => fs.readFileSync(file, 'utf8')).join('\n');
       check('nothing the panel wrote holds a server’s password', !written.includes(PASSWORD));
     } finally {
-      panel?.child.kill('SIGTERM');
+      await stopPanel(panel);
       await fleet.stopAll();
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -422,12 +432,15 @@ try {
       const overview = await page.textContent('#sections');
       check('the overview groups the servers by cluster', overview.includes('Alpha') && overview.includes('Beta') && overview.includes('r1') && overview.includes('r2'));
 
-      const sectionIds = ['queues', 'users', 'relays', 'traffic', 'machine', 'reports', 'bootstrap', 'system', 'clusters'];
+      /* Each section, at the sub-tab with its table of servers. */
+      const sectionIds = [['queues', 'servers'], ['users', 'online'], ['relays', 'summary'], ['partners', 'ours'], ['traffic', 'servers'], ['ops', 'servers'], ['reports', 'summary'], ['ops', 'install'], ['ops', 'system'], ['clusters', 'links']];
       const unrendered = [];
-      for (const id of sectionIds) {
+      for (const [id, tab] of sectionIds) {
         await page.click(`[data-tab="${id}"]`);
+        await page.waitForSelector(`[data-subtab="${id}"][data-subtab-key="${tab}"]`, { timeout: 20000 }).catch(() => {});
+        await page.click(`[data-subtab="${id}"][data-subtab-key="${tab}"]`).catch(() => {});
         const ok = await page.waitForFunction(() => document.querySelector('#sections [data-server-row="r1"]') && document.querySelector('#sections [data-server-row="r2"]'), null, { timeout: 20000 }).then(() => true, () => false);
-        if (!ok) unrendered.push(id);
+        if (!ok) unrendered.push(`${id}/${tab}`);
       }
       check('every section shows rows for every server', unrendered.length === 0, unrendered.join(' '));
 
@@ -454,7 +467,7 @@ try {
     } finally {
       for (const client of clients) client.close();
       await browser?.close();
-      panel?.child.kill('SIGTERM');
+      await stopPanel(panel);
       await fleet.stopAll();
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -601,7 +614,7 @@ try {
       const refused = await post('/api/directory', { edits, signature: await sigBy(device) });
       check('without the operator key here, clusters are only shown', readOnly.json?.canEdit === false && refused.status === 409 && refused.json?.reason === 'no-operator-key', `${readOnly.text.slice(0, 100)} ${refused.text.slice(0, 100)}`);
     } finally {
-      panel?.child.kill('SIGTERM');
+      await stopPanel(panel);
       await fleet.stopAll();
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -678,6 +691,8 @@ try {
       check('moving it to another cluster from the graph signs the family list again and the relays take it', movedOnRelays);
       check('and the graph redraws r2 inside Alpha', await page.waitForFunction(() => !document.querySelector('[data-cluster="Beta"]'), null, { timeout: 20000 }).then(() => true, () => false));
 
+      /* The gateway order is the network section's own sub-tab. */
+      await page.click('[data-subtab="network"][data-subtab-key="gateways"]');
       await page.click(`[data-gw-up="relay:${s16(r2.id)}"]`);
       await page.click('#saveGateways');
       const reordered = await waitUntil(async () => {
@@ -686,6 +701,8 @@ try {
       }, 20000);
       check('reordering the gateways in the list and saving reaches the servers', reordered);
 
+      await page.click('[data-subtab="network"][data-subtab-key="graph"]');
+      await page.waitForSelector(n1, { timeout: 10000 });
       await page.click(n1);
       await page.waitForFunction(() => document.querySelector('#nodeName')?.textContent === 'r1', null, { timeout: 5000 });
       await page.selectOption('#linkTarget', `relay:${s16(r2.id)}`);
@@ -707,7 +724,7 @@ try {
       check('the page ran without a script error', errors.length === 0, errors.join(' | '));
     } finally {
       await browser?.close();
-      panel?.child.kill('SIGTERM');
+      await stopPanel(panel);
       await fleet.stopAll();
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -1,7 +1,7 @@
 {
   "name": "app",
-  "version": "2.98.85",
-  "buildTag": "chat-v178",
+  "version": "2.98.90",
+  "buildTag": "chat-v183",
   "description": "[🇬🇧 English](#english) | [🇮🇷 فارسی](#فارسی)",
   "main": "scripts/server.js",
   "directories": {
@@ -148,6 +148,8 @@
     "test:unifiedpush": "node tests/e2e/unifiedpush.mjs",
     "test:allowlist": "node tests/e2e/allowlist.mjs",
     "test:notifyprivacy": "node tests/e2e/notificationprivacy.mjs",
+    "test:sileotoasts": "node tests/e2e/sileotoasts.mjs",
+    "test:bootstrapinstall": "node tests/e2e/bootstrapinstall.mjs",
     "test:pusherrors": "node tests/e2e/pusherrors.mjs",
     "test:callcodec": "node tests/e2e/callcodec.mjs",
     "test:relay:both": "RELAY_SERVER=$R npm run -s test:throughput && RELAY_SERVER=$R npm run -s test:maildelivery && RELAY_SERVER=$R npm run -s test:offlinesize && RELAY_SERVER=$R npm run -s test:unifiedpush && RELAY_SERVER=$R npm run -s test:allowlist",

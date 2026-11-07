@@ -1153,10 +1153,21 @@ bubble.dataset.selectBound = '1';
 /* A long press is how every messenger starts a multi-select; a plain tap
    only means "toggle" once that mode is already on. */
 let holdTimer = 0;
+/* The click that ends a long press belongs to the press. A mouse delivers
+   one on release however long the button was held, and it reached the
+   toggle below: the message the press had just picked was unpicked, the
+   count fell to zero and selection closed the moment the button came up.
+   (A redraw used to replace the bubble before that click landed; picking
+   now marks bubbles in place, so it lands on the same one.) Touch sends no
+   click after a long press, so the flag is cleared on the next press
+   rather than waited on. */
+let heldIntoSelection = false;
 const startHold = () => {
+heldIntoSelection = false;
 holdTimer = window.setTimeout(() => {
 if (chatState.selectionMode) return;
 enterSelectionMode(id);
+heldIntoSelection = true;
 navigator.vibrate?.(18);
 }, 520);
 };
@@ -1168,6 +1179,10 @@ if (!chatState.selectionMode) return;
 if (event.target.closest('button, a, input, textarea')) return;
 event.preventDefault();
 event.stopPropagation();
+if (heldIntoSelection) {
+heldIntoSelection = false;
+return;
+}
 toggleMessageSelected(id);
 });
 });

@@ -245,11 +245,12 @@ const limits = await A.evaluate(() => {
 console.log('  ' + JSON.stringify(limits));
 /* The live ceiling is 4 GB, not 500 MB: those bytes go peer to peer and never
    touch a server, so what bounds them is the two devices. The offline one is
-   the opposite case and stays at 100 MB — it is the relay's 512 MB mailbox
-   that is being protected, and one large file there evicts everything else
-   somebody is waiting on. */
+   the opposite case and is 200 MB — it is the relay's 512 MB mailbox that is
+   being protected, and a file arrives there as chunks, base64'd, at about 1.34
+   times its size: 200 MB is 267 MB of it, room to spare for everything else
+   somebody is waiting on (offline-file-size checks that sum). */
 check('the limits are the documented ones',
-  limits.max === 4 * 1024 * MB && limits.offline === 100 * MB && limits.vault === 64 * MB,
+  limits.max === 4 * 1024 * MB && limits.offline === 200 * MB && limits.vault === 64 * MB,
   JSON.stringify(limits));
 check('the chunk size stays under the data channel frame limit',
   limits.chunk <= 64 * 1024, String(limits.chunk));

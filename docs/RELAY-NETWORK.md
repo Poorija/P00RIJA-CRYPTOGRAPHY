@@ -68,7 +68,7 @@ with a key, and each of them needs root once:
 Run this once, on the server, and nothing after it needs privilege:
 
 ```bash
-sudo bash scripts/prepare-relay-host.sh pooriya /root/cert/relay.example.com
+sudo bash scripts/prepare-relay-host.sh deploy /root/cert/relay.example.com
 ```
 
 It finds the certificate whatever the issuer named the files, copies it where the
@@ -752,7 +752,7 @@ compose «permission denied» می‌دهد · گواهی TLS معمولاً ز�
 این را یک‌بار روی سرور اجرا کنید و بعد از آن هیچ‌چیز ممتاز لازم نیست:
 
 ```bash
-sudo bash scripts/prepare-relay-host.sh pooriya /root/cert/relay.example.com
+sudo bash scripts/prepare-relay-host.sh deploy /root/cert/relay.example.com
 ```
 
 گواهی را پیدا می‌کند هر اسمی که صادرکننده گذاشته باشد، جایی کپی می‌کند که

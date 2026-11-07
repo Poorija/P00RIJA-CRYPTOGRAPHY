@@ -83,7 +83,7 @@ try {
 
   console.log('\n===== notifications, against the highest layer in the app =====');
 
-  const stacking = await A.evaluate(() => {
+  const stacking = await A.evaluate(async () => {
     /* Something at the top of the app's own range, which is what a confirm
        dialog uses — the exact case where a notice matters most and where it
        used to disappear. */
@@ -91,9 +91,15 @@ try {
     cover.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#000';
     document.body.appendChild(cover);
     window.PoorijaApp.showNotification('a message that has to be seen', 'error');
+    /* sileo draws on React's next pass and settles its spring in well under
+       a second; the plain fallback is there at once. */
+    await new Promise((resolve) => setTimeout(resolve, 900));
     const stack = document.getElementById('toastStack');
     const style = stack ? getComputedStyle(stack) : null;
-    const box = stack?.getBoundingClientRect();
+    /* The host is a zero-size box when sileo draws into it; what a person sees
+       is the toast itself. */
+    const drawn = stack?.querySelector('[data-sileo-toast], .app-toast') || stack;
+    const box = drawn?.getBoundingClientRect();
     const onTop = box
       ? document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
       : null;
@@ -107,7 +113,8 @@ try {
       text: stack?.textContent || '',
     };
     cover.remove();
-    stack?.remove();
+    if (stack?.dataset.toaster === 'sileo') window.PoorijaSileo?.sileo.clear();
+    else stack?.remove();
     return result;
   });
   console.log(`  ${JSON.stringify({ z: stacking.z, lastChild: stacking.lastChild })}`);

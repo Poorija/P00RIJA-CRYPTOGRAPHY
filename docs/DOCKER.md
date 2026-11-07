@@ -42,6 +42,17 @@ Then it does the rest:
 4. Prints the app address, the dashboard address, the user name and the
    password.
 
+A certificate the server already has for the domain, from whichever program
+got it, is served from where it is, as on a server set up by hand, instead of
+a new one. It looks in `/root/cert/<domain>/` first (3X-UI keeps one there),
+then in the folders 3X-UI's panel names, and where certbot, acme.sh, Caddy and
+Hiddify keep theirs. The certificate must name the domain, belong with its
+key, and not have expired. Its owner goes on renewing it, unless you answer
+`here` or pass `--letsencrypt`: then this server renews it in that folder. A
+program's own store (certbot's `live/`, acme.sh's home, and the like) always
+stays that program's to renew. The check reads root's folders through Docker,
+so it works from an account that is not root.
+
 The same, without questions:
 
 ```bash
@@ -53,6 +64,9 @@ curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/s
 | `--dir DIR` | install folder (default `/opt/p00rija` as root, else `~/p00rija`) |
 | `--domain NAME` | domain or IP (default: the public IP) |
 | `--email ADDRESS` | for Let's Encrypt |
+| `--cert-dir DIR` | serve the certificate already in DIR, in place |
+| `--letsencrypt` | a certificate found or given is renewed by this server, in its folder |
+| `--new-cert` | use no certificate already on the server; make a new one |
 | `--app-port N` | the app's HTTPS port (default 8585) |
 | `--registry HOST` | pull through a registry mirror (see below) |
 | `--version V` | run this release instead of `latest` |
@@ -91,11 +105,16 @@ the containers, and keeps `.env` and your data.
 registry mirror:
 
 ```bash
-curl -fsSL .../docker-install.sh | bash -s -- --registry docker.example-mirror.ir
+curl -fsSL .../docker-install.sh | bash -s -- --registry docker.mobinhost.com
 ```
 
 Every image, coturn included, is then pulled as
-`<mirror>/poorija/...` and `<mirror>/coturn/...`.
+`<mirror>/poorija/...` and `<mirror>/coturn/...`. These answered from two
+Iranian providers on 3 November 2026, quickest first, and the central panel
+offers them in its Install dialog: `docker.mobinhost.com`,
+`mirror-docker.runflare.com`, `docker.abrha.net`, `focker.ir`,
+`registry.docker.ir`, and `docker.iranserver.com`. Mirrors come and go; one
+typed by hand in the panel is kept and offered after them.
 
 **By hand.** `docker/compose.yaml` is the compose file the installer uses. Put
 it in a folder with a `.env` (at least `DOMAIN`, `EXTERNAL_IP`, `TURN_USER`,
@@ -149,6 +168,17 @@ It works the same on macOS and Linux:
 - **The LAN.** On the LAN, give it a certificate (`--tls-cert FILE --tls-key
   FILE`) so the login is sent over HTTPS. Without one it warns, every time,
   that the login crosses the network unencrypted.
+- **Building server updates.** `--builds yes` gives the panel this
+  computer's Docker, so that **Server operations → Updates** and **Build &
+  package** can build the images (see [CONTROL-PANEL.md](CONTROL-PANEL.md)).
+  That socket is as good as root on this computer: answer `no` (the default)
+  on one you would not hand that to. The answer is remembered; `update
+  --builds yes` changes it.
+- **The checkout Build & package works in.** Run from a checkout, the
+  launcher mounts that checkout into the panel at the same path, read and
+  write, so a folder typed in the page is found and its `dist/server/` is
+  written there. `--source DIR` names another folder, `--source none` mounts
+  none; the answer is remembered too.
 - **Other commands:** `stop`, `status`, `logs`, `update` (new image,
   same settings), `login` (a new login, or `--new-code` for a new app code),
   `doctor`, `backup`, `restore`, and `uninstall`.
@@ -223,6 +253,17 @@ curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/s
 3. کانتینرها را بالا می‌آورد.
 4. نشانی برنامه، نشانی داشبورد، نام کاربری و رمز را نشان می‌دهد.
 
+گواهی‌ای که سرور از قبل برای این دامنه دارد، هر برنامه‌ای که گرفته باشدش، مثل
+سروری که دستی راه افتاده از همان‌جا به کار می‌رود و گواهی تازه گرفته نمی‌شود. اول
+`/root/cert/<domain>/` را نگاه می‌کند (3X-UI گواهی‌اش را آنجا نگه می‌دارد)، بعد
+پوشه‌هایی که پنل 3X-UI نام برده، و جایی که certbot، acme.sh، Caddy و Hiddify
+گواهی‌شان را نگه می‌دارند. گواهی باید نام دامنه را داشته باشد، کلیدش با آن جور
+باشد و منقضی نشده باشد. تمدیدش با صاحب فعلی‌اش می‌ماند، مگر اینکه `here` جواب
+بدهید یا `--letsencrypt` بدهید؛ آن‌وقت همین سرور آن را در همان پوشه تمدید می‌کند.
+انبار خود یک برنامه (`live/` در certbot، پوشهٔ خانهٔ acme.sh و مانند این‌ها)
+همیشه برای تمدید با همان برنامه می‌ماند. این بررسی پوشه‌های root را از راه Docker
+می‌خواند، پس با حسابی غیر از root هم کار می‌کند.
+
 همین کار، بدون سؤال:
 
 ```bash
@@ -234,6 +275,9 @@ curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/s
 | `--dir DIR` | پوشهٔ نصب (پیش‌فرض `/opt/p00rija` برای root، وگرنه `~/p00rija`) |
 | `--domain NAME` | دامنه یا IP (پیش‌فرض: IP عمومی) |
 | `--email ADDRESS` | برای Let's Encrypt |
+| `--cert-dir DIR` | گواهی‌ای که در DIR هست، از همان‌جا |
+| `--letsencrypt` | گواهی پیدا یا داده‌شده را همین سرور در همان پوشه تمدید کند |
+| `--new-cert` | گواهی موجود روی سرور به کار نرود؛ یک گواهی تازه |
 | `--app-port N` | پورت HTTPS برنامه (پیش‌فرض ۸۵۸۵) |
 | `--registry HOST` | کشیدن ایمیج‌ها از راه یک mirror (پایین‌تر) |
 | `--version V` | اجرای این نسخه به جای `latest` |
@@ -273,11 +317,16 @@ curl -fsSL https://raw.githubusercontent.com/Poorija/P00RIJA-CRYPTOGRAPHY/main/s
 mirror بکشید:
 
 ```bash
-curl -fsSL .../docker-install.sh | bash -s -- --registry docker.example-mirror.ir
+curl -fsSL .../docker-install.sh | bash -s -- --registry docker.mobinhost.com
 ```
 
 در این حالت همهٔ ایمیج‌ها، coturn هم، به شکل `<mirror>/poorija/...` و
-`<mirror>/coturn/...` کشیده می‌شوند.
+`<mirror>/coturn/...` کشیده می‌شوند. این‌ها در ۱۲ آبان ۱۴۰۵ از دو ارائه‌دهندهٔ
+ایرانی جواب دادند (سریع‌ترها اول) و پنل مرکزی هم در پنجرهٔ نصب پیشنهادشان
+می‌دهد: `docker.mobinhost.com`، `mirror-docker.runflare.com`، `docker.abrha.net`،
+`focker.ir`، `registry.docker.ir` و `docker.iranserver.com`. mirrorها می‌آیند و
+می‌روند؛ هر mirror که در پنل دستی بنویسید نگه داشته می‌شود و بعد از این‌ها
+پیشنهاد می‌شود.
 
 **دستی.** فایل `docker/compose.yaml` همان فایل compose نصب‌کننده است. آن را با
 یک `.env` در یک پوشه بگذارید (دست‌کم `DOMAIN`، `EXTERNAL_IP`، `TURN_USER`،
@@ -330,6 +379,15 @@ bash scripts/panel.sh
 - **شبکهٔ محلی.** روی شبکهٔ محلی به آن گواهی بدهید (`--tls-cert FILE --tls-key
   FILE`) تا ورود روی HTTPS فرستاده شود. بدون گواهی، هر بار هشدار می‌دهد که ورود
   بدون رمزنگاری از شبکه می‌گذرد.
+- **ساختن به‌روزرسانی سرورها.** `--builds yes` داکرِ همین کامپیوتر را به پنل
+  می‌دهد تا **عملیات سرورها ← به‌روزرسانی** و **ساخت و بسته‌بندی** بتوانند ایمیج‌ها
+  را بسازند (ببینید [CONTROL-PANEL.md](CONTROL-PANEL.md)). این سوکت با دسترسی root
+  روی همین کامپیوتر برابر است: روی کامپیوتری که چنین دسترسی‌ای را به آن نمی‌دهید `no`
+  (پیش‌فرض) بگذارید. پاسخ به خاطر سپرده می‌شود و `update --builds yes` آن را عوض می‌کند.
+- **پوشه‌ای که ساخت و بسته‌بندی در آن کار می‌کند.** اگر از داخل یک کلون اجرا شود،
+  همان کلون با همان مسیر و با دسترسی خواندن و نوشتن به پنل داده می‌شود تا پوشه‌ای که
+  در صفحه نوشته می‌شود پیدا شود و `dist/server/` در همان‌جا نوشته شود. `--source DIR`
+  پوشهٔ دیگری را می‌دهد و `--source none` هیچ پوشه‌ای را؛ این پاسخ هم به خاطر سپرده می‌شود.
 - **فرمان‌های دیگر:** `stop`، `status`، `logs`، `update` (ایمیج تازه با همان
   تنظیمات)، `login` (ورود تازه، یا `--new-code` برای کد تازهٔ برنامه)، `doctor`،
   `backup`، `restore` و `uninstall`.

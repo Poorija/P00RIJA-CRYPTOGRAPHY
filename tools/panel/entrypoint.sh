@@ -18,6 +18,14 @@ fi
 # A state folder bind-mounted from the host may not take a chown; it then
 # needs to be writable as it is.
 chown node:node /state 2>/dev/null || true
+# The host's Docker, when panel.sh --builds yes gave its socket: the panel runs
+# as node, so node joins the group that owns the socket.
+if [ -S /var/run/docker.sock ]; then
+  gid="$(stat -c %g /var/run/docker.sock)"
+  group="$(awk -F: -v g="$gid" '$3 == g { print $1; exit }' /etc/group)"
+  [ -n "$group" ] || { addgroup -g "$gid" dockerhost 2>/dev/null && group=dockerhost; }
+  [ -n "$group" ] && addgroup node "$group" 2>/dev/null || true
+fi
 case "${1:-serve}" in
   serve) exec su-exec node node /app/tools/panel/server.mjs ;;
   setup-login) shift; exec su-exec node node /app/tools/panel/setup-login.mjs "$@" ;;

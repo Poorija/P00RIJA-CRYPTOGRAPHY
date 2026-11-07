@@ -46,6 +46,10 @@
 #   --tls-cert FILE     serve HTTPS with this certificate (and --tls-key FILE);
 #                       asked for when the panel listens on the LAN
 #   --write             let the panel edit deploy.conf and sign the family list
+#   --builds yes|no     let the panel build server update packages with this
+#                       computer's Docker (its socket goes into the container)
+#   --source DIR|none   the checkout Build & package works in, mounted at the
+#                       same path (default: the checkout this script is in)
 #   --build | --pull    build from this checkout, or pull from Docker Hub
 #   --yes               take the saved answers, or the defaults, without asking
 #   --reconfigure       ask every question again
@@ -108,7 +112,8 @@ Keep the script to run it again:
 
 Options: --port N  --bind ADDR  --host NAME  --autostart yes|no
          --config-dir DIR  --ssh-dir DIR  --tls-cert FILE  --tls-key FILE
-         --write  --build | --pull  --yes  --reconfigure  --no-open  --dry-run
+         --write  --builds yes|no  --source DIR|none
+         --build | --pull  --yes  --reconfigure  --no-open  --dry-run
 EOF
   fi
 }
@@ -116,7 +121,7 @@ EOF
 # ---- arguments ----------------------------------------------------------------
 COMMAND=start
 DRY=0 YES=0 RECONFIGURE=0 OPEN=1 SOURCE=""
-F_PORT="" F_BIND="" F_HOST="" F_AUTOSTART="" F_CONFIG="" F_SSH="" F_WRITE="" F_TLS_CERT="" F_TLS_KEY=""
+F_PORT="" F_BIND="" F_HOST="" F_AUTOSTART="" F_CONFIG="" F_SSH="" F_WRITE="" F_TLS_CERT="" F_TLS_KEY="" F_BUILDS="" F_SOURCE=""
 LOGIN_ARGS=()
 PURGE=0 FILE_ARG=""
 while [ $# -gt 0 ]; do
@@ -131,6 +136,8 @@ while [ $# -gt 0 ]; do
     --config-dir) F_CONFIG="${2:?--config-dir needs a folder}"; shift ;;
     --ssh-dir) F_SSH="${2:?--ssh-dir needs a folder}"; shift ;;
     --write) F_WRITE=yes ;;
+    --builds) F_BUILDS="${2:?--builds needs yes or no}"; shift ;;
+    --source) F_SOURCE="${2:?--source needs a folder (or none)}"; shift ;;
     --tls-cert) F_TLS_CERT="${2:?--tls-cert needs a file}"; shift ;;
     --tls-key) F_TLS_KEY="${2:?--tls-key needs a file}"; shift ;;
     --build) SOURCE=build ;;
@@ -185,13 +192,13 @@ ensure_docker() {
 # ---- settings --------------------------------------------------------------------
 PANEL_PORT=8686 PANEL_BIND=127.0.0.1 PANEL_HOST="" PANEL_AUTOSTART=yes
 PANEL_CONFIG_DIR="" PANEL_SSH_DIR="" PANEL_WRITE=no PANEL_IMAGE=""
-PANEL_TLS_CERT="" PANEL_TLS_KEY=""
+PANEL_TLS_CERT="" PANEL_TLS_KEY="" PANEL_BUILDS=no PANEL_SOURCE=""
 HAVE_SETTINGS=0
 if [ -f "$SETTINGS" ]; then
   # Read as data, not sourced: only the known keys, values taken literally.
   while IFS='=' read -r key value; do
     case "$key" in
-      PANEL_PORT|PANEL_BIND|PANEL_HOST|PANEL_AUTOSTART|PANEL_CONFIG_DIR|PANEL_SSH_DIR|PANEL_WRITE|PANEL_IMAGE|PANEL_TLS_CERT|PANEL_TLS_KEY)
+      PANEL_PORT|PANEL_BIND|PANEL_HOST|PANEL_AUTOSTART|PANEL_CONFIG_DIR|PANEL_SSH_DIR|PANEL_WRITE|PANEL_IMAGE|PANEL_TLS_CERT|PANEL_TLS_KEY|PANEL_BUILDS|PANEL_SOURCE)
         printf -v "$key" '%s' "$value" ;;
     esac
   done < "$SETTINGS"
@@ -302,6 +309,11 @@ configure() {
   [ -n "$F_WRITE" ] && PANEL_WRITE="$F_WRITE"
   [ -n "$F_TLS_CERT" ] && PANEL_TLS_CERT="$F_TLS_CERT"
   [ -n "$F_TLS_KEY" ] && PANEL_TLS_KEY="$F_TLS_KEY"
+  [ -n "$F_BUILDS" ] && PANEL_BUILDS="$F_BUILDS"
+  [ -n "$F_SOURCE" ] && PANEL_SOURCE="$F_SOURCE"
+  # Build & package works in a checkout of the app: this one, unless told otherwise.
+  [ -z "$PANEL_SOURCE" ] && [ "$IN_CHECKOUT" = 1 ] && PANEL_SOURCE="$ROOT"
+  [ "$PANEL_SOURCE" = none ] || PANEL_SOURCE="$(whole_path "$PANEL_SOURCE")"
   if [ "$YES" = 0 ] && { [ "$HAVE_SETTINGS" = 0 ] || [ "$RECONFIGURE" = 1 ]; }; then
     say "The central panel — a few questions (Enter keeps the value in brackets)." >&2
     [ -z "$F_PORT" ] && ask PANEL_PORT "Port on this computer"
@@ -345,14 +357,15 @@ configure() {
   case "$PANEL_PORT" in ''|*[!0-9]*) die "the port must be a number (got \"$PANEL_PORT\")" ;; esac
   [ "$PANEL_PORT" -ge 1 ] && [ "$PANEL_PORT" -le 65535 ] || die "the port must be 1-65535 (got $PANEL_PORT)"
   case "$PANEL_AUTOSTART" in yes|no) ;; *) die "--autostart takes yes or no (got \"$PANEL_AUTOSTART\")" ;; esac
+  case "$PANEL_BUILDS" in yes|no) ;; *) die "--builds takes yes or no (got \"$PANEL_BUILDS\")" ;; esac
   if [ -n "$PANEL_TLS_CERT" ] || [ -n "$PANEL_TLS_KEY" ]; then
     [ -f "$PANEL_TLS_CERT" ] || die "the TLS certificate $PANEL_TLS_CERT is not there"
     [ -f "$PANEL_TLS_KEY" ] || die "the TLS key ${PANEL_TLS_KEY:-(none given)} is not there; pass --tls-key FILE"
   fi
   mkdir -p "$PANEL_CONFIG_DIR" "$(dirname "$SETTINGS")"
   { umask 077
-    printf 'PANEL_PORT=%s\nPANEL_BIND=%s\nPANEL_HOST=%s\nPANEL_AUTOSTART=%s\nPANEL_CONFIG_DIR=%s\nPANEL_SSH_DIR=%s\nPANEL_WRITE=%s\nPANEL_IMAGE=%s\nPANEL_TLS_CERT=%s\nPANEL_TLS_KEY=%s\n' \
-      "$PANEL_PORT" "$PANEL_BIND" "$PANEL_HOST" "$PANEL_AUTOSTART" "$PANEL_CONFIG_DIR" "$PANEL_SSH_DIR" "$PANEL_WRITE" "$PANEL_IMAGE" "$PANEL_TLS_CERT" "$PANEL_TLS_KEY" > "$SETTINGS"; }
+    printf 'PANEL_PORT=%s\nPANEL_BIND=%s\nPANEL_HOST=%s\nPANEL_AUTOSTART=%s\nPANEL_CONFIG_DIR=%s\nPANEL_SSH_DIR=%s\nPANEL_WRITE=%s\nPANEL_IMAGE=%s\nPANEL_TLS_CERT=%s\nPANEL_TLS_KEY=%s\nPANEL_BUILDS=%s\nPANEL_SOURCE=%s\n' \
+      "$PANEL_PORT" "$PANEL_BIND" "$PANEL_HOST" "$PANEL_AUTOSTART" "$PANEL_CONFIG_DIR" "$PANEL_SSH_DIR" "$PANEL_WRITE" "$PANEL_IMAGE" "$PANEL_TLS_CERT" "$PANEL_TLS_KEY" "$PANEL_BUILDS" "$PANEL_SOURCE" > "$SETTINGS"; }
 }
 
 port_free() { # 0 when nothing but the panel itself listens on the port
@@ -403,12 +416,21 @@ ensure_login() {
 start() {
   configure
   local image origins url publish restart access scheme=http
-  local tls_args=()
+  local tls_args=() build_args=()
   image="${PANEL_IMAGE:-$(image_ref)}"
   port_free "$PANEL_PORT" || die "port $PANEL_PORT is already in use; choose another with --port N"
   ensure_docker
   get_image "$image"
   ensure_login "$image"
+  # Building update packages (System → Server updates) needs this computer's
+  # Docker. Its socket is the keys to this machine, so it goes in only when
+  # asked for (--builds yes); the panel uses it only to build and save images.
+  [ "$PANEL_BUILDS" = yes ] && build_args=(-v /var/run/docker.sock:/var/run/docker.sock -e POORIJA_PANEL_BUILDS=1)
+  # The checkout Build & package reads and writes its dist/server/ in, at the
+  # same path as on this computer, so a folder typed in the page is found.
+  if [ -n "$PANEL_SOURCE" ] && [ "$PANEL_SOURCE" != none ] && [ -d "$PANEL_SOURCE" ]; then
+    build_args+=(-v "$PANEL_SOURCE:$PANEL_SOURCE" -e "POORIJA_PANEL_SOURCES=$PANEL_SOURCE")
+  fi
   if [ -n "$PANEL_TLS_CERT" ]; then
     scheme=https
     tls_args=(-v "$PANEL_TLS_CERT:/tls/cert.pem:ro" -v "$PANEL_TLS_KEY:/tls/key.pem:ro"
@@ -442,7 +464,7 @@ EOF
   run docker run -d --name "$NAME" --restart "$restart" -p "$publish" \
     -e "POORIJA_PANEL_ORIGINS=$origins" -e "POORIJA_PANEL_HOST_SSH_DIR=$PANEL_SSH_DIR" \
     -v "$PANEL_CONFIG_DIR:/config:$access" -v "$PANEL_SSH_DIR:/ssh-src:ro" -v "$VOLUME:/state" \
-    ${tls_args[@]+"${tls_args[@]}"} \
+    ${tls_args[@]+"${tls_args[@]}"} ${build_args[@]+"${build_args[@]}"} \
     "$image"
   say "✓ The central panel: $url"
   [ "$restart" = unless-stopped ] && say "  It comes back by itself whenever Docker starts. Change that with --reconfigure."

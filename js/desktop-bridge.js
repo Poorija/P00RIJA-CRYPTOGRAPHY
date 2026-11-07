@@ -185,6 +185,13 @@
     /* ---- external links ---- */
     openExternal: (url) => invoke('desktop_open_external', { url }),
 
+    /* ---- a newer release (js/update-check.js, js/app.js offerUpdate) ---- */
+    downloadUpdate: (url, name) => invoke('desktop_download_update', { url, name }),
+    showDownload: (token, open) => invoke('desktop_show_download', { token, open: Boolean(open) }),
+    onUpdateProgress: (handler) => (tauri?.event?.listen
+      ? tauri.event.listen('update-download-progress', (event) => handler(event.payload || {}))
+      : Promise.resolve(() => {})),
+
     /* ---- screen guard (js/screen-guard.js) ---- */
     setScreenGuard: (enabled) => invoke('desktop_set_screen_guard', { enabled: Boolean(enabled) }),
 

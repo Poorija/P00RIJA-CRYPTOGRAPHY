@@ -59,7 +59,7 @@ try {
     'a',
     'P00RIJA Panel 17c',
     `otpauth://totp/P00RIJA%20Panel:op?secret=JBSWY3DPEHPK3PXP&issuer=P00RIJA%20Panel`,
-    `otpauth://totp/P00RIJA%20Panel:pooriya?secret=${'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.repeat(2)}&issuer=P00RIJA%20Panel`,
+    `otpauth://totp/P00RIJA%20Panel:operator?secret=${'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.repeat(2)}&issuer=P00RIJA%20Panel`,
     'x'.repeat(250),
     'پنل مرکزی',
   ];

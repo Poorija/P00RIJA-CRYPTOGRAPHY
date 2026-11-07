@@ -6,14 +6,17 @@
 #   docker compose -f config/control-panel.compose.yaml run --rm -it control-panel setup-login
 #   docker compose -f config/control-panel.compose.yaml up -d --build
 FROM node:26.12.1-alpine
-RUN apk add --no-cache openssh-client su-exec
+# docker-cli and buildx build server update packages with the host's Docker
+# when its socket is given (panel.sh --builds yes); unzip opens a .zip of a tree.
+RUN apk add --no-cache openssh-client su-exec docker-cli docker-cli-buildx unzip bash tar gzip git coreutils
 WORKDIR /app
-COPY scripts/lib/relay-identity.js scripts/lib/relay-directory.js scripts/lib/operator-signature.js ./scripts/lib/
+COPY scripts/lib/relay-identity.js scripts/lib/relay-directory.js scripts/lib/operator-signature.js scripts/lib/update-package.js scripts/lib/relay-updates.js ./scripts/lib/
 COPY tools/relay-directory.mjs tools/admin-key.mjs tools/control-panel.mjs tools/control-panel.html tools/control-panel.js ./tools/
 COPY tools/panel ./tools/panel
 # The installer and compose file the panel sends to a new server, and the
 # version it shows.
 COPY scripts/docker-install.sh ./scripts/docker-install.sh
+COPY scripts/lib/server-prereqs.sh ./scripts/lib/server-prereqs.sh
 COPY docker/compose.yaml ./docker/compose.yaml
 COPY package.json ./package.json
 # The logo and the fonts the page is set in.

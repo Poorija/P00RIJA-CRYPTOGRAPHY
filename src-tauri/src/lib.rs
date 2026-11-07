@@ -68,6 +68,11 @@ mod mobile_screen_guard;
 #[cfg(desktop)]
 mod link_preview;
 
+/* A newer release downloaded by the app itself, through its own proxy, and
+   checked against the release's SHA256SUMS (desktop only). */
+#[cfg(desktop)]
+mod update_download;
+
 #[cfg(mobile)]
 fn desktop_only<T>(what: &str) -> Result<T, NativeError> {
     Err(NativeError::Message(format!(
@@ -178,6 +183,13 @@ struct DesktopPlatformInfo {
     vault_dir: String,
     ssh_dir: String,
     tray: bool,
+    /// How this build was installed (deb, rpm, appimage, nsis, msi, app),
+    /// as Tauri marked it into the binary; what the update offer matches.
+    bundle: Option<String>,
+    /// A universal Mac binary, rather than one for this machine's chip.
+    universal: bool,
+    /// The Linux distribution's id, for a build installed by none of the bundles.
+    distro: String,
 }
 
 /// Shell behaviour the user controls from Settings. Persisted next to the
@@ -703,7 +715,146 @@ fn desktop_platform_info<R: Runtime>(app: AppHandle<R>) -> Result<DesktopPlatfor
         #[cfg(mobile)]
         ssh_dir: String::new(),
         tray: tray_available(&app),
+        #[cfg(desktop)]
+        bundle: update_download::bundle(),
+        #[cfg(mobile)]
+        bundle: None,
+        #[cfg(desktop)]
+        universal: update_download::universal_binary(),
+        #[cfg(mobile)]
+        universal: false,
+        #[cfg(desktop)]
+        distro: update_download::linux_distro(),
+        #[cfg(mobile)]
+        distro: String::new(),
     })
+}
+
+/// The files this shell downloaded, by the token it handed the page: the only
+/// files desktop_show_download will show or open. A page names a token, never
+/// a path, so it cannot point the shell at anything else.
+#[cfg(desktop)]
+fn update_downloads() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>> {
+    static DOWNLOADS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>>> = std::sync::OnceLock::new();
+    DOWNLOADS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[derive(Serialize)]
+struct UpdateDownload {
+    token: String,
+    path: String,
+}
+
+/// Downloads a file of this project's own GitHub releases into the Downloads
+/// folder, through the shell's proxy, and checks it against that release's
+/// SHA256SUMS — fetched here, from the same release, and required. A file
+/// already there is never written over. Progress goes to the page as
+/// "update-download-progress"; the answer is a token for desktop_show_download.
+#[cfg(desktop)]
+#[tauri::command]
+async fn desktop_download_update<R: Runtime>(app: AppHandle<R>, url: String, name: String) -> Result<UpdateDownload, NativeError> {
+    use tauri::Emitter;
+    let (tag, file_name) = update_download::release_file(&url)
+        .ok_or_else(|| NativeError::msg("only a file of this app's own GitHub releases can be downloaded"))?;
+    if file_name != name || name.ends_with(".txt") {
+        return Err(NativeError::msg("the file name is not the link's"));
+    }
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() < 5 && update_download::allowed_redirect(attempt.url()) { attempt.follow() } else { attempt.stop() }
+        }));
+    if let Ok(Some(proxy)) = checked_proxy_url(&read_shell_settings(&app).proxy_url) {
+        builder = builder.proxy(reqwest::Proxy::all(reqwest_proxy_target(&proxy)).map_err(|error| NativeError::msg(error.to_string()))?);
+    }
+    let client = builder.build().map_err(|error| NativeError::msg(error.to_string()))?;
+    let sums_url = format!("https://github.com/Poorija/P00RIJA-Cryptography/releases/download/{tag}/SHA256SUMS.txt");
+    let sums = client.get(&sums_url).send().await
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| NativeError::msg(format!("the release's SHA256SUMS could not be fetched: {error}")))?
+        .text().await
+        .map_err(|error| NativeError::msg(format!("SHA256SUMS: {error}")))?;
+    let expected = update_download::expected_hash(&sums, &name)
+        .ok_or_else(|| NativeError::msg("the release's SHA256SUMS does not name this file"))?;
+    let dir = app.path().download_dir().map_err(|error| NativeError::msg(error.to_string()))?;
+    let target = update_download::unused_path(&dir, &name);
+    let part = dir.join(format!(".{}.part", target.file_name().and_then(|n| n.to_str()).unwrap_or("update")));
+    let events = app.clone();
+    let hash = update_download::download(&client, &url, &part, move |received, total| {
+        let _ = events.emit("update-download-progress", serde_json::json!({ "received": received, "total": total }));
+    })
+    .await
+    .map_err(|error| {
+        let _ = std::fs::remove_file(&part);
+        NativeError::msg(format!("the download failed: {error}"))
+    })?;
+    if hash != expected {
+        let _ = std::fs::remove_file(&part);
+        return Err(NativeError::msg("the downloaded file is not the one the release's SHA256SUMS names; it was removed"));
+    }
+    std::fs::rename(&part, &target).map_err(|error| NativeError::msg(error.to_string()))?;
+    let mut token_bytes = [0u8; 16];
+    getrandom::fill(&mut token_bytes).map_err(|error| NativeError::msg(error.to_string()))?;
+    let token: String = token_bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    update_downloads().lock().map_err(|_| NativeError::msg("busy"))?.insert(token.clone(), target.clone());
+    Ok(UpdateDownload { token, path: target.to_string_lossy().into_owned() })
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+async fn desktop_download_update(url: String, name: String) -> Result<UpdateDownload, NativeError> {
+    let _ = (url, name);
+    desktop_only("downloading an update")
+}
+
+/// A file this shell downloaded, by its token: shown in the file manager, or
+/// opened — opening asks first, in a dialog of the shell's own that the page
+/// cannot answer for the person.
+#[cfg(desktop)]
+#[tauri::command]
+fn desktop_show_download<R: Runtime>(app: AppHandle<R>, token: String, open: bool) -> Result<(), NativeError> {
+    let file = update_downloads().lock().map_err(|_| NativeError::msg("busy"))?.get(&token).cloned()
+        .ok_or_else(|| NativeError::msg("not a file this app downloaded"))?;
+    if !file.is_file() {
+        return Err(NativeError::msg("the downloaded file is gone"));
+    }
+    let dir = file.parent().map(|parent| parent.to_path_buf()).unwrap_or_default();
+    let open = open && {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        app.dialog()
+            .message(format!("{}\n\n{}", file.display(), "Open this installer now? / این نصب‌کننده همین حالا باز شود؟"))
+            .title("P00RIJA Cryptography")
+            .buttons(MessageDialogButtons::OkCancel)
+            .blocking_show()
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        if !open { c.arg("-R"); }
+        c.arg(&file);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("explorer.exe");
+        if open { c.arg(&file); } else { c.arg(format!("/select,{}", file.display())); }
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(if open { file.as_path() } else { dir.as_path() });
+        c
+    };
+    let _ = &dir;
+    command.spawn().map(|_| ()).map_err(|error| NativeError::msg(error.to_string()))
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+fn desktop_show_download(token: String, open: bool) -> Result<(), NativeError> {
+    let _ = (token, open);
+    desktop_only("showing a download")
 }
 
 // ==================== on-system encrypted vault copy ====================
@@ -2184,7 +2335,9 @@ pub fn run() {
             desktop_set_screen_guard,
             desktop_set_proxy,
             desktop_restart,
-            desktop_link_preview
+            desktop_link_preview,
+            desktop_download_update,
+            desktop_show_download
         ])
         .setup(|app| {
             #[allow(unused_variables)]

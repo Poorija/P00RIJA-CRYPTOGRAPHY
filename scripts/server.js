@@ -35,9 +35,11 @@ const { verifyDirectory, planChanges, verifyTlsFor } = require('./lib/relay-dire
 const partnerRules = require('./lib/relay-partners.js');
 const signatureRules = require('./lib/operator-signature.js');
 const {
-  alertThresholds, readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, createAlertState, sendTelegram, telegramCall,
+  readMeminfo, turnPortsInUse, networkBytes, evaluate: evaluateAlerts, limitsFrom, createAlertState, sendTelegram, telegramCall,
 } = require('./lib/relay-alerts.js');
 const relayReport = require('./lib/relay-report.js');
+const telegramConfig = require('./lib/telegram-settings.js');
+const { textFor } = require('./lib/telegram-text.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
 // Simple .env loader for native runs. CHAT_ENV_FILE names another file, or
@@ -790,7 +792,7 @@ app.use((req, res, next) => {
   signedNonces.set(verdict.nonce, Date.now() + 10 * 60 * 1000);
   req.signedBy = verdict.name;
   monitorLog(`Signed by ${verdict.name}: ${req.path}`);
-  queueReport({ level: 'security', title: 'کار حساس با امضا انجام شد', body: `«${req.path}» با امضای «${verdict.name}».` });
+  queueReport({ level: 'security', title: botText().security.title, body: botText().security.body(req.path, verdict.name) });
   flushAlerts().catch(() => {});
   return next();
 });
@@ -4243,7 +4245,7 @@ app.get('/chat-health', (req, res) => {
     linkPreviews: LINK_PREVIEWS_ENABLED,
     /* Whether this relay can fetch a Telegram sticker pack from a link,
        itself or through the relay it hands the question to. */
-    telegramStickers: TELEGRAM_STICKERS_AVAILABLE,
+    telegramStickers: telegramStickersAvailable(),
     /* So a client learns the relay's name in the probe it already makes. */
     relayId: relayIdentity.id,
     /* Which tree this relay was built from, so a deploy can check it. */
@@ -4372,15 +4374,27 @@ app.post('/link-preview', async (req, res) => {
   }
 });
 
+/* The Telegram bot's settings, which the central panel changes while the
+   relay runs (scripts/lib/telegram-settings.js): .env gives the defaults,
+   what the panel changed is kept beside the data, and so is a token set from
+   the panel, owner-only, in a file of its own. */
+const telegramSettings = telegramConfig.createTelegramSettings({
+  file: process.env.CHAT_TELEGRAM_SETTINGS_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'telegram-settings.json'),
+  tokenFile: process.env.CHAT_TELEGRAM_TOKEN_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'telegram-token'),
+  env: process.env,
+});
+const telegramToken = () => telegramSettings.token();
+/* Everything the bot says, in the language the operator chose. */
+const botText = () => textFor(telegramSettings.get().language);
+
 /* A Telegram sticker pack from its share link (scripts/lib/telegram-stickers.js
-   has the checks). TELEGRAM_BOT_TOKEN lets this relay ask Telegram itself;
+   has the checks). The bot's token lets this relay ask Telegram itself;
    without one, TELEGRAM_STICKERS_UPSTREAM names a relay that can, and the
    question is passed to it — the relay inside a network that cannot reach
    Telegram asks the one outside. Neither set: the endpoint says so, and the
    app explains. Nothing about who asked is logged or kept. */
-const TELEGRAM_BOT_TOKEN = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const TELEGRAM_STICKERS_UPSTREAM = String(process.env.TELEGRAM_STICKERS_UPSTREAM || '').trim();
-const TELEGRAM_STICKERS_AVAILABLE = Boolean(TELEGRAM_BOT_TOKEN || TELEGRAM_STICKERS_UPSTREAM);
+const telegramStickersAvailable = () => Boolean(telegramToken() || TELEGRAM_STICKERS_UPSTREAM);
 const TELEGRAM_MAX_IN_FLIGHT = Number(process.env.CHAT_TELEGRAM_MAX_IN_FLIGHT || 12);
 let telegramInFlight = 0;
 function telegramFailure(res, error) {
@@ -4391,7 +4405,7 @@ function telegramFailure(res, error) {
 async function telegramGate(req, res, work) {
   if (sendRestrictionResponse(req, res)) return;
   setNoStoreHeaders(res);
-  if (!TELEGRAM_STICKERS_AVAILABLE) return res.status(404).json({ ok: false, reason: 'not-configured' });
+  if (!telegramStickersAvailable()) return res.status(404).json({ ok: false, reason: 'not-configured' });
   if (telegramInFlight >= TELEGRAM_MAX_IN_FLIGHT) return res.status(503).json({ ok: false, reason: 'busy' });
   telegramInFlight += 1;
   try {
@@ -4405,15 +4419,15 @@ async function telegramGate(req, res, work) {
 app.get('/telegram-stickers/set', (req, res) => telegramGate(req, res, async () => {
   const name = String(req.query.name || '');
   if (!telegramStickers.PACK_NAME.test(name)) throw new Error('bad-name');
-  if (TELEGRAM_BOT_TOKEN) return res.json({ ok: true, pack: await telegramStickers.stickerPack(TELEGRAM_BOT_TOKEN, name) });
+  if (telegramToken()) return res.json({ ok: true, pack: await telegramStickers.stickerPack(telegramToken(), name) });
   const answer = await telegramStickers.fromUpstream(TELEGRAM_STICKERS_UPSTREAM, `/telegram-stickers/set?name=${encodeURIComponent(name)}`, telegramStickers.MAX_JSON_BYTES);
   return res.status(answer.status || 502).type('application/json').send(answer.body);
 }));
 app.get('/telegram-stickers/file', (req, res) => telegramGate(req, res, async () => {
   const id = String(req.query.id || '');
   if (!telegramStickers.FILE_ID.test(id)) throw new Error('bad-file');
-  if (TELEGRAM_BOT_TOKEN) {
-    const file = await telegramStickers.stickerFile(TELEGRAM_BOT_TOKEN, id);
+  if (telegramToken()) {
+    const file = await telegramStickers.stickerFile(telegramToken(), id);
     return res.status(200).type(file.type).send(file.body);
   }
   const answer = await telegramStickers.fromUpstream(TELEGRAM_STICKERS_UPSTREAM, `/telegram-stickers/file?id=${encodeURIComponent(id)}`, telegramStickers.MAX_FILE_BYTES);
@@ -6791,8 +6805,12 @@ async function imagesInUse() {
 /* Proves the whole way to the operator's phone: from a relay without
    Telegram, over the link to the one with it, and on. */
 app.post('/Monitor_Server/alert-test', authMiddleware, async (req, res) => {
+  /* A test proves the way the cards take, so it obeys the bot's own switch:
+     a relay whose bot is off sends nothing, and says so, instead of a test
+     that arrives while every other card is dropped. */
+  if (!telegramSettings.get().enabled) return res.json({ ok: false, via: 'none', reason: 'bot-off' });
   const via = alertsByTelegram() ? 'telegram' : (Array.from(alertPeers()).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none');
-  queueReport({ level: 'test', title: 'پیام آزمایشی هشدار', body: 'از پنل مدیریت فرستاده شد؛ راه هشدارهای این سرور تا تلگرام برقرار است.' });
+  queueReport({ level: 'test', title: botText().test.title, body: botText().test.body, force: true });
   await flushAlerts();
   res.json({ ok: via !== 'none', via, waiting: alertOutbox.length });
 });
@@ -7108,7 +7126,12 @@ async function runOpsJob(command, { timeoutMs = 900000 } = {}) {
 /* What a backup refuses to carry, and what the clean bundle refuses to
    carry (everything of this machine's own). */
 const OPS_BACKUP_EXCLUDE = ['node_modules', '.git', 'backups', 'dist', 'Export', 'GitHub', 'standalone-relay/lib', 'release-logs'];
-const OPS_BUNDLE_EXCLUDE = [...OPS_BACKUP_EXCLUDE, 'data', '.env', 'certs', 'server-config.json'];
+/* `.env*`, not `.env`. tar matches an exclude against the whole name, so
+   `.env` left every copy of it in: `.env.bak-before-family`, the backups a
+   change to .env leaves beside it, carry this server's dashboard password,
+   TURN secrets and bot token, and went to whoever held a bootstrap token.
+   `.env.example` goes too; the installer writes a fresh .env of its own. */
+const OPS_BUNDLE_EXCLUDE = [...OPS_BACKUP_EXCLUDE, 'data', '.env*', 'certs', 'server-config.json'];
 
 /* Retention: the newest OPS_BACKUPS_KEPT, plus any named (the one just
    restored, which may be older). Run after every path that makes a backup —
@@ -7452,6 +7475,93 @@ app.post('/Monitor_Server/ops-github-rollback', authMiddleware, async (req, res)
  * session, no cookies: the point is one bash line from a fresh machine. */
 
 const BOOTSTRAP_PORT = process.env.CHAT_BOOTSTRAP_PORT === '0' ? 0 : Number(process.env.CHAT_BOOTSTRAP_PORT || 9080);
+/* The script a fresh machine runs: `curl …/install | bash -s -- <origin>
+ * <token> [dir] [domain]`. Plain sh, so it runs under whatever shell it is
+ * piped into, and one block, so a download cut short runs nothing.
+ *
+ * It writes .env itself. It used to copy a template from the bundle under a
+ * name the tree has never had (docker-compose.env.example), found nothing and
+ * stopped with "no .env template found in the bundle" on every machine. And a
+ * template copied as it is would have been worse than nothing: its dashboard
+ * password is printed in the repository for anyone to read, its domain and
+ * address are documentation examples. Here every secret is new and random,
+ * the domain is asked for (Enter takes the machine's public address, on a
+ * self-signed certificate), and a .env already there is kept untouched, so
+ * running it again never changes a secret live calls depend on. */
+const BOOTSTRAP_INSTALLER = [
+  '#!/bin/sh',
+  '# P00RIJA Cryptography — clean-server installer.',
+  '# Pulls the program (and nothing of the server it came from) and stands',
+  '# the stack up on THIS machine with a fresh, empty identity and fresh secrets.',
+  'set -eu',
+  '{',
+  'SRC=${1:?usage: install <origin> <bootstrap-token> [dir] [domain]}',
+  'TOKEN=${2:?bootstrap token required}',
+  'DIR=${3:-$HOME/poorija-cryptography}',
+  'DOMAIN=${4:-}',
+  'command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 || { echo "Docker with its compose plugin is needed first: https://docs.docker.com/engine/install/" >&2; exit 1; }',
+  'random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d " \\n"; }',
+  /* grep tests each LINE, so "1.2.3.4<newline>MONITOR_PASSWORD=x" passed and
+     wrote a line of its own into .env. case looks at the whole value: any
+     character outside the set, a newline included, fails before grep runs. */
+  'is_ip() { case "$1" in ""|*[!0-9.]*) return 1 ;; esac; printf "%s" "$1" | grep -Eq "^([0-9]{1,3}\\.){3}[0-9]{1,3}$"; }',
+  'is_name() { case "$1" in ""|*[!A-Za-z0-9.-]*) return 1 ;; esac; [ ${#1} -le 253 ]; }',
+  'echo "==> fetching the clean bundle from $SRC"',
+  'mkdir -p "$DIR"',
+  'curl -fsSL -H "X-Bootstrap-Token: $TOKEN" "$SRC/bundle" -o "$DIR/bundle.tar.gz"',
+  'tar -xzf "$DIR/bundle.tar.gz" -C "$DIR"',
+  'rm -f "$DIR/bundle.tar.gz"',
+  'cd "$DIR"',
+  'mkdir -p certs data/chat-signal',
+  'PASSWORD_SHOWN=""',
+  'if [ -s .env ]; then',
+  '  echo "==> keeping the .env already here"',
+  'else',
+  '  echo "==> writing .env"',
+  '  PUBLIC_IP=$(curl -fsS4 --max-time 8 https://api.ipify.org 2>/dev/null || curl -fsS4 --max-time 8 https://ifconfig.me 2>/dev/null || true)',
+  '  is_ip "$PUBLIC_IP" || { echo "could not find this machine\'s public IPv4 address" >&2; exit 1; }',
+  /* /dev/tty exists without a terminal behind it (over ssh, under cron);
+     opening it then fails, and under set -e the prompt would end the run. */
+  '  if [ -z "$DOMAIN" ] && ( : < /dev/tty ) 2>/dev/null; then',
+  '    printf "Domain of this server (Enter for its address, %s): " "$PUBLIC_IP" > /dev/tty',
+  '    read -r DOMAIN < /dev/tty || DOMAIN=""',
+  '  fi',
+  '  DOMAIN=${DOMAIN:-$PUBLIC_IP}',
+  '  is_name "$DOMAIN" || { echo "not a domain or address: $DOMAIN" >&2; exit 1; }',
+  '  if is_ip "$DOMAIN"; then ORIGINS="https://$DOMAIN:8585,http://$DOMAIN:8585"; else ORIGINS="https://$DOMAIN:8585,https://$DOMAIN"; fi',
+  '  MONITOR_PASSWORD=$(random_hex 12)',
+  '  ( umask 077',
+  '    printf "%s\\n" "# P00RIJA Cryptography, written by the clean-server installer. Keep it private."',
+  '    printf "DOMAIN=%s\\n" "$DOMAIN"',
+  '    printf "EXTERNAL_IP=%s\\n" "$PUBLIC_IP"',
+  '    printf "APP_PORT=8585\\n"',
+  '    printf "CHAT_ALLOWED_ORIGINS=%s\\n" "$ORIGINS"',
+  '    printf "MONITOR_PASSWORD=%s\\n" "$MONITOR_PASSWORD"',
+  '    printf "TURN_USER=p00rija-%s\\n" "$(random_hex 4)"',
+  '    printf "TURN_PASSWORD=%s\\n" "$(random_hex 16)"',
+  '    printf "TURN_SECRET=%s\\n" "$(random_hex 32)"',
+  '    printf "VAPID_SUBJECT=mailto:admin@%s\\n" "$DOMAIN"',
+  '    printf "CERT_MODE=\\nCERTBOT_EMAIL=\\n"',
+  '  ) > .env',
+  '  chmod 600 .env',
+  '  PASSWORD_SHOWN=$MONITOR_PASSWORD',
+  'fi',
+  'echo "==> starting the stack (docker compose; the first build takes a while)"',
+  'APP_VERSION=$(sed -n "s/.*\\"version\\": *\\"\\([^\\"]*\\)\\".*/\\1/p" package.json | head -1)',
+  'APP_VERSION=$APP_VERSION OPS_INSTALL_DIR=$PWD OPS_BACKUP_DIR=$PWD/backups docker compose -p config -f config/docker-compose.yaml --env-file .env up -d --build',
+  'DOMAIN_NOW=$(sed -n "s/^DOMAIN=//p" .env | tail -1)',
+  'echo "==> done."',
+  'echo "    App:        https://$DOMAIN_NOW:8585/"',
+  'echo "    Dashboard:  https://$DOMAIN_NOW:8585/Monitor_Server"',
+  'if [ -n "$PASSWORD_SHOWN" ]; then',
+  '  echo "    Password:   $PASSWORD_SHOWN"',
+  '  echo "    It is in .env as MONITOR_PASSWORD; change it in the dashboard."',
+  'fi',
+  'is_ip "$DOMAIN_NOW" && echo "    The certificate is self-signed, so the browser asks you to accept it once." || true',
+  'exit 0',
+  '}',
+  '',
+].join('\n');
 function bootstrapToken() {
   if (process.env.CHAT_BOOTSTRAP_TOKEN) return process.env.CHAT_BOOTSTRAP_TOKEN;
   try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')).bootstrapToken || ''; } catch (_error) { return ''; }
@@ -7477,35 +7587,19 @@ if (BOOTSTRAP_PORT > 0) {
     res.setHeader('Cache-Control', 'no-store');
     if (asked.startsWith('/install')) {
       res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8' });
-      res.end([
-        '#!/bin/sh',
-        '# P00RIJA Cryptography — clean-server installer.',
-        '# Pulls the program (and nothing of the server it came from) and stands',
-        '# the stack up on THIS machine with a fresh, empty identity.',
-        'set -eu',
-        'SRC=${1:?usage: install <origin> <bootstrap-token> [dir]}',
-        'TOKEN=${2:?bootstrap token required}',
-        'DIR=${3:-$HOME/poorija-cryptography}',
-        'echo "==> fetching the clean bundle from $SRC"',
-        'mkdir -p "$DIR"',
-        'curl -fsSL -H "X-Bootstrap-Token: $TOKEN" "$SRC/bundle" -o "$DIR/bundle.tar.gz"',
-        'tar -xzf "$DIR/bundle.tar.gz" -C "$DIR"',
-        'rm -f "$DIR/bundle.tar.gz"',
-        'cd "$DIR"',
-        'echo "==> preparing configuration"',
-        'cp docker-compose.env.example .env 2>/dev/null || cp config/docker-compose.env.example .env 2>/dev/null || true',
-        'test -f .env || { echo "no .env template found in the bundle" >&2; exit 1; }',
-        'echo "==> starting the stack (docker compose)"',
-        'docker compose -f config/docker-compose.yaml --env-file .env up -d --build',
-        'echo "==> done. The app serves on :8585; edit .env for your domain, then restart."',
-      ].join('\n'));
+      res.end(BOOTSTRAP_INSTALLER);
       return;
     }
     if (asked.startsWith('/bundle')) {
       const token = bootstrapToken();
       if (!token) { res.writeHead(503).end('bootstrap token not configured on the server'); return; }
-      if (String(req.headers['x-bootstrap-token'] || '') !== token) { res.writeHead(401).end('bad bootstrap token'); return; }
+      if (!secretsMatch(req.headers['x-bootstrap-token'] || '', token)) { res.writeHead(401).end('bad bootstrap token'); return; }
       if (!INSTALL_HOST_DIR) { res.writeHead(503).end('ops paths not configured on the server'); return; }
+      /* Used once, as the panel says. It never changed, so a token copied
+         into one machine's shell history went on fetching the bundle from
+         this server for as long as it ran. The panel's next "show install"
+         hands out the new one. */
+      rotateBootstrapToken();
       opsBundleTo(res, 'poorija-clean-bundle.tar.gz');
       return;
     }
@@ -7525,6 +7619,148 @@ if (BOOTSTRAP_PORT > 0) {
     console.log(`Bootstrap installer available on port ${BOOTSTRAP_PORT}`);
   });
 }
+
+/* ---- updates: a signed package, passed along the family, applied at the right time
+ *
+ * scripts/lib/relay-updates.js decides; this is where it meets the relay: its
+ * family (the signed directory), the people on it (presence), the notice they
+ * get, and the step that applies a package. That step runs on the host, as
+ * the install's owner, the way a deploy does: a privileged helper (the
+ * renewer's image, which every server holds) enters the host's namespaces and
+ * runs scripts/apply-update.sh, which checks the package's hash again before
+ * it touches anything. The helper outlives this process, which the update
+ * restarts; how it went is left in result.json for the relay that comes back. */
+const { createRelayUpdates } = require('./lib/relay-updates.js');
+
+function updatesRequest(url, { headers = {}, to = null } = {}) {
+  return new Promise((resolve) => {
+    let target;
+    try { target = new URL(url); } catch (_error) { resolve({ ok: false, status: 0 }); return; }
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') { resolve({ ok: false, status: 0 }); return; }
+    const transport = target.protocol === 'https:' ? https : http;
+    const request = transport.request(target, {
+      method: 'GET', headers,
+      rejectUnauthorized: verifyTlsFor({ origin: target.origin, familyMember: true, verifyTls: TRANSIT_VERIFY_TLS }),
+      /* Idle, not total: a package of a few hundred megabytes over a slow
+         international path takes as long as it takes. */
+      timeout: 120000,
+    }, (response) => {
+      if (response.statusCode !== 200) { response.resume(); resolve({ ok: false, status: response.statusCode }); return; }
+      if (to) {
+        /* Never into a file that is already there (a link someone put down). */
+        const out = fs.createWriteStream(to, { mode: 0o644, flags: 'wx' });
+        let size = 0;
+        response.on('data', (chunk) => { size += chunk.length; if (size > 3 * 1024 * 1024 * 1024) request.destroy(new Error('too large')); });
+        response.on('error', () => resolve({ ok: false, status: 0 }));
+        out.on('error', () => resolve({ ok: false, status: 0 }));
+        out.on('finish', () => resolve({ ok: true, status: 200 }));
+        response.pipe(out);
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on('data', (chunk) => { size += chunk.length; if (size > 65536) request.destroy(new Error('too large')); else chunks.push(chunk); });
+      response.on('end', () => {
+        try { resolve({ ok: true, status: 200, json: JSON.parse(Buffer.concat(chunks).toString('utf8')) }); } catch (_error) { resolve({ ok: false, status: 200 }); }
+      });
+      response.on('error', () => resolve({ ok: false, status: 0 }));
+    });
+    request.on('timeout', () => request.destroy(new Error('timeout')));
+    request.on('error', () => resolve({ ok: false, status: 0 }));
+    request.end();
+  });
+}
+
+const UPDATE_APPLY_SCRIPT = [
+  'dir=$1; pkg=$2; out=$3; version=$4; code=0',
+  'owner=$(stat -c %U "$dir") || exit 1',
+  'home=$(getent passwd "$owner" | cut -d: -f6)',
+  'runuser -u "$owner" -- env HOME="$home" PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \\',
+  '  bash -c \'cd "$1" && bash scripts/apply-update.sh "$2"\' apply "$dir" "$pkg" > "$out/apply.log.tmp" 2>&1 || code=$?',
+  'printf \'{"code":%d,"at":"%s","version":"%s"}\\n\' "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$version" > "$out/result.json"',
+  'mv "$out/apply.log.tmp" "$out/apply.log"',
+].join('\n');
+
+async function launchUpdateHelper({ file, version }) {
+  if (!dockerAvailable() || !INSTALL_HOST_DIR || !OPS_DATA_HOST_DIR) return { ok: false, reason: 'docker-socket-not-mounted' };
+  if (!/^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(String(version))) return { ok: false, reason: 'bad-version' };
+  const renewer = await dockerEngineJson('GET', '/v1.44/containers/Poorija-Cryptography_CertRenewer/json');
+  const image = renewer.data?.Image;
+  if (!renewer.ok || !image) return { ok: false, reason: 'no-helper-image' };
+  const hostUpdates = `${OPS_DATA_HOST_DIR}/updates`;
+  const created = await dockerEngineJson('POST', `/v1.44/containers/create?name=poorija-update-${Date.now()}`, {
+    Image: image,
+    Entrypoint: ['nsenter'],
+    Cmd: ['-t', '1', '-m', '-u', '-i', '-n', '-p', '--', '/bin/sh', '-c', UPDATE_APPLY_SCRIPT, 'apply',
+      INSTALL_HOST_DIR, `${hostUpdates}/${path.basename(file)}`, hostUpdates, String(version)],
+    HostConfig: { Privileged: true, PidMode: 'host', AutoRemove: true },
+  });
+  if (!created.ok) return { ok: false, reason: `create-${created.status}`, detail: String(created.data?.message || '').slice(0, 200) };
+  const started = await dockerEngineJson('POST', `/v1.44/containers/${created.data.Id}/start`, null);
+  return started.ok ? { ok: true } : { ok: false, reason: `start-${started.status}` };
+}
+
+const relayUpdates = createRelayUpdates({
+  dir: process.env.CHAT_UPDATES_DIR || path.join(defaultDataDir, 'updates'),
+  operatorKey: () => OPERATOR_KEY,
+  currentVersion: () => RELAY_BUILD.version,
+  self: { id: relayIdentity.id, publicKey: publicRelayIdentity(relayIdentity).publicKey, privateKey: relayPrivate },
+  peers: () => (directoryState.doc?.body.relays || []).filter((relay) => relay.id !== relayIdentity.id)
+    .map((relay) => ({ id: relay.id, origins: [...(relay.inside || []), ...(relay.origins || [])].filter((origin) => /^https?:\/\//.test(origin)) })),
+  isMember: (id) => isFamilyPeer(id),
+  fetchJson: (url) => updatesRequest(url),
+  fetchFile: (url, { headers, to }) => updatesRequest(url, { headers, to }),
+  onlineCount: () => presence.size,
+  notifyClients: (notice) => {
+    for (const record of presence.values()) {
+      if (record.ws && record.ws.readyState === WebSocket.OPEN) safeSend(record.ws, { type: 'server-update', ...notice });
+    }
+  },
+  launchApply: launchUpdateHelper,
+  noticeMs: Math.max(1000, Number(process.env.CHAT_UPDATE_NOTICE_MS || 120000)),
+  log: (line) => monitorLog(line),
+  /* Told before the alert queue below exists, at a start that finished an
+     update: so said on the next turn. */
+  onEvent: (event) => setImmediate(() => reportUpdateEvent(event)),
+});
+
+app.get('/p00rija-update/offer', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(relayUpdates.offer());
+});
+app.get('/p00rija-update/package/:version', (req, res) => {
+  const pathname = `/p00rija-update/package/${req.params.version}`;
+  const allowed = relayUpdates.authorize(req.headers['x-p00rija-update-auth'], pathname);
+  if (!allowed.ok) { res.status(401).json({ ok: false, reason: allowed.reason }); return; }
+  const file = relayUpdates.packageFile(req.params.version);
+  if (!file) { res.status(404).json({ ok: false, reason: 'not-held' }); return; }
+  monitorLog(`update: handing ${req.params.version} to ${allowed.id.slice(0, 12)}`);
+  res.set({ 'Content-Type': 'application/x-tar', 'Content-Length': String(fs.statSync(file).size), 'Cache-Control': 'no-store' });
+  fs.createReadStream(file).pipe(res);
+});
+app.get('/Monitor_Server/updates', authMiddleware, (req, res) => {
+  res.json({ ok: true, ...relayUpdates.status(), canApply: Boolean(dockerAvailable() && INSTALL_HOST_DIR && OPS_DATA_HOST_DIR) });
+});
+app.post('/Monitor_Server/updates/stage', authMiddleware, async (req, res) => {
+  const name = String(req.body?.file || '');
+  if (!/^[A-Za-z0-9._-]{1,120}$/.test(name)) { res.status(400).json({ ok: false, reason: 'bad-file' }); return; }
+  const file = path.join(relayUpdates.incomingDir, name);
+  if (!fs.existsSync(file)) { res.status(404).json({ ok: false, reason: 'no-such-file' }); return; }
+  const kept = await relayUpdates.stage(file, { from: 'panel', policy: req.body?.policy });
+  try { fs.unlinkSync(file); } catch (_error) { /* moved or gone */ }
+  res.status(kept.ok ? 200 : 400).json(kept);
+});
+app.post('/Monitor_Server/updates/policy', authMiddleware, async (req, res) => res.json(await relayUpdates.setPolicy(req.body || {})));
+app.post('/Monitor_Server/updates/cancel', authMiddleware, async (req, res) => res.json(await relayUpdates.cancel()));
+app.post('/Monitor_Server/updates/check', authMiddleware, async (req, res) => res.json(await relayUpdates.checkPeers()));
+
+setTimeout(() => {
+  relayUpdates.sample();
+  relayUpdates.tick().catch(() => {});
+  setInterval(() => relayUpdates.sample(), 5 * 60 * 1000).unref();
+  setInterval(() => { relayUpdates.tick().catch((error) => monitorLog(`update: ${error.message}`)); }, 60 * 1000).unref();
+  setInterval(() => { relayUpdates.checkPeers().catch((error) => monitorLog(`update: ${error.message}`)); }, Math.max(60000, Number(process.env.CHAT_UPDATE_PEER_MS || 10 * 60 * 1000))).unref();
+}, Math.max(1000, Number(process.env.CHAT_UPDATE_START_MS || 60000))).unref();
 
 app.post('/self-destruct/records', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
@@ -7814,17 +8050,18 @@ function filesNearlyExhausted() {
  * Telegram, from the relay that has the bot's token and a chat to send to;
  * every other relay hands its messages over its transit link to one that does.
  */
-const ALERT_TELEGRAM_CHAT_ID = String(process.env.CHAT_ALERT_TELEGRAM_CHAT_ID || '').trim();
-const ALERT_LABEL = String(process.env.CHAT_ALERT_LABEL || '').trim() || (() => {
+const alertChatId = () => telegramSettings.get().chatId;
+const ALERT_LABEL_DEFAULT = String(process.env.CHAT_ALERT_LABEL || '').trim() || (() => {
   try { return new URL(process.env.CHAT_PUBLIC_RELAY_ORIGIN || '').hostname || os.hostname(); } catch (_error) { return os.hostname(); }
 })();
-const ALERT_INTERVAL_MS = Math.max(5000, Number(process.env.CHAT_ALERT_INTERVAL_MS || 60000));
+/* The name this server goes by on its cards: the panel's, else .env's, else
+   its domain's. */
+const alertLabel = () => telegramSettings.get().label || ALERT_LABEL_DEFAULT;
 /* coturn's relay ports, as config/docker-compose.yaml hands them to it. */
 const TURN_PORT_MIN = Number(process.env.CHAT_TURN_PORT_MIN || 49152);
 const TURN_PORT_MAX = Number(process.env.CHAT_TURN_PORT_MAX || 50152);
 const COTURN_CONTAINER = process.env.COTURN_CONTAINER || 'Poorija-Cryptography_Coturn';
-const alertLimits = alertThresholds();
-const alertState = createAlertState({ label: ALERT_LABEL, remindMs: Math.max(1, Number(process.env.CHAT_ALERT_REMIND_HOURS || 6)) * 3600000 });
+const alertState = createAlertState({ label: ALERT_LABEL_DEFAULT, remindMs: () => telegramSettings.get().remindHours * 3600000 });
 /* The relays alerts may go to and come from, by id. Named outright, never
    "whoever is linked": an alert says how full this machine is and what it is
    called, and a transit link can be with another operator's relay, who has
@@ -7848,21 +8085,20 @@ const alertIdsSeen = new Set();
 let alertNetworkBefore = null;
 let alertsChecking = false;
 let alertsFlushing = false;
-const alertsByTelegram = () => Boolean(TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID);
+const alertsByTelegram = () => Boolean(telegramToken() && alertChatId());
 
-/* What each kind of problem is called on its card. */
-const ALERT_TITLES = {
-  disk: 'دیسک تقریباً پر است', memory: 'حافظهٔ سرور تقریباً پر است', 'relay-memory': 'حافظهٔ رله نزدیک سقف است', files: 'فایل‌های باز نزدیک سقف است',
-  'turn-down': 'سرویس TURN اجرا نمی‌شود', 'turn-ports': 'ظرفیت TURN رو به پایان است', bandwidth: 'پهنای باند نزدیک سقف است', peer: 'لینک یک رلهٔ دیگر قطع است',
-  'peer-via': 'لینک مستقیم برقرار نیست؛ از راه دیگر',
-};
+/* Which of the operator's categories (scripts/lib/telegram-settings.js) a
+   card of each level falls in, when it does not say. */
+const CATEGORY_OF_LEVEL = { warn: 'warn', critical: 'critical', ok: 'resolved', start: 'start', test: 'test', security: 'security', partner: 'partner', peer: 'peer', update: 'update', info: 'report' };
 
 /* An event for the operator: { level, title, body }. The card is drawn when
    it is sent, with the server's state of that moment. fromPeer and report
-   are for a card another relay of the family sent over its link. */
-function queueReport({ level = 'info', title = '', body = '' }, fromPeer = '', report = null) {
+   are for a card another relay of the family sent over its link. `force`
+   is the panel's test, which goes whatever the categories and quiet hours. */
+function queueReport({ level = 'info', title = '', body = '', category = '', force = false }, fromPeer = '', report = null) {
   if (fromPeer && alertOutbox.filter((entry) => entry.fromPeer).length >= ALERT_PEER_SHARE) return;
-  alertOutbox.push({ id: crypto.randomBytes(8).toString('hex'), level, title: String(title), body: String(body), report, fromPeer, at: Date.now(), sentAt: 0 });
+  const kind = telegramConfig.CATEGORIES.includes(category) ? category : (report?.category || CATEGORY_OF_LEVEL[level] || 'peer');
+  alertOutbox.push({ id: crypto.randomBytes(8).toString('hex'), level, category: kind, force: Boolean(force), title: String(title), body: String(body), report, fromPeer, at: Date.now(), sentAt: 0 });
   /* Full: the oldest of a peer's go first, then the oldest of this relay's. */
   while (alertOutbox.length > ALERT_OUTBOX_LIMIT) {
     const peerIndex = alertOutbox.findIndex((entry) => entry.fromPeer);
@@ -7889,7 +8125,7 @@ function directoryIdentity(id) {
   return { label: String(entry.name || ''), region: entry.region || '', cluster: entry.cluster || '', gateway: gateway ? gateway.priority : Number(entry.gateway) || 0, relayId: id };
 }
 function selfIdentity() {
-  return { ...directoryIdentity(relayIdentity.id), label: ALERT_LABEL, host: publicHost(), version: RELAY_BUILD?.version || '', build: RELAY_BUILD?.buildTag || '' };
+  return { ...directoryIdentity(relayIdentity.id), label: alertLabel(), host: publicHost(), version: RELAY_BUILD?.version || '', build: RELAY_BUILD?.buildTag || '' };
 }
 function liveUserCount() {
   const now = Date.now();
@@ -7925,7 +8161,7 @@ async function liveSnapshot() {
 }
 const activeProblems = () => alertState.active().map(({ level, text }) => ({ level, text }));
 async function ownReport(entry = {}) {
-  return { level: entry.level || 'info', title: entry.title || '', body: entry.body || '', at: entry.at || Date.now(), identity: selfIdentity(), snapshot: await liveSnapshot(), problems: activeProblems() };
+  return { level: entry.level || 'info', category: entry.category || '', title: entry.title || '', body: entry.body || '', at: entry.at || Date.now(), identity: selfIdentity(), snapshot: await liveSnapshot(), problems: activeProblems() };
 }
 /* The card for one queued event: a peer's from the fields it sent, with the
    id its link proved; this relay's own with its state as it is sent. */
@@ -7934,11 +8170,68 @@ async function cardFor(entry) {
     const fields = entry.report || { level: 'peer', body: entry.body, at: entry.at, identity: directoryIdentity(entry.fromPeer) };
     const cleaned = relayReport.cleanReport(fields);
     if (!cleaned.identity.label) cleaned.identity.label = directoryIdentity(entry.fromPeer).label;
-    return relayReport.renderCard({ ...cleaned, provenId: entry.fromPeer });
+    return relayReport.renderCard({ ...cleaned, provenId: entry.fromPeer, ...cardOptions() });
   }
-  return relayReport.renderCard({ ...relayReport.cleanReport(await ownReport(entry)), provenId: relayIdentity.id });
+  return relayReport.renderCard({ ...relayReport.cleanReport(await ownReport(entry)), provenId: relayIdentity.id, ...cardOptions() });
 }
-const sendCard = (html) => sendTelegram(TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, html, { html: true });
+/* How the operator wants a card drawn: language, time zone, footer, and how
+   much of the server and its state to show. */
+function cardOptions(current = telegramSettings.get()) {
+  const design = current.templates;
+  return {
+    lang: current.language, timezone: current.timezone, footer: design.footer, showIdentity: design.showIdentity, showSnapshot: design.showSnapshot,
+    style: design.style, separator: design.separator, direction: design.direction, icons: design.icons, quote: design.quote, custom: design.custom,
+  };
+}
+
+/* What the operator's settings make of one card: not sent (the bot off, or
+   its category off), held for the end of quiet hours, sent without a sound,
+   or sent. A critical card sounds through a mute, and through quiet hours
+   when the operator lets it. */
+function deliveryFor(entry, at = Date.now()) {
+  const current = telegramSettings.get();
+  /* This relay's own test from the panel proves the way, whatever the
+     categories say. Only that: force is never set for what a peer sent, and
+     a peer naming its card a test gets no further than any other card. */
+  if (entry.force && !entry.fromPeer) return { send: true, silent: false };
+  if (!current.enabled) return { send: false, why: 'bot-off' };
+  const flags = current.categories[entry.category] || { on: true, silent: false };
+  if (!flags.on) return { send: false, why: 'category-off' };
+  const critical = entry.level === 'critical';
+  if (telegramSettings.quietNow(at) && !(critical && current.quiet.criticalPasses)) {
+    return current.quiet.mode === 'hold' ? { send: false, hold: true, why: 'quiet-hours' } : { send: true, silent: true };
+  }
+  if (telegramSettings.muted(at) && !critical) return { send: true, silent: true };
+  return { send: true, silent: Boolean(flags.silent) && !critical };
+}
+
+/* What the bot sent lately, and what it did not and why, for the panel. */
+const telegramSentLog = [];
+function noteTelegram(entry) {
+  telegramSentLog.push({ at: Date.now(), ...entry });
+  while (telegramSentLog.length > 60) telegramSentLog.shift();
+}
+let telegramLastSentAt = 0;
+/* One card to the operator's chat: in its category's forum topic, silent
+   when the settings say so, with the buttons on an alert, and no sooner after
+   the last than the operator's gap. */
+async function sendCard(html, { category = 'report', level = 'info', title = '', silent = false, buttons = false } = {}) {
+  const current = telegramSettings.get();
+  const wait = current.minGapSeconds * 1000 - (Date.now() - telegramLastSentAt);
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  const extra = {};
+  if (silent) extra.disable_notification = true;
+  const topic = telegramSettings.topicFor(category);
+  if (topic) extra.message_thread_id = Number(topic);
+  if (buttons && current.buttons) {
+    const words = textFor(current.language).buttons;
+    extra.reply_markup = { inline_keyboard: [[{ text: words.mute, callback_data: 'mute:3600' }, { text: words.status, callback_data: 'status' }]] };
+  }
+  const ok = await sendTelegram(telegramToken(), current.chatId, html, { html: true, extra });
+  telegramLastSentAt = Date.now();
+  noteTelegram({ category, level, title: String(title).slice(0, 120), ok, silent: Boolean(silent) });
+  return ok;
+}
 
 /* The link to hand alerts to: a named or family relay that said it has the
    bot, else the first linked one. */
@@ -7954,9 +8247,29 @@ async function flushAlerts() {
   alertsFlushing = true;
   try {
     while (alertOutbox.length) {
-      const entry = alertOutbox[0];
       if (alertsByTelegram()) {
-        if (!await sendCard(await cardFor(entry))) return;
+        /* The first that may go now: one held for the end of quiet hours
+           stays where it is, and the next is looked at. */
+        let entry = null;
+        let decision = null;
+        for (const candidate of alertOutbox) {
+          const verdict = deliveryFor(candidate);
+          if (verdict.hold) continue;
+          entry = candidate;
+          decision = verdict;
+          break;
+        }
+        if (!entry) return;
+        const title = entry.report?.title || entry.title || '';
+        if (decision.send && !await sendCard(await cardFor(entry), { category: entry.category, level: entry.level, title, silent: decision.silent, buttons: ['warn', 'critical'].includes(entry.level) })) return;
+        if (!decision.send) noteTelegram({ category: entry.category, level: entry.level, title: String(title).slice(0, 120), ok: false, skipped: decision.why });
+        const at = alertOutbox.indexOf(entry);
+        if (at >= 0) alertOutbox.splice(at, 1);
+        continue;
+      }
+      const entry = alertOutbox[0];
+      /* The bot is off on this relay: nothing of its own leaves it. */
+      if (!telegramSettings.get().enabled && !entry.force) {
         alertOutbox.shift();
         continue;
       }
@@ -7996,7 +8309,7 @@ function receiveRelayAlert(payload, link) {
   if (tally.count > 30) return;
   if (payload.report && typeof payload.report === 'object') {
     const report = relayReport.cleanReport(payload.report);
-    queueReport({ level: report.level, title: report.title, body: report.body }, link.peerId, report);
+    queueReport({ level: report.level, title: report.title, body: report.body, category: report.category }, link.peerId, report);
   } else {
     const text = String(payload.text || '').replace(/[\u0000-\u001f\u2028\u2029]+/g, ' ').trim().slice(0, 1500);
     if (!text) return;
@@ -8059,32 +8372,140 @@ async function fleetStatus() {
 }
 
 /* ---- the bot's commands, on the relay that has it ------------------------
-   Only the operator's own chat is answered, and only when no webhook is set
-   for the bot and nothing else is reading its updates. */
-const TELEGRAM_COMMANDS = [
-  { command: 'status', description: 'وضعیت همهٔ سرورها، همین لحظه' },
-  { command: 'servers', description: 'فهرست سرورها با نام، نشانی، خوشه و نسخه' },
-  { command: 'help', description: 'راهنمای ربات' },
-];
-async function answerTelegram(update) {
-  const message = update?.message;
-  if (!message || String(message.chat?.id) !== ALERT_TELEGRAM_CHAT_ID) return;
-  const command = String(message.text || '').trim().split(/\s+/)[0].replace(/@.*$/, '').toLowerCase();
-  if (command === '/status') await sendCard(relayReport.renderFleet({ entries: await fleetStatus() }));
-  else if (command === '/servers') await sendCard(relayReport.renderServers({ entries: await fleetStatus() }));
-  else if (command === '/help' || command === '/start') await sendCard(relayReport.renderHelp({ label: ALERT_LABEL }));
+   Only the operator's own chat is answered — and in it only the people the
+   panel named, when it named any — and only when no webhook is set for the
+   bot and nothing else is reading its updates. A chat the bot is not set
+   for is remembered, not answered, so the panel can offer it. */
+const telegramChatsSeen = new Map();
+function noteTelegramChat(chat, from) {
+  if (!chat || chat.id === undefined) return;
+  const id = String(chat.id);
+  telegramChatsSeen.delete(id);
+  telegramChatsSeen.set(id, {
+    id, type: String(chat.type || '').slice(0, 20), at: Date.now(),
+    title: String(chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || '').replace(/[\u0000-\u001f<>]/g, '').slice(0, 60),
+    username: String(chat.username || from?.username || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 32),
+  });
+  while (telegramChatsSeen.size > 10) telegramChatsSeen.delete(telegramChatsSeen.keys().next().value);
 }
-async function readTelegramCommands() {
-  const hook = await telegramCall(TELEGRAM_BOT_TOKEN, 'getWebhookInfo', {});
+function telegramMayAsk(chat, from) {
+  const current = telegramSettings.get();
+  if (!chat || String(chat.id) !== current.chatId) return false;
+  return !current.admins.length || current.admins.includes(String(from?.id ?? ''));
+}
+/* The commands the operator left on, described in the bot's language. */
+function telegramCommandList() {
+  const current = telegramSettings.get();
+  const words = textFor(current.language).commands;
+  return telegramConfig.COMMANDS.filter((command) => current.commands[command]).map((command) => ({ command, description: words[command] }));
+}
+async function syncTelegramCommands(token = telegramToken()) {
+  if (!token) return;
+  await telegramCall(token, 'setMyCommands', { commands: telegramCommandList() });
+}
+/* An answer in the chat and topic it was asked in. */
+const replyTelegram = (message, html, extra = {}) => sendTelegram(telegramToken(), message.chat.id, html, {
+  html: true, extra: { ...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}), ...extra },
+});
+/* "30m", "2h", "1d" or nothing (an hour), up to seven days. */
+function muteLength(text) {
+  const match = /^(\d{1,4})([mhd]?)$/i.exec(String(text || '1h').trim());
+  if (!match) return 0;
+  const ms = Number(match[1]) * ({ m: 60000, h: 3600000, d: 86400000 }[(match[2] || 'h').toLowerCase()]);
+  return ms > 0 && ms <= 7 * 86400000 ? ms : 0;
+}
+function localTime(at) {
+  const current = telegramSettings.get();
+  try {
+    return new Intl.DateTimeFormat(current.language === 'fa' ? 'fa-IR' : 'en-GB', { timeZone: current.timezone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(at));
+  } catch (_error) {
+    return new Date(at).toISOString().slice(0, 16).replace('T', ' ');
+  }
+}
+async function telegramAnswer(command, argument, message) {
+  const current = telegramSettings.get();
+  const T = textFor(current.language);
+  const options = { lang: current.language, timezone: current.timezone };
+  const allowed = (name) => current.commands[name];
+  if (command === 'status' && allowed('status')) return replyTelegram(message, relayReport.renderFleet({ entries: await fleetStatus(), ...options }));
+  if (command === 'servers' && allowed('servers')) return replyTelegram(message, relayReport.renderServers({ entries: await fleetStatus(), ...options }));
+  if (command === 'alerts' && allowed('alerts')) {
+    const lines = [];
+    for (const entry of await fleetStatus()) {
+      for (const problem of entry.report.problems || []) {
+        lines.push(`${problem.level === 'critical' ? '🔴' : '🟡'} <b>${relayReport.escapeHtml(entry.report.identity.label || entry.provenId.slice(0, 12))}</b>: ${relayReport.escapeHtml(problem.text)}`);
+      }
+    }
+    return replyTelegram(message, lines.length ? [`<b>🚦 ${T.replies.problems}</b>`, ...lines].join('\n').slice(0, 4000) : T.replies.noProblems);
+  }
+  if (command === 'updates' && allowed('updates')) {
+    const staged = relayUpdates.status().staged?.version || '';
+    const lines = (await fleetStatus()).map((entry) => `${entry.answered ? '🟢' : '⛔️'} <b>${relayReport.escapeHtml(entry.report.identity.label || entry.provenId.slice(0, 12))}</b>: <code>${relayReport.escapeHtml(entry.report.identity.version || T.replies.none)}</code>`);
+    if (staged) lines.push('', `⬆️ ${T.replies.staged}: <code>${relayReport.escapeHtml(staged)}</code>`);
+    return replyTelegram(message, [`<b>🏷 ${T.replies.updatesTitle}</b>`, ...lines].join('\n').slice(0, 4000));
+  }
+  if (command === 'version' && allowed('version')) return replyTelegram(message, T.replies.versionOf(relayReport.escapeHtml(alertLabel()), relayReport.escapeHtml(RELAY_BUILD.version || '—'), relayReport.escapeHtml(RELAY_BUILD.buildTag || '')));
+  if (command === 'mute' && allowed('mute')) {
+    const ms = muteLength(argument);
+    if (!ms) return replyTelegram(message, T.replies.badMute);
+    telegramSettings.mute(Date.now(), ms);
+    return replyTelegram(message, T.replies.muted(localTime(Date.now() + ms)));
+  }
+  if (command === 'unmute' && allowed('unmute')) {
+    telegramSettings.unmute();
+    return replyTelegram(message, T.replies.unmuted);
+  }
+  if ((command === 'help' && allowed('help')) || command === 'start') {
+    return replyTelegram(message, relayReport.renderHelp({ label: alertLabel(), lang: current.language, commands: telegramCommandList().map((entry) => entry.command) }));
+  }
+  return null;
+}
+async function answerTelegram(update) {
+  /* A button under an alert: the same as its command. */
+  if (update?.callback_query) {
+    const query = update.callback_query;
+    const message = query.message;
+    const permitted = telegramMayAsk(message?.chat, query.from);
+    await telegramCall(telegramToken(), 'answerCallbackQuery', { callback_query_id: query.id });
+    if (!permitted) return;
+    const data = String(query.data || '');
+    if (data === 'status') await telegramAnswer('status', '', message);
+    else if (/^mute:\d{1,6}$/.test(data)) await telegramAnswer('mute', `${Math.round(Number(data.slice(5)) / 60)}m`, message);
+    return;
+  }
+  const message = update?.message;
+  if (!message?.chat) return;
+  if (String(message.chat.id) !== telegramSettings.get().chatId) { noteTelegramChat(message.chat, message.from); return; }
+  if (!telegramMayAsk(message.chat, message.from)) return;
+  const [first, ...rest] = String(message.text || '').trim().split(/\s+/);
+  if (!first.startsWith('/')) return;
+  await telegramAnswer(first.slice(1).replace(/@.*$/, '').toLowerCase(), rest.join(' '), message);
+}
+/* One reader of the bot's updates at a time: a new token from the panel
+   starts a new one, and the old one stops at its next turn. */
+let telegramReader = 0;
+async function readTelegramCommands(turn) {
+  const token = telegramToken();
+  const hook = await telegramCall(token, 'getWebhookInfo', {});
   if (hook.json?.result?.url) { console.warn('[Telegram] the bot has a webhook; its commands are left to it'); return; }
-  await telegramCall(TELEGRAM_BOT_TOKEN, 'setMyCommands', { commands: TELEGRAM_COMMANDS });
+  await syncTelegramCommands(token);
   /* What was sent while the relay was down is not answered now. */
   let offset = 0;
-  const last = await telegramCall(TELEGRAM_BOT_TOKEN, 'getUpdates', { offset: -1, timeout: 0 });
+  const last = await telegramCall(token, 'getUpdates', { offset: -1, timeout: 0 });
   if (Array.isArray(last.json?.result) && last.json.result.length) offset = last.json.result[last.json.result.length - 1].update_id + 1;
-  for (;;) {
-    const answer = await telegramCall(TELEGRAM_BOT_TOKEN, 'getUpdates', { offset, timeout: 25, allowed_updates: ['message'] }, 40000);
-    if (answer.status === 409) { console.warn('[Telegram] something else reads this bot’s updates; its commands stay with it'); return; }
+  let conflicts = 0;
+  while (turn === telegramReader) {
+    const answer = await telegramCall(token, 'getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] }, 40000);
+    if (turn !== telegramReader) return;
+    /* Another reader: the one before this, finishing its last turn, or
+       something else entirely, which keeps the commands. */
+    if (answer.status === 409) {
+      conflicts += 1;
+      if (conflicts > 3) { console.warn('[Telegram] something else reads this bot’s updates; its commands stay with it'); return; }
+      await new Promise((resolve) => setTimeout(resolve, 30000));
+      continue;
+    }
+    conflicts = 0;
     if (!answer.json?.ok || !Array.isArray(answer.json.result)) { await new Promise((resolve) => setTimeout(resolve, 15000)); continue; }
     for (const update of answer.json.result) {
       offset = Math.max(offset, Number(update.update_id) + 1);
@@ -8092,34 +8513,40 @@ async function readTelegramCommands() {
     }
   }
 }
-if (alertsByTelegram() && process.env.CHAT_TELEGRAM_COMMANDS !== '0' && process.env.CHAT_ALERTS !== '0') {
-  setTimeout(() => readTelegramCommands().catch((error) => console.warn('[Telegram] commands stopped:', error?.message || error)), 3000).unref?.();
+function startTelegramReader(delayMs = 0) {
+  telegramReader += 1;
+  const turn = telegramReader;
+  if (!telegramToken() || process.env.CHAT_TELEGRAM_COMMANDS === '0' || process.env.CHAT_ALERTS === '0') return;
+  setTimeout(() => readTelegramCommands(turn).catch((error) => console.warn('[Telegram] commands stopped:', error?.message || error)), delayMs).unref?.();
 }
+startTelegramReader(3000);
 
-/* Once a day, at CHAT_STATUS_REPORT_AT (Tehran time, "09:00" unless set;
-   "off" for none), every server's state. The day it went out is kept, so a
-   restart after that hour does not send it twice. */
-const STATUS_REPORT_AT = (() => {
-  const wanted = String(process.env.CHAT_STATUS_REPORT_AT ?? '09:00').trim();
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(wanted) ? wanted : '';
-})();
+/* Once a day, at the time the operator chose (CHAT_STATUS_REPORT_AT in .env,
+   "09:00" unless set, "off" for none) in their time zone, every server's
+   state. The day it went out is kept, so a restart after that hour does not
+   send it twice. */
 const STATUS_REPORT_FILE = process.env.CHAT_STATUS_REPORT_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'status-report-day.txt');
-const tehranClock = () => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-    .formatToParts(new Date()).map((part) => [part.type, part.value]));
-  return { day: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour === '24' ? '00' : parts.hour}:${parts.minute}` };
-};
 let statusReportBusy = false;
 async function maybeSendStatusReport() {
-  if (statusReportBusy || !STATUS_REPORT_AT || !alertsByTelegram()) return;
-  const { day, time } = tehranClock();
-  if (time < STATUS_REPORT_AT) return;
+  const current = telegramSettings.get();
+  if (statusReportBusy || !current.report.on || !alertsByTelegram()) return;
+  const { day, time } = telegramSettings.clock();
+  if (time < current.report.at) return;
   let sentDay = '';
   try { sentDay = fs.readFileSync(STATUS_REPORT_FILE, 'utf8').trim(); } catch (_error) { /* never sent */ }
   if (sentDay === day) return;
+  const decision = deliveryFor({ category: 'report', level: 'info' });
+  if (decision.hold) return;
   statusReportBusy = true;
   try {
-    if (await sendCard(relayReport.renderFleet({ entries: await fleetStatus(), title: 'گزارش روزانهٔ سرورها' }))) fs.writeFileSync(STATUS_REPORT_FILE, `${day}\n`);
+    const title = textFor(current.language).fleet.daily;
+    if (!decision.send) {
+      noteTelegram({ category: 'report', level: 'info', title, ok: false, skipped: decision.why });
+      fs.writeFileSync(STATUS_REPORT_FILE, `${day}\n`);
+      return;
+    }
+    const html = relayReport.renderFleet({ entries: await fleetStatus(), title, lang: current.language, timezone: current.timezone });
+    if (await sendCard(html, { category: 'report', level: 'info', title, silent: decision.silent })) fs.writeFileSync(STATUS_REPORT_FILE, `${day}\n`);
   } finally {
     statusReportBusy = false;
   }
@@ -8128,7 +8555,7 @@ if (process.env.CHAT_ALERTS !== '0') {
   setInterval(() => { maybeSendStatusReport().catch(() => {}); }, Math.max(1000, Number(process.env.CHAT_STATUS_REPORT_CHECK_MS || 30000))).unref?.();
 }
 
-async function alertReadings() {
+async function alertReadings(limits) {
   const reading = {};
   const stat = await fsp.statfs(defaultDataDir).catch(() => null);
   if (stat) reading.disk = { free: Number(stat.bavail) * Number(stat.bsize), total: Number(stat.blocks) * Number(stat.bsize) };
@@ -8158,7 +8585,7 @@ async function alertReadings() {
     if (relayPeers.linkFor(id)) { alertPeerDownSince.delete(id); continue; }
     if (!alertPeerDownSince.has(id)) alertPeerDownSince.set(id, now);
     const forMs = now - alertPeerDownSince.get(id);
-    if (forMs >= alertLimits.peerDownMs) {
+    if (forMs >= limits.peerDownMs) {
       const nameOf = (relayId) => directoryState.doc?.body?.relays?.find((relay) => relay.id === relayId)?.name || '';
       const through = familyIds().has(id) ? familyDetour(id) : null;
       reading.peersDown.push({ id, forMs, name: nameOf(id), via: through ? (nameOf(through.peerId) || through.peerId.slice(0, 12)) : '' });
@@ -8172,18 +8599,25 @@ async function checkAlerts() {
      quiet. */
   if (alertsChecking || !(alertsByTelegram() || alertPeers().size)) return;
   alertsChecking = true;
+  const current = telegramSettings.get();
+  const T = textFor(current.language);
   /* A start is announced: after a crash and a restart, that is how the
      operator hears of it. */
   if (!alertsAnnounced) {
     alertsAnnounced = true;
-    queueReport({ level: 'start', title: 'رله راه‌اندازی شد', body: 'پایش دیسک، حافظه، TURN و لینک رله‌ها روشن است.' });
+    queueReport({ level: 'start', title: T.start.title, body: T.start.body });
   }
   try {
-    alertState.update(evaluateAlerts(await alertReadings(), alertLimits)).forEach((message) => queueReport({
-      level: message.level,
-      title: message.level === 'ok' ? `برطرف شد: ${ALERT_TITLES[message.key.split(':')[0]] || 'هشدار'}` : `${ALERT_TITLES[message.key.split(':')[0]] || 'هشدار'}${message.reminder ? ' (هنوز ادامه دارد)' : ''}`,
-      body: message.text,
-    }));
+    const limits = limitsFrom(current.thresholds);
+    alertState.update(evaluateAlerts(await alertReadings(limits), limits, current.language, current.alertKeys)).forEach((message) => {
+      const name = T.alertTitles[message.key.split(':')[0]] || T.alertTitles.default;
+      queueReport({
+        level: message.level,
+        category: message.level === 'ok' ? 'resolved' : message.reminder ? 'reminder' : message.level,
+        title: message.level === 'ok' ? T.resolved(name) : `${name}${message.reminder ? T.stillOn : ''}`,
+        body: message.text,
+      });
+    });
     await flushAlerts();
   } catch (error) {
     console.warn('[Alerts] the check failed:', error?.message || error);
@@ -8191,10 +8625,98 @@ async function checkAlerts() {
     alertsChecking = false;
   }
 }
-if (process.env.CHAT_ALERTS !== '0') {
-  setTimeout(checkAlerts, Math.min(15000, ALERT_INTERVAL_MS)).unref?.();
-  setInterval(checkAlerts, ALERT_INTERVAL_MS).unref?.();
+/* Each check sets the next, so a new interval from the panel holds from the
+   check after it. */
+function scheduleAlertCheck(first = false) {
+  const every = telegramSettings.get().checkSeconds * 1000;
+  setTimeout(() => { checkAlerts().finally(() => scheduleAlertCheck()); }, first ? Math.min(15000, every) : every).unref?.();
 }
+if (process.env.CHAT_ALERTS !== '0') scheduleAlertCheck(true);
+
+/* Each step of a server update, to the operator (scripts/lib/relay-updates.js
+   tells; this says it in their language). A failure is critical. */
+function reportUpdateEvent(event) {
+  const T = botText();
+  const version = String(event?.version || '');
+  const say = {
+    staged: () => T.update.staged(version), notifying: () => T.update.notifying(version, event.seconds), applying: () => T.update.applying(version),
+    done: () => T.update.done(version), failed: () => T.update.failed(version, String(event.reason || '').slice(0, 80)),
+  }[event?.kind];
+  if (!say || !version) return;
+  queueReport({ level: event.kind === 'failed' ? 'critical' : 'update', category: 'update', title: T.update.titles[event.kind], body: say() });
+  flushAlerts().catch(() => {});
+}
+
+/* ---- the bot's settings, for the central panel's Telegram section --------
+   Reading shows the token masked, never whole. Writing is a signed request
+   on a locked relay (scripts/lib/operator-signature.js): whoever sets the
+   token and the chat reads every alert. */
+app.get('/Monitor_Server/telegram', authMiddleware, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    settings: telegramSettings.view(),
+    sends: alertsByTelegram(),
+    via: alertsByTelegram() ? 'telegram' : (Array.from(alertPeers()).some((id) => relayPeers.linkFor(id)?.isOpen()) ? 'relay-link' : 'none'),
+    waiting: alertOutbox.length,
+    held: alertOutbox.filter((entry) => deliveryFor(entry).hold).length,
+    active: alertState.active(),
+    chats: Array.from(telegramChatsSeen.values()).reverse(),
+    choices: { categories: telegramConfig.CATEGORIES, alertKeys: telegramConfig.ALERT_KEYS, commands: telegramConfig.COMMANDS, topics: telegramConfig.TOPICS, languages: ['fa', 'en'] },
+    label: alertLabel(),
+  });
+});
+app.post('/Monitor_Server/telegram', authMiddleware, async (req, res) => {
+  const body = req.body || {};
+  const hasToken = Object.prototype.hasOwnProperty.call(body, 'token');
+  if (hasToken && body.token !== '' && !telegramConfig.validToken(body.token)) { res.status(400).json({ ok: false, reason: 'token' }); return; }
+  const before = telegramSettings.get();
+  const tokenBefore = telegramToken();
+  if (body.reset === true) telegramSettings.reset();
+  if (body.settings !== undefined) {
+    const changed = telegramSettings.update(body.settings);
+    if (!changed.ok) { res.status(400).json({ ok: false, reason: changed.reason }); return; }
+  }
+  if (hasToken) telegramSettings.setToken(body.token);
+  const after = telegramSettings.get();
+  monitorLog(`Telegram settings changed${hasToken ? ' (token)' : ''}${req.signedBy ? ` by ${req.signedBy}` : ''}`);
+  if (telegramToken() !== tokenBefore) startTelegramReader();
+  else if (before.language !== after.language || JSON.stringify(before.commands) !== JSON.stringify(after.commands)) syncTelegramCommands().catch(() => {});
+  flushAlerts().catch(() => {});
+  res.json({ ok: true, settings: telegramSettings.view() });
+});
+/* A card of any category drawn as the settings would draw it now, without
+   sending it: what the panel shows beside the form. */
+app.post('/Monitor_Server/telegram/preview', authMiddleware, async (req, res) => {
+  const category = telegramConfig.CATEGORIES.includes(req.body?.category) ? req.body.category : 'warn';
+  /* The card as the form being edited would draw it, before it is saved. */
+  let options = cardOptions();
+  if (req.body?.settings !== undefined) {
+    const tried = telegramSettings.tryOn(req.body.settings);
+    if (!tried.ok) return res.status(400).json(tried);
+    options = cardOptions(tried.settings);
+  }
+  const T = botText();
+  const level = { resolved: 'ok', reminder: 'warn', report: 'info' }[category] || category;
+  if (category === 'report') {
+    res.json({ ok: true, html: relayReport.renderFleet({ entries: [{ answered: true, provenId: relayIdentity.id, report: relayReport.cleanReport(await ownReport()) }], title: T.fleet.daily, ...options }) });
+    return;
+  }
+  const sample = {
+    warn: [T.alertTitles.disk, T.alert.disk({ free: '3.1 GB', total: '48 GB', pct: 6 })],
+    critical: [T.alertTitles['turn-down'], T.alert['turn-down']()],
+    resolved: [T.resolved(T.alertTitles.disk), T.alert.disk({ free: '3.1 GB', total: '48 GB', pct: 6 })],
+    reminder: [`${T.alertTitles.memory}${T.stillOn}`, T.alert.memory({ free: '210 MB', total: '4.0 GB', pct: 5 })],
+    start: [T.start.title, T.start.body], test: [T.test.title, T.test.body], security: [T.security.title, T.security.body('/Monitor_Server/gateways', 'operator')],
+    update: [T.update.titles.staged, T.update.staged(RELAY_BUILD.version || '0.0.0')], partner: [T.kinds.partner, '—'], peer: [T.kinds.peer, '—'],
+  }[category];
+  const html = relayReport.renderCard({ ...relayReport.cleanReport(await ownReport({ level, category, title: sample[0], body: sample[1] })), provenId: relayIdentity.id, ...options });
+  res.json({ ok: true, html, delivery: deliveryFor({ category, level }) });
+});
+app.get('/Monitor_Server/telegram/log', authMiddleware, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, sent: telegramSentLog.slice().reverse(), chats: Array.from(telegramChatsSeen.values()).reverse() });
+});
 
 function socketBudgetRefused(request, socket) {
   const address = socketAddress(request);

@@ -8,7 +8,7 @@
 
 [فارسی](#فارسی) · [English](#english)
 
-![version](https://img.shields.io/badge/version-2.98.85-0ea5e9?style=for-the-badge)
+![version](https://img.shields.io/badge/version-2.98.90-0ea5e9?style=for-the-badge)
 ![platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux%20·%20Android%20·%20iOS%20·%20PWA-1e293b?style=for-the-badge)
 ![crypto](https://img.shields.io/badge/AES--256--GCM%20·%20RSA--OAEP--3072%20·%20Argon2id-10b981?style=for-the-badge)
 ![offline](https://img.shields.io/badge/works%20fully%20offline-8b5cf6?style=for-the-badge)
@@ -151,7 +151,7 @@ End-to-end encrypted messaging that keeps working when the other person is not t
 - **Every message type survives the queue** — text, files, stickers, polls,
   location, contact cards, voice notes and secret messages.
 - **Files up to 4 GB** between two people who are both online — the bytes go
-  peer to peer, so the ceiling is the devices, not a server — and up to 100 MB
+  peer to peer, so the ceiling is the devices, not a server — and up to 200 MB
   queued for somebody who is away. Streamed in encrypted 64 KB chunks with
   per-chunk IVs and real backpressure; the receiver moves each finished run
   into the blob store as it arrives, so neither side ever holds the file in
@@ -407,21 +407,23 @@ Clients need one thing for this to work: a contact's **home relay**, which
 travels in their identity card — the QR code or the pasted code. Two people on
 different relays exchange a card once; after the first message in each direction
 the return route travels inside the sealed message and the rest is automatic.
-The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
+The full picture is in [docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md); what is
+done and what comes next for a relay network that keeps working when one relay
+is down is in [docs/RELAY-RESILIENCE-ROADMAP.md](docs/RELAY-RESILIENCE-ROADMAP.md).
 
 ### Quick install — client
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Apple silicon) | `P00RIJA.Cryptography_2.98.85_aarch64.dmg` | ad-hoc signed |
-| macOS (Intel + Apple silicon) | `P00RIJA.Cryptography_2.98.85_universal.dmg` | |
+| macOS (Apple silicon) | `P00RIJA.Cryptography_2.98.90_aarch64.dmg` | ad-hoc signed |
+| macOS (Intel + Apple silicon) | `P00RIJA.Cryptography_2.98.90_universal.dmg` | |
 | Windows x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | NSIS installer |
 | Debian / Ubuntu | `..._amd64.deb` / `..._arm64.deb` | |
 | Fedora / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | Arch | `...-x86_64.pkg.tar.zst` | |
 | Any Linux | `..._amd64.AppImage` | `chmod +x` and run |
 | Any Linux (no install) | `...-linux-x86_64.tar.gz` | portable |
-| Android | `P00RIJA-Cryptography-2.98.85-universal.apk` | built from `npm run android:build` |
+| Android | `P00RIJA-Cryptography-2.98.90-universal.apk` | built from `npm run android:build` |
 | iPhone / iPad | — | install the web app from the site: Share → Add to Home Screen. A native `.ipa` needs a paid Apple Developer account; see [MOBILE_BUILD.md](MOBILE_BUILD.md) |
 
 A native install has no origin to learn a relay from — the web app does, because
@@ -997,7 +999,7 @@ modified relay as a service for other people, they are entitled to your source.
 - **هر نوع پیامی از صف جان سالم به در می‌برد** — متن، فایل، استیکر، نظرسنجی،
   موقعیت، کارت مخاطب، پیام صوتی و پیام مخفی.
 - **فایل تا ۴ گیگابایت** وقتی هر دو نفر آنلاین‌اند — بایت‌ها مستقیم بین دو
-  دستگاه می‌روند، پس سقف را دستگاه تعیین می‌کند نه سرور — و تا ۱۰۰ مگابایت در
+  دستگاه می‌روند، پس سقف را دستگاه تعیین می‌کند نه سرور — و تا ۲۰۰ مگابایت در
   صف برای کسی که آنلاین نیست. تکه‌های رمزشدهٔ ۶۴ کیلوبایتی با IV مجزا برای هر
   تکه و کنترل فشار واقعی؛ گیرنده هر دستهٔ کامل‌شده را همان‌جا به blob store
   منتقل می‌کند، پس هیچ‌کدام از دو طرف فایل را در حافظه نگه نمی‌دارند. نمایش
@@ -1251,21 +1253,23 @@ sudo bash scripts/setup.sh --quick --domain chat.example.com \
 هویت او سفر می‌کند — کد QR یا کدی که کپی می‌شود. دو نفر روی دو رلهٔ مختلف یک بار
 کارت رد و بدل می‌کنند؛ بعد از اولین پیام در هر جهت، مسیر بازگشت داخل پیام مهرشده
 سفر می‌کند و بقیه‌اش خودکار است. شرح کامل در
-[docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md).
+[docs/RELAY-NETWORK.md](docs/RELAY-NETWORK.md)؛ آنچه برای شبکه‌ای که با قطع
+شدن یک رله از کار نمی‌افتد انجام شده و آنچه مانده در
+[docs/RELAY-RESILIENCE-ROADMAP.md](docs/RELAY-RESILIENCE-ROADMAP.md) است.
 
 ### نصب سریع — کلاینت
 
 | سکو | فایل | توضیح |
 |---|---|---|
-| مک (Apple silicon) | `P00RIJA.Cryptography_2.98.85_aarch64.dmg` | امضای ad-hoc |
-| مک (اینتل + Apple silicon) | `P00RIJA.Cryptography_2.98.85_universal.dmg` | |
+| مک (Apple silicon) | `P00RIJA.Cryptography_2.98.90_aarch64.dmg` | امضای ad-hoc |
+| مک (اینتل + Apple silicon) | `P00RIJA.Cryptography_2.98.90_universal.dmg` | |
 | ویندوز x64 / ARM64 | `..._x64-setup.exe` / `..._arm64-setup.exe` | نصب‌کنندهٔ NSIS |
 | دبیان / اوبونتو | `..._amd64.deb` / `..._arm64.deb` | |
 | فدورا / RHEL | `...x86_64.rpm` / `...aarch64.rpm` | |
 | آرچ | `...-x86_64.pkg.tar.zst` | |
 | هر لینوکسی | `..._amd64.AppImage` | `chmod +x` و اجرا |
 | هر لینوکسی (بدون نصب) | `...-linux-x86_64.tar.gz` | قابل حمل |
-| اندروید | `P00RIJA-Cryptography-2.98.85-universal.apk` | با `npm run android:build` ساخته می‌شود |
+| اندروید | `P00RIJA-Cryptography-2.98.90-universal.apk` | با `npm run android:build` ساخته می‌شود |
 | آیفون / آیپد | — | وب‌اپ را از سایت نصب کنید: Share ← Add to Home Screen. ساخت `.ipa` نیتیو به حساب پولی Apple Developer نیاز دارد؛ [MOBILE_BUILD.md](MOBILE_BUILD.md) را ببینید |
 
 نصب نیتیو مبدأیی ندارد که از رویش رله را یاد بگیرد — برنامهٔ وب دارد، چون از

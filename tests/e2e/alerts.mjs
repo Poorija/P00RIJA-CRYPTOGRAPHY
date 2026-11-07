@@ -119,7 +119,8 @@ const telegram = http.createServer((req, res) => {
 await new Promise((resolve) => telegram.listen(0, '127.0.0.1', resolve));
 
 let stacks = null;
-const texts = () => sent.map((message) => String(message.text || ''));
+/* A card's lines start with a direction mark (right to left for Persian). */
+const texts = () => sent.map((message) => String(message.text || '').replace(/[\u200E\u200F]/g, ''));
 const waitFor = async (test, ms = 40000) => {
   for (let waited = 0; waited < ms; waited += 250) {
     if (test()) return true;

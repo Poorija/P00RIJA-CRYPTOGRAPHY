@@ -27,13 +27,14 @@ export const login = await import(pathToFileURL(path.join(ROOT, 'tools/panel/log
 export const PASSWORD = 'A-long-enough-password-42';
 
 /* Its answer comes from files the suite can change between calls: the mode
-   (denied, script, or anything else to stay up like a tunnel) and, in
+   (denied, hostkey, script, or anything else to stay up like a tunnel) and, in
    script mode, what it prints. */
 const STAND_IN_SSH = `#!/bin/sh
 echo "$*" >> "$FAKE_SSH_LOG"
 mode="$(cat "$FAKE_SSH_MODE_FILE" 2>/dev/null || echo denied)"
 case "$mode" in
   denied) echo "op@relay.example: Permission denied (publickey,password)." >&2; exit 255 ;;
+  hostkey) printf '%s\n' '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@' '@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @' 'Host key verification failed.' >&2; exit 255 ;;
   script) cat > "$FAKE_SSH_LOG.stdin"; cat "$FAKE_SSH_OUT_FILE" 2>/dev/null; exit 0 ;;
   *) exec sleep 30 ;;
 esac

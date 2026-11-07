@@ -56,8 +56,7 @@ async function app(tag, w=1440, h=900) {
 async function instrument(page) {
   await page.evaluate(() => {
     window.__toasts = [];
-    const orig = window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification = (m,t)=>{window.__toasts.push(`${t}: ${m}`); return orig?.(m,t);};
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const w = navigator.clipboard.writeText.bind(navigator.clipboard);
     navigator.clipboard.writeText=(t)=>{window.__clip.push(t); return w(t).catch(()=>{});};
     document.getElementById('mobileInstallGate')?.classList.add('hidden');

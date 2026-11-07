@@ -13,57 +13,23 @@
  * key, and the sections of sections.js. */
 import { signHeader, deviceKey, makeDeviceKey, forgetDeviceKey } from './sign.js';
 import {
-  state, hooks, t, $, esc, num, pct, api, serverNamed, deviceListed, show, explain, clusterOf, byCluster, allServers, shownServers,
+  state, hooks, t, $, esc, api, serverNamed, deviceListed, show, explain, clusterOf, allServers, shownServers, setView, setFolded, applySearch, forgetReads,
 } from './ui.js';
 import { SECTIONS, runRow, runGroup, runPicked, runForm, openMailbox, showLogs, exportCsv } from './sections.js';
 import { network, networkClick, wireGatewayDrag } from './graph.js';
-import { servers as serversSection, family as familySection, account as accountSection, log as logSection, adminClick, closeDialog } from './admin.js';
+import { servers as serversSection, family as familySection, account as accountSection, adminClick, closeDialog, openDialog } from './admin.js';
+import { updatesClick, updatesChange } from './updates.js';
+import { telegramSection, telegramClick, telegramChange } from './telegram.js';
+import { overview, liveCharts, loadMetrics, refreshSeconds } from './overview.js';
+import { clusters, clustersClick } from './clusters.js';
+import { ops, opsClick } from './ops.js';
+import { build, buildClick } from './build.js';
+import { help, about } from './help.js';
+import { runExport, exportPanelLog } from './reports.js';
+import { wireCharts, forgetCharts } from './charts.js';
+import { admins, sharesClick, strength } from './share.js';
 
 /* ---- the overview and the key --------------------------------------------- */
-
-function serverCard(server) {
-  /* Why a server cannot be reached, when ssh said: a refused key or a missing
-     key file is not the same as a server that is down, and is never retried on
-     its own (a wrong key tried again and again gets an address locked out). */
-  const problem = server.problem && server.problem !== 'unreachable' ? server.problem : 'unreachable';
-  const status = !server.reachable ? `<span class="tag bad" title="${esc(server.problemDetail || '')}">${esc(t(problem))}</span>`
-    : `${server.locked ? `<span class="tag good">${esc(t('locked'))}</span>` : `<span class="tag">${esc(t('unlocked'))}</span>`}${server.passwordOk ? '' : ` <span class="tag warn">${esc(t('passwordNeeded'))}</span>`}`;
-  /* /healthz gives the processor as a percent and memory in MB: the
-     container's use against its limit when it has one, the process's
-     otherwise. */
-  const memory = server.containerMem ? `${num(server.containerMem.usageMb)}${server.containerMem.limitMb ? ` / ${num(server.containerMem.limitMb)}` : ''} MB`
-    : server.memory?.rss ? `${num(server.memory.rss)} MB` : '—';
-  const disk = server.storage ? pct(num(server.storage.total) - num(server.storage.free), num(server.storage.total)) : '—';
-  const links = server.links ? `${num(server.links.up)}/${num(server.links.allowed)}` : '—';
-  const family = server.family ? `${esc(server.family.name)} #${num(server.family.serial)}` : '—';
-  const load = Array.isArray(server.cpu) ? `${Math.round(num(server.cpu[0]))}%` : '—';
-  return `<div class="card" data-server-card="${esc(server.name)}"><div class="row spread"><h3>${esc(server.name)}</h3>${status}</div>
-    <div class="kv">
-      <span>${esc(t('version'))}</span><span class="mono">${esc(server.version || '—')}</span>
-      <span>${esc(t('cpu'))}</span><span class="mono">${esc(load)}</span>
-      <span>${esc(t('memory'))}</span><span>${esc(memory)}</span>
-      <span>${esc(t('disk'))}</span><span>${esc(disk)}</span>
-      <span>${esc(t('online'))}</span><span>${num(server.peers)}</span>
-      <span>${esc(t('links'))}</span><span>${esc(links)}</span>
-      <span>${esc(t('family'))}</span><span>${family}</span>
-      <span>${esc(t('gateway'))}</span><span>${server.gateway ? num(server.gateway) : '—'}</span>
-    </div>
-    <div class="row">
-      <button data-lock="${esc(server.name)}" data-on="${server.locked ? '0' : '1'}"${server.locked ? '' : ' class="acc"'}>${esc(t(server.locked ? 'lockOff' : 'lockOn'))}</button>
-      ${server.passwordOk || !server.reachable ? '' : `<input type="password" data-password="${esc(server.name)}" placeholder="${esc(t('passwordNeeded'))}">`}
-      ${server.reachable ? '' : `<button data-reconnect="${esc(server.name)}">${esc(t('reconnect'))}</button>`}
-    </div>${!server.reachable && server.problemDetail ? `<div class="mut mono small">${esc(server.problemDetail)}</div>` : ''}</div>`;
-}
-
-function renderOverview() {
-  return byCluster(shownServers()).map(([cluster, servers]) => {
-    const up = servers.filter((server) => server.reachable).length;
-    const online = servers.reduce((total, server) => total + num(server.peers), 0);
-    return `<section class="card"><div class="row spread"><strong>${esc(t('cluster'))}: ${esc(cluster)}</strong>
-      <span class="mut">${esc(t('servers'))} ${up}/${servers.length} · ${esc(t('online'))} ${online}</span></div>
-      <div class="cards">${servers.map(serverCard).join('')}</div></section>`;
-  }).join('');
-}
 
 function renderKeys() {
   if (!globalThis.crypto?.subtle) return `<section class="card bad-text">${esc(t('noWebCrypto'))}</section>`;
@@ -77,19 +43,22 @@ function renderKeys() {
     <div class="row"><button id="checkAgain">${esc(t('checkAgain'))}</button><button class="bad" id="forgetKey">${esc(t('forgetKey'))}</button></div></section>`;
 }
 
-state.sections.push({ id: 'overview', title: 'overview', render: renderOverview }, network, ...SECTIONS, { id: 'keys', title: 'keys', render: renderKeys },
-  serversSection, familySection, accountSection, logSection);
+state.sections.push(overview, network, ...SECTIONS, clusters, ops, build, { id: 'keys', title: 'keys', render: renderKeys },
+  serversSection, familySection, admins, accountSection, telegramSection, help, about);
 
 /* The sidebar: what each section is under, and its icon. */
 const GROUPS = [
   ['groupMain', ['overview', 'network']],
-  ['groupAdmin', ['servers', 'clusters', 'family', 'keys', 'account']],
-  ['groupMonitor', ['queues', 'users', 'relays', 'traffic', 'machine', 'reports', 'bootstrap', 'system', 'log']],
+  ['groupAdmin', ['servers', 'clusters', 'family', 'admins', 'partners', 'telegram', 'keys', 'account']],
+  ['groupMonitor', ['queues', 'users', 'relays', 'traffic', 'reports']],
+  ['groupOps', ['build', 'ops']],
+  ['groupInfo', ['help', 'about']],
 ];
 const ICONS = {
   overview: 'fa-gauge-high', network: 'fa-diagram-project', servers: 'fa-server', clusters: 'fa-layer-group', family: 'fa-file-signature', keys: 'fa-key',
   account: 'fa-user-shield', queues: 'fa-inbox', users: 'fa-users', relays: 'fa-tower-broadcast', traffic: 'fa-chart-line', machine: 'fa-hard-drive',
-  reports: 'fa-file-lines', bootstrap: 'fa-seedling', system: 'fa-microchip', log: 'fa-scroll',
+  reports: 'fa-file-lines', telegram: 'fa-paper-plane', partners: 'fa-handshake', build: 'fa-box-open', ops: 'fa-screwdriver-wrench',
+  help: 'fa-circle-question', about: 'fa-circle-info', admins: 'fa-users-gear',
 };
 function renderSidebar() {
   const known = new Set(state.sections.map((section) => section.id));
@@ -122,6 +91,11 @@ function applyLang() {
   document.querySelectorAll('[data-lang-toggle]').forEach((node) => { node.textContent = state.lang === 'fa' ? 'EN' : 'فا'; });
 }
 
+/* A section being read for the first time: a spinner, and after a while a
+   way out (the CSS shows the button only if it takes long). */
+const loadingCard = () => `<section class="card loading-card"><div class="spinner" aria-hidden="true"></div><div><strong>${esc(t('loadingSection'))}</strong><p class="mut">${esc(t('loadingSectionHelp'))}</p>
+  <button class="late" id="reloadSection"><i class="fa-solid fa-rotate"></i> ${esc(t('tryAgain'))}</button></div></section>`;
+
 const current = () => state.sections.find((candidate) => candidate.id === state.tab) || state.sections[0];
 
 function renderFilter() {
@@ -146,8 +120,9 @@ function render() {
   state.rows.clear();
   const section = current();
   const ready = !section.load || state.loaded.has(section.id);
-  $('sections').innerHTML = ready ? section.render() : `<section class="card mut">${esc(t('loading'))}</section>`;
-  if (ready) section.mount?.();
+  $('sections').innerHTML = ready ? section.render() : loadingCard();
+  forgetCharts($('sections'));
+  if (ready) { section.mount?.(); applySearch($('sections')); }
 }
 hooks.render = render;
 state.loaded = new Set();
@@ -157,8 +132,8 @@ state.loaded = new Set();
 /* Someone is typing, or has typed something not yet sent: a redraw now
    would take it away. */
 function typing() {
-  if (document.activeElement?.closest?.('[data-form], [data-ram], [data-cpu], select[data-gw-id], #sections input, #sections select, #sections textarea')) return true;
-  return [...document.querySelectorAll('#sections input:not([type="checkbox"]):not([readonly]), #sections textarea')].some((field) => field.value);
+  if (document.activeElement?.closest?.('[data-form], [data-ram], [data-cpu], select[data-gw-id], #sections input:not([data-search]), #sections select:not([data-view]), #sections textarea')) return true;
+  return [...document.querySelectorAll('#sections input:not([type="checkbox"]):not([type="radio"]):not([readonly]):not([data-search]):not([type="number"]), #sections textarea')].some((field) => field.value);
 }
 
 async function reload({ poll = false, force = false } = {}) {
@@ -181,6 +156,7 @@ async function refresh({ poll = false } = {}) {
 }
 
 function showLogin(message) {
+  bootDone();
   state.data = null;
   $('appView').hidden = true;
   $('loginView').hidden = false;
@@ -188,13 +164,38 @@ function showLogin(message) {
 }
 hooks.loggedOut = () => showLogin(t('sessionEnded'));
 
+function bootDone() { $('boot')?.remove(); }
+
 async function showApp() {
   $('loginView').hidden = true;
   $('appView').hidden = false;
   try { state.device = await deviceKey(); } catch (_error) { state.device = null; }
   await refresh();
+  bootDone();
   render();
+  reload().then(prefetch);
 }
+
+/* Every section's data read quietly in the background after login, one at
+   a time, so each opens with its data already there (and is read again,
+   fresh, when it is opened). */
+const PREFETCH = ['network', 'queues', 'users', 'relays', 'partners', 'traffic', 'clusters', 'reports', 'ops', 'telegram'];
+async function prefetch() {
+  for (const id of PREFETCH) {
+    if (!state.data || document.hidden) return;
+    const section = state.sections.find((candidate) => candidate.id === id);
+    if (!section?.load || state.loaded.has(id) || state.tab === id) continue;
+    try { await section.load(true); state.loaded.add(id); } catch (_error) { /* read when opened */ }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/* The panel itself not answering: said at once, and gone when it answers. */
+hooks.offline = (down) => {
+  const banner = $('offline');
+  if (banner && banner.hidden === !down) return;
+  if (banner) banner.hidden = !down;
+};
 
 async function openTab(id) {
   state.tab = id;
@@ -209,6 +210,32 @@ document.addEventListener('click', async (event) => {
   if (target.closest('#menuToggle')) { document.querySelector('.app')?.classList.toggle('menu-open'); return; }
   if (event.target.id === 'dialog') { closeDialog(); return; }
   if (await adminClick(target)) return;
+  if (await updatesClick(target)) return;
+  if (await telegramClick(target)) return;
+  if (await buildClick(target)) return;
+  if (await opsClick(target)) return;
+  if (await clustersClick(target, { runGroup })) return;
+  if (state.tab === 'admins' && await sharesClick(target)) return;
+  const sub = target.closest('[data-subtab]');
+  if (sub) {
+    const section = sub.getAttribute('data-subtab');
+    setView(`${section}:tab`, sub.getAttribute('data-subtab-key'));
+    /* The operations section reads only what its sub-tab shows. */
+    if (section === 'ops') await reload({ force: true }); else render();
+    return;
+  }
+  if (target.closest('[data-export-run]')) { await runExport(target.closest('[data-export-form]')); return; }
+  if (target.closest('[data-panel-log-export]')) { exportPanelLog(); return; }
+  const editPartner = target.closest('[data-partner-edit]');
+  if (editPartner) { partnerDialog(editPartner.getAttribute('data-partner-edit')); return; }
+  if (target.closest('#partnerSave') || target.closest('#partnerForget')) {
+    const id = target.closest('[data-operator]').getAttribute('data-operator');
+    const forget = Boolean(target.closest('#partnerForget'));
+    const value = (field) => String($(field)?.value || '');
+    const answer = await api('/api/partner-notes', forget ? { operatorId: id, remove: true } : { operatorId: id, label: value('pnLabel'), contact: value('pnContact'), tags: value('pnTags'), notes: value('pnNotes') });
+    if (answer.ok) { state.cache.partners = { ...state.cache.partners, notes: answer.notes }; closeDialog(); render(); } else show(t(answer.reason || 'failed'));
+    return;
+  }
   if (target.closest('[data-lang-toggle]')) {
     state.lang = state.lang === 'fa' ? 'en' : 'fa';
     try { localStorage.setItem('panel_lang', state.lang); } catch (_error) { /* a private window */ }
@@ -218,7 +245,7 @@ document.addEventListener('click', async (event) => {
   }
   const tab = target.closest('[data-tab]');
   if (tab) { await openTab(tab.getAttribute('data-tab')); return; }
-  if (target.closest('#refreshButton')) { await refresh(); await reload({ force: true }); return; }
+  if (target.closest('#refreshButton') || target.closest('#reloadSection')) { forgetReads(); await refresh(); await reload({ force: true }); return; }
   if (state.tab === 'network' && await networkClick(target)) return;
   const act = target.closest('[data-act]');
   if (act) { await runRow(act.getAttribute('data-act'), act.getAttribute('data-row')); return; }
@@ -276,6 +303,19 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('change', async (event) => {
+  if (await updatesChange(event)) return;
+  if (telegramChange(event)) return;
+  const view = event.target.closest('select[data-view]');
+  if (view) {
+    const key = view.getAttribute('data-view');
+    setView(key, view.value);
+    if (['metrics:range', 'overview:refresh', 'overview:focus'].includes(key)) await loadMetrics();
+    if (key === 'overview:refresh') restartLive();
+    render();
+    return;
+  }
+  const check = event.target.closest('[data-view-check]');
+  if (check) { setView(check.getAttribute('data-view-check'), check.checked); render(); return; }
   const box = event.target.closest('[data-password]');
   if (box) {
     await api('/api/password', { server: box.getAttribute('data-password'), password: box.value });
@@ -297,6 +337,31 @@ document.addEventListener('change', async (event) => {
     await reload();
   }
 });
+
+/* The admin's own notes on a partner: kept on this panel, never sent to a server. */
+function partnerDialog(id) {
+  const note = state.cache.partners?.notes?.[String(id).slice(0, 16)] || {};
+  openDialog(`<h2>${esc(t('partnerNotes'))}</h2><p class="mut mono">${esc(String(id).slice(0, 16))}</p><div class="form-grid" data-operator="${esc(id)}">
+    <label><span>${esc(t('label'))}</span><input id="pnLabel" maxlength="60" value="${esc(note.label || '')}"></label>
+    <label><span>${esc(t('contact'))}</span><input id="pnContact" maxlength="120" value="${esc(note.contact || '')}"></label>
+    <label class="wide"><span>${esc(t('tags'))}</span><input id="pnTags" maxlength="120" value="${esc(note.tags || '')}"></label>
+    <label class="wide"><span>${esc(t('notes'))}</span><textarea id="pnNotes" rows="4" maxlength="1000">${esc(note.notes || '')}</textarea></label>
+    <div class="wide row"><button id="partnerSave" class="acc">${esc(t('save'))}</button><button id="partnerForget" class="bad">${esc(t('forgetNotes'))}</button></div></div><p class="mut small">${esc(t('partnerNotesHint'))}</p>`);
+}
+
+document.addEventListener('input', (event) => {
+  if (event.target.id === 'sharePassword') { strength(); return; }
+  const box = event.target.closest?.('[data-search]');
+  if (!box) return;
+  setView(`search:${box.getAttribute('data-search')}`, box.value);
+  applySearch($('sections'));
+});
+/* A group folded or opened stays so, in this browser. */
+document.addEventListener('toggle', (event) => {
+  const group = event.target;
+  if (group?.matches?.('details[data-grp]')) setFolded(group.getAttribute('data-grp'), !group.open);
+}, true);
+wireCharts(document.body);
 
 $('loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -339,6 +404,25 @@ setInterval(async () => {
   /* Typing into a form is not interrupted by a redraw, nor is anything
      half-filled lost to one; the admin's own sections are not redrawn by
      themselves at all. */
-  if (state.busy || typing() || ['servers', 'family', 'account', 'log'].includes(state.tab) || !$('dialog').hidden) return;
+  if (state.busy || typing() || ['servers', 'family', 'account', 'telegram', 'build', 'help', 'about', 'keys', 'admins'].includes(state.tab) || !$('dialog').hidden) return;
   await reload({ poll: true });
 }, 20000);
+/* The live graphs: read again at the rate the overview asks for (1 s to
+   1 min) while they are on screen, and only they are drawn again. */
+let liveTimer = null;
+async function liveTick() {
+  try {
+    const onTraffic = state.tab === 'traffic' && (state.view['traffic:tab'] || 'charts') === 'charts';
+    if (state.data && !document.hidden && !state.busy && $('dialog').hidden && (state.tab === 'overview' || onTraffic)) {
+      await loadMetrics(true);
+      if (state.tab === 'overview' && $('liveCharts')) { $('liveCharts').innerHTML = liveCharts(); forgetCharts($('sections')); }
+      else if (onTraffic && !typing()) render();
+    }
+  } finally {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(liveTick, refreshSeconds() * 1000);
+  }
+}
+liveTimer = setTimeout(liveTick, 5000);
+/* A new rate takes effect at once, not after the old one's wait. */
+function restartLive() { clearTimeout(liveTimer); liveTimer = setTimeout(liveTick, refreshSeconds() * 1000); }

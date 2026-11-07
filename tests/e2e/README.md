@@ -9,6 +9,18 @@
 
 </div>
 
+## Toasts
+
+The app's toasts are drawn by sileo (`vendor/sileo`, rebuilt with
+`npm ci && npm run build` in `tools/vendor-sileo`). Suites read what the page
+told the person from `window.PoorijaApp.toasts.recent()` (newest last,
+`{ type, message, at }`) and reset it with `toasts.clear()`. The shared
+harness maps `window.__toasts` onto that log, so assigning `[]` clears it. Do not
+wrap `showNotification`: that only ever saw the calls made through
+`window.PoorijaApp`. `sileotoasts` checks the toasts themselves: where they
+land, which way Persian runs, and the plain fallback when the bundle cannot
+load.
+
 ## Running them
 
 For an isolated local stack (fresh relay stores and automatic shutdown):

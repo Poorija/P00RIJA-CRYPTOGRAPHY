@@ -314,8 +314,7 @@ check('and it may no longer manage', await B.page.evaluate(() => {
 
 const nonOwner = await pageC.evaluate(async () => {
   window.__toasts = [];
-  const o = window.PoorijaApp?.showNotification?.bind(window.PoorijaApp);
-  if (o) window.PoorijaApp.showNotification = (m, t) => { window.__toasts.push(String(m)); return o(m, t); };
+  Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
   document.getElementById('chatSpaceInfoBtn')?.click();
   await new Promise((r) => setTimeout(r, 800));
   return document.querySelectorAll('[data-space-nuke]').length;

@@ -84,30 +84,16 @@ ok(/if \(system\) void sendDesktopSystemNotification/.test(body),
    real one touches; what is measured is whether the mirror fired. */
 function runToast({ system }) {
   const raised = [];
-  const stack = {
-    id: '', className: '', parentElement: null, nextSibling: null, children: [],
-    appendChild(child) { this.children.push(child); },
-    remove() {},
-  };
-  const element = () => ({
-    className: '', style: {}, innerHTML: '', children: [],
-    querySelector: () => ({ textContent: '' }),
-    remove() {},
-  });
-  const scope = {
-    state: { settings: { notifications: true } },
-    document: {
-      getElementById: (id) => (id === 'toastStack' ? stack : null),
-      createElement: () => element(),
-      body: { appendChild() {} },
-    },
-    setTimeout: () => 0,
-    sendDesktopSystemNotification: (text) => { raised.push(text); },
-  };
+  const drawn = [];
+  /* The toast is drawn by drawToast (sileo, or the plain fallback); what is
+     measured here is only whether the system mirror fired beside it. */
   // eslint-disable-next-line no-new-func
-  new Function('state', 'document', 'setTimeout', 'sendDesktopSystemNotification',
+  new Function('state', 'drawToast', 'sendDesktopSystemNotification',
     `${body}\nshowNotification('Ada: meet me at six', 'info'${system === undefined ? '' : `, { system: ${system} }`});`)(
-    scope.state, scope.document, scope.setTimeout, scope.sendDesktopSystemNotification);
+    { settings: { notifications: true } },
+    (text, type) => { drawn.push(`${type}: ${text}`); },
+    (text) => { raised.push(text); });
+  if (drawn.length !== 1) throw new Error(`the toast itself was drawn ${drawn.length} times`);
   return raised;
 }
 

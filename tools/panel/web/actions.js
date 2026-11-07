@@ -36,6 +36,10 @@ export const READS = [
   { path: '/Monitor_Server/ops-images' },
   { path: '/Monitor_Server/ops-github-check' },
   { path: '/Monitor_Server/ops-status' },
+  /* The Telegram section (telegram.js) reads these and writes the first back,
+     signed: the whole form at once rather than a button per setting. */
+  { path: '/Monitor_Server/telegram', method: 'GET' },
+  { path: '/Monitor_Server/telegram/log', method: 'GET' },
 ];
 
 export const ACTIONS = {

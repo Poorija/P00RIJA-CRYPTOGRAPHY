@@ -40,8 +40,7 @@ async function newPeer(w, h) {
 async function instrument(page) {
   await page.evaluate(() => {
     window.__toasts = [];
-    const orig = window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification = (m, t) => { window.__toasts.push(`${t}: ${m}`); return orig?.(m, t); };
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const write = navigator.clipboard.writeText.bind(navigator.clipboard);
     navigator.clipboard.writeText = (txt) => { window.__clip.push(txt); return write(txt).catch(() => {}); };
     document.getElementById('mobileInstallGate')?.classList.add('hidden');

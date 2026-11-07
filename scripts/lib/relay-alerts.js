@@ -38,6 +38,7 @@
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const { textFor } = require('./telegram-text.js');
 
 const GiB = 1024 ** 3;
 const LEVELS = { warn: 1, critical: 2 };
@@ -120,53 +121,76 @@ function networkBytes(text = null) {
 
 /* ---- what is wrong ------------------------------------------------------- */
 
-/* Readings in, problems out: { key, level, text } each, in Persian — the
-   operator reads them on a phone. */
-function evaluate(reading, limits) {
+/* Readings in, problems out: { key, level, text } each, in the operator's
+   language (Persian unless the panel chose another) — they read them on a
+   phone. `keys` turns a kind of alert off: { bandwidth: false } and the
+   bandwidth is never reported. */
+function evaluate(reading, limits, lang = 'fa', keys = {}) {
+  const say = textFor(lang).alert;
   const found = [];
+  const add = (key, level, kind, params = {}) => {
+    if (keys[kind] === false) return;
+    found.push({ key, level, text: say[kind](params) });
+  };
   const { disk, memory, relay, files, turn, network, peersDown } = reading;
   if (disk && disk.total) {
     const freePct = (disk.free / disk.total) * 100;
     if (freePct < limits.diskFreePct || disk.free < limits.diskFreeBytes) {
       const critical = freePct < limits.diskFreePct / 2 || disk.free < limits.diskFreeBytes / 2;
-      found.push({ key: 'disk', level: critical ? 'critical' : 'warn', text: `دیسک تقریباً پر است: ${formatBytes(disk.free)} آزاد از ${formatBytes(disk.total)} (${Math.round(freePct)}٪). با پر شدن دیسک، صندوق پیام‌ها نوشته نمی‌شوند.` });
+      add('disk', critical ? 'critical' : 'warn', 'disk', { free: formatBytes(disk.free), total: formatBytes(disk.total), pct: Math.round(freePct) });
     }
   }
   if (memory && memory.total) {
     const freePct = (memory.available / memory.total) * 100;
     if (freePct < limits.memoryFreePct) {
-      found.push({ key: 'memory', level: freePct < limits.memoryFreePct / 2 ? 'critical' : 'warn', text: `حافظهٔ سرور تقریباً پر است: ${formatBytes(memory.available)} آزاد از ${formatBytes(memory.total)} (${Math.round(freePct)}٪).` });
+      add('memory', freePct < limits.memoryFreePct / 2 ? 'critical' : 'warn', 'memory', { free: formatBytes(memory.available), total: formatBytes(memory.total), pct: Math.round(freePct) });
     }
   }
   if (relay && relay.limit && percent(relay.rss, relay.limit) >= limits.relayMemoryPct) {
-    found.push({ key: 'relay-memory', level: 'warn', text: `حافظهٔ رله به ${percent(relay.rss, relay.limit)}٪ سقف کانتینرش رسیده (${formatBytes(relay.rss)} از ${formatBytes(relay.limit)}). اتصال تازه با پاسخ «پر است» رد می‌شود.` });
+    add('relay-memory', 'warn', 'relay-memory', { pct: percent(relay.rss, relay.limit), used: formatBytes(relay.rss), limit: formatBytes(relay.limit) });
   }
   if (files && files.limit && percent(files.open, files.limit) >= limits.filesPct) {
-    found.push({ key: 'files', level: 'warn', text: `فایل‌های باز رله به ${percent(files.open, files.limit)}٪ سقف رسیده (${files.open} از ${files.limit}). نزدیک سقف، اتصال تازه رد می‌شود.` });
+    add('files', 'warn', 'files', { pct: percent(files.open, files.limit), open: files.open, limit: files.limit });
   }
   if (turn) {
-    if (turn.running === false) {
-      found.push({ key: 'turn-down', level: 'critical', text: 'سرویس TURN (coturn) اجرا نمی‌شود. تماس‌هایی که بدون رله وصل نمی‌شوند برقرار نخواهند شد.' });
-    }
+    if (turn.running === false) add('turn-down', 'critical', 'turn-down');
     if (Number.isFinite(turn.used) && turn.size > 0 && percent(turn.used, turn.size) >= limits.turnPct) {
       const pct = percent(turn.used, turn.size);
-      found.push({ key: 'turn-ports', level: pct >= 95 ? 'critical' : 'warn', text: `ظرفیت TURN: ${turn.used} از ${turn.size} پورت رلهٔ coturn در استفاده است (${pct}٪). تماس تازه‌ای که به رله نیاز دارد ممکن است وصل نشود.` });
+      add('turn-ports', pct >= 95 ? 'critical' : 'warn', 'turn-ports', { used: turn.used, size: turn.size, pct });
     }
   }
   if (network && limits.linkMbps > 0 && Number.isFinite(network.mbps) && network.mbps >= (limits.linkMbps * limits.linkPct) / 100) {
-    found.push({ key: 'bandwidth', level: network.mbps >= limits.linkMbps * 0.95 ? 'critical' : 'warn', text: `پهنای باند سرور: ${Math.round(network.mbps)} مگابیت بر ثانیه، ${percent(network.mbps, limits.linkMbps)}٪ ظرفیت ${limits.linkMbps} مگابیتی. تماس‌های تصویری از مسیر TURN کیفیت از دست می‌دهند.` });
+    add('bandwidth', network.mbps >= limits.linkMbps * 0.95 ? 'critical' : 'warn', 'bandwidth', { mbps: Math.round(network.mbps), pct: percent(network.mbps, limits.linkMbps), link: limits.linkMbps });
   }
   for (const peer of peersDown || []) {
-    const who = `${peer.name ? `«${peer.name}» ` : ''}(${peer.id.slice(0, 12)})`;
+    const who = `${peer.name ? (lang === 'fa' ? `«${peer.name}» ` : `“${peer.name}” `) : ''}(${peer.id.slice(0, 12)})`;
+    const minutes = Math.round(peer.forMs / 60000);
     /* Reached through another member of the family: nothing is cut off, but
        the direct path is closed and the operator should know it. */
     if (peer.via) {
-      found.push({ key: `peer-via:${peer.id}`, level: 'warn', text: `لینک مستقیم با رلهٔ ${who} ${Math.round(peer.forMs / 60000)} دقیقه است که برقرار نیست؛ پیام‌ها و تماس‌ها از راه «${peer.via}» می‌روند.` });
+      add(`peer-via:${peer.id}`, 'warn', 'peer-via', { who, minutes, via: peer.via });
       continue;
     }
-    found.push({ key: `peer:${peer.id}`, level: 'critical', text: `ارتباط با رلهٔ ${who} ${Math.round(peer.forMs / 60000)} دقیقه است که قطع است. پیام‌ها و تماس‌های بین دو رله برقرار نمی‌شوند.` });
+    add(`peer:${peer.id}`, 'critical', 'peer', { who, minutes });
   }
   return found;
+}
+
+/* The limits evaluate() works to, from the panel's thresholds
+   (scripts/lib/telegram-settings.js): gigabytes and minutes as they are
+   typed, bytes and milliseconds as they are measured. */
+function limitsFrom(thresholds) {
+  return {
+    diskFreePct: thresholds.diskFreePct,
+    diskFreeBytes: thresholds.diskFreeGb * GiB,
+    memoryFreePct: thresholds.memoryFreePct,
+    relayMemoryPct: thresholds.relayMemoryPct,
+    filesPct: thresholds.filesPct,
+    turnPct: thresholds.turnPct,
+    linkMbps: thresholds.linkMbps,
+    linkPct: thresholds.linkPct,
+    peerDownMs: thresholds.peerDownMinutes * 60000,
+  };
 }
 
 /* ---- when to say so ------------------------------------------------------ */
@@ -177,6 +201,7 @@ function evaluate(reading, limits) {
    for two checks in a row — one reading under the line on a disk hovering at
    it would otherwise be a message a minute. */
 function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
+  const remindAfter = () => (typeof remindMs === 'function' ? remindMs() : remindMs);
   const active = new Map();
   return {
     update(found) {
@@ -186,7 +211,7 @@ function createAlertState({ label, remindMs = 6 * 3600000, now = Date.now }) {
         seen.add(problem.key);
         const previous = active.get(problem.key);
         const worse = previous && LEVELS[problem.level] > LEVELS[previous.level];
-        const due = previous && now() - previous.notifiedAt >= remindMs;
+        const due = previous && now() - previous.notifiedAt >= remindAfter();
         if (!previous || worse || due) {
           messages.push({ key: problem.key, level: problem.level, text: problem.text, reminder: Boolean(due && !worse) });
           active.set(problem.key, { ...problem, since: previous?.since || now(), notifiedAt: now(), clear: 0 });
@@ -238,10 +263,19 @@ function telegramCall(token, method, payload = {}, timeoutMs = 15000) {
   });
 }
 /* A message to the operator's chat: Telegram's HTML when asked for, and the
-   same words without markup if Telegram refuses the HTML. */
-async function sendTelegram(token, chatId, text, { html = false } = {}) {
-  const send = (payload) => telegramCall(token, 'sendMessage', { chat_id: chatId, disable_web_page_preview: true, ...payload });
-  let answer = await send(html ? { text: String(text).slice(0, 4000), parse_mode: 'HTML' } : { text: String(text).slice(0, 4000) });
+   same words without markup if Telegram refuses the HTML. `extra` carries
+   what the operator's settings add (silent, a forum topic, buttons); a topic
+   Telegram does not know is dropped rather than the message. */
+async function sendTelegram(token, chatId, text, { html = false, extra = {} } = {}) {
+  let more = { ...extra };
+  const send = (payload) => telegramCall(token, 'sendMessage', { chat_id: chatId, disable_web_page_preview: true, ...more, ...payload });
+  const body = html ? { text: String(text).slice(0, 4000), parse_mode: 'HTML' } : { text: String(text).slice(0, 4000) };
+  let answer = await send(body);
+  if (answer.status === 400 && more.message_thread_id && /thread/i.test(String(answer.json?.description || ''))) {
+    const { message_thread_id: _dropped, ...rest } = more;
+    more = rest;
+    answer = await send(body);
+  }
   if (html && answer.status === 400) {
     const plain = String(text).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     answer = await send({ text: plain.slice(0, 4000) });
@@ -256,6 +290,7 @@ module.exports = {
   turnPortsInUse,
   networkBytes,
   evaluate,
+  limitsFrom,
   createAlertState,
   telegramCall,
   sendTelegram,

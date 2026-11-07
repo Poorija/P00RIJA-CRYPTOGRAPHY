@@ -141,8 +141,7 @@ await page.waitForTimeout(400);
 await page.evaluate(() => document.getElementById('setupBtn')?.click());
 await page.waitForTimeout(4000);
 await page.evaluate(() => { window.__toasts = [];
-  const original = window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-  window.PoorijaApp.showNotification = (m, t) => { window.__toasts.push(`${t}: ${m}`); return original?.(m, t); };
+  Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
   document.getElementById('mobileInstallGate')?.classList.add('hidden'); });
 
 console.log(`\n===== one confirmation per click, however often a tab is opened (${engineName}) =====`);

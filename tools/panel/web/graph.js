@@ -15,7 +15,7 @@
  * the gateways, link two relays by hand, and answer other operators. Every
  * change asks first, and a dangerous one is signed in this browser. */
 import { signHeader } from './sign.js';
-import { state, t, esc, num, api, hooks, show, explain, deviceListed, rowRef, button, allServers, regionText, report } from './ui.js';
+import { state, t, esc, num, api, hooks, show, explain, deviceListed, rowRef, button, allServers, regionText, report, subtabs, viewOf, viewPicker, groupPicker, groupItems, grouped, searchBox, table, tag, kpi, fmtNum, saveFile } from './ui.js';
 import { runGroup, runOn } from './sections.js';
 
 const PALETTE = 8;
@@ -170,15 +170,56 @@ export const network = {
     if (directory.httpStatus === 200) state.cache.directory = directory;
   },
   render() {
-    const graph = state.cache.network;
-    if (!graph?.nodes) return `<section class="card mut">${esc(t('loading'))}</section>`;
+    const full = state.cache.network;
+    if (!full?.nodes) return `<section class="card mut">${esc(t('loading'))}</section>`;
+    const relaysCount = full.nodes.filter((node) => node.kind === 'relay').length;
+    const upEdges = full.edges.filter((edge) => edge.linked).length;
+    const tabs = subtabs('network', [['graph', 'networkGraph'], ['nodes', 'networkNodes', relaysCount], ['links', 'networkLinks', `${upEdges}/${full.edges.length}`], ['gateways', 'gateways'], ['partner', 'partnerRequest']]);
+    const head = `<section class="card">${tabs.html}<div class="kpis">${kpi('familyRelays', fmtNum(relaysCount))}${kpi('linksUp', `${upEdges}/${full.edges.length}`, '', upEdges === full.edges.length ? 'good' : 'warn')}${kpi('partners', fmtNum(full.nodes.filter((node) => node.kind === 'partner').length))}${kpi('clusters', fmtNum(full.clusters.length))}</div></section>`;
+    const name = (key) => full.nodes.find((node) => node.key === key)?.name || key;
+    if (tabs.current === 'nodes') {
+      const mode = groupPicker('network:nodeGroup', ['cluster', 'region', 'kind', 'none'], 'cluster');
+      const keyOf = (node) => (mode.current === 'cluster' ? (node.cluster || t('noCluster')) : mode.current === 'region' ? regionText(node.region) : mode.current === 'kind' ? t(node.kind === 'relay' ? 'relay' : node.kind === 'partner' ? 'partner' : 'external') : t('everything'));
+      const linksOf = (node) => full.edges.filter((edge) => edge.from === node.key || edge.to === node.key);
+      return head + `<section class="card"><div class="toolbar">${mode.html}${searchBox('netnodes')}</div><div data-searchable="netnodes">${grouped('netnodes', groupItems(full.nodes, keyOf), (list) => table(['name', 'kind', 'cluster', 'region', 'gateway', 'state', 'links', 'insideAddresses'], list.map((node) => {
+        const links = linksOf(node);
+        return `<tr><td><button class="link" data-node-pick="${esc(node.key)}"><strong>${esc(node.name)}</strong></button></td><td>${tag(t(node.kind === 'relay' ? 'relay' : node.kind === 'partner' ? 'partner' : 'external'), 'mut')}</td><td>${esc(node.cluster || '—')}</td><td>${esc(regionText(node.region))}</td><td>${node.gateway ? num(node.gateway) : '—'}</td>
+          <td>${node.kind !== 'relay' ? esc(node.state ? t(`st${node.state.charAt(0).toUpperCase()}${node.state.slice(1)}`) : '—') : node.reachable === false ? tag(t('unreachable'), 'bad') : node.reachable ? tag(node.locked ? t('locked') : t('unlocked'), 'good') : tag(t('notConnected'), 'mut')}</td>
+          <td>${links.filter((edge) => edge.linked).length}/${links.length}</td><td class="mono small">${esc((node.inside || []).join(' ') || '—')}</td></tr>`;
+      })))}</div></section>`;
+    }
+    if (tabs.current === 'links') {
+      const mode = groupPicker('network:linkGroup', ['kind', 'state', 'cluster', 'none'], 'kind');
+      const clusterOfKey = (key) => full.nodes.find((node) => node.key === key)?.cluster || '—';
+      const keyOf = (edge) => (mode.current === 'kind' ? t(`${edge.kind}Link`) : mode.current === 'state' ? t(edge.linked ? 'linked' : 'down') : mode.current === 'cluster' ? [clusterOfKey(edge.from), clusterOfKey(edge.to)].sort().join(' ⇄ ') : t('everything'));
+      return head + `<section class="card"><div class="toolbar">${mode.html}${searchBox('netlinks')}</div><div data-searchable="netlinks">${grouped('netlinks', groupItems(full.edges, keyOf), (list) => table(['from', 'to', 'kind', 'state'], list.map((edge) => `<tr><td>${esc(name(edge.from))}</td><td>${esc(name(edge.to))}</td><td>${tag(t(`${edge.kind}Link`), 'mut')}</td><td>${edge.linked ? tag(t('linked'), 'good') : tag(t('down'), 'bad')}</td></tr>`)), { summary: (list) => esc(`${list.filter((edge) => edge.linked).length}/${list.length} ${t('linked')}`) })}</div></section>`;
+    }
+    if (tabs.current === 'gateways') return head + `<section class="card"><strong>${esc(t('gateways'))}</strong><p class="mut">${esc(t('gwOrderHint'))}</p>${gatewayList(full)}</section>`;
+    if (tabs.current === 'partner') {
+      const { found } = state.cache.relays || {};
+      const servers = allServers().map((server) => `<option value="${esc(server.name)}">${esc(server.name)}</option>`).join('');
+      return head + `<section class="card"><strong>${esc(t('partnerRequest'))}</strong>
+        <div class="row" data-form="partner-lookup"><select data-field="server">${servers}</select><input data-field="origin" class="mono wide" placeholder="https://relay.example.com:8585"><button data-form-run="partner-lookup">${esc(t('lookup'))}</button>
+        ${found ? `<span class="mut">${esc(found.name || '—')} · <span class="mono">${esc(String(found.id).slice(0, 16))}</span></span>${button('partner-request', rowRef(found), { cls: 'acc' })}` : ''}</div>
+        <p class="mut">${esc(t('partnersManageHint'))}</p><button data-tab="partners">${esc(t('partners'))}</button></section>`;
+    }
+    /* The picture, with what is shown chosen: partners or not, only links
+       that are down, one cluster. */
+    const showPartners = viewOf('network:partners', true) !== false;
+    const downOnly = viewOf('network:downOnly', false) === true;
+    const onlyCluster = viewOf('network:cluster', '');
+    const keepNode = (node) => (showPartners || node.kind === 'relay') && (!onlyCluster || node.kind !== 'relay' || node.cluster === onlyCluster);
+    const nodes = full.nodes.filter(keepNode);
+    const keys = new Set(nodes.map((node) => node.key));
+    const edges = full.edges.filter((edge) => keys.has(edge.from) && keys.has(edge.to) && (!downOnly || !edge.linked));
+    const graph = { ...full, nodes, edges, clusters: full.clusters.map((cluster) => ({ ...cluster, members: cluster.members.filter((key) => keys.has(key)) })).filter((cluster) => cluster.members.length) };
     /* Nodes stay where they were drawn last, so new data does not shuffle the
        picture; only a node never drawn before is placed afresh. */
     const memo = Object.fromEntries(state.cache.positions || []);
     for (const key of state.cache.replace || []) delete memo[key];
     state.cache.replace = [];
     const at = layOut(graph, { ...memo, ...(graph.layout || {}), ...(state.cache.dragged || {}) });
-    state.cache.positions = at;
+    state.cache.positions = new Map([...(state.cache.positions || []), ...at]);
     const boxes = frames(graph, at);
     state.cache.frames = boxes;
     const xs = [...at.values()].map((p) => p.x); const ys = [...at.values()].map((p) => p.y);
@@ -190,16 +231,14 @@ export const network = {
       + graph.edges.map((edge) => edgeSvg(edge, at)).join('')
       + graph.nodes.map((node) => nodeSvg(node, at.get(node.key), node.key === state.cache.selected)).join('')
       + '</svg>';
-    const { found } = state.cache.relays || {};
-    const servers = allServers().map((server) => `<option value="${esc(server.name)}">${esc(server.name)}</option>`).join('');
-    return `<section class="card"><div class="row spread"><strong>${esc(t('network'))}</strong>
+    const cluster = viewPicker('network:cluster', [['', 'allClusters'], ...full.clusters.map((entry) => [entry.name, entry.name])], '', 'cluster');
+    return head + `<section class="card"><div class="row spread"><strong>${esc(t('network'))}</strong>
         <div class="row legend"><span class="edge-key family up">${esc(t('familyLink'))}</span><span class="edge-key family down">${esc(t('down'))}</span><span class="edge-key manual">${esc(t('manualLink'))}</span><span class="edge-key partner">${esc(t('partnerLink'))}</span><span class="edge-key via">${esc(t('pathVia'))}</span></div></div>
-        <div class="graph-wrap">${svg}<aside class="card" id="nodeDetails">${details(graph, state.cache.selected)}</aside></div>
-        <p class="mut">${esc(t('graphHint'))}</p></section>
-      <section class="card"><strong>${esc(t('gateways'))}</strong><p class="mut">${esc(t('gwOrderHint'))}</p>${gatewayList(graph)}</section>
-      <section class="card"><strong>${esc(t('partnerRequest'))}</strong>
-        <div class="row" data-form="partner-lookup"><select data-field="server">${servers}</select><input data-field="origin" class="mono wide" placeholder="https://relay.example.com:8585"><button data-form-run="partner-lookup">${esc(t('lookup'))}</button>
-        ${found ? `<span class="mut">${esc(found.name || '—')} · <span class="mono">${esc(String(found.id).slice(0, 16))}</span></span>${button('partner-request', rowRef(found), { cls: 'acc' })}` : ''}</div></section>`;
+        <div class="toolbar">${cluster.html}<label class="check"><input type="checkbox" data-view-check="network:partners"${showPartners ? ' checked' : ''}> ${esc(t('showPartners'))}</label>
+          <label class="check"><input type="checkbox" data-view-check="network:downOnly"${downOnly ? ' checked' : ''}> ${esc(t('downOnly'))}</label>
+          <button id="layoutReset"><i class="fa-solid fa-arrows-rotate"></i> ${esc(t('layoutReset'))}</button><button id="graphExport"><i class="fa-solid fa-file-export"></i> JSON</button></div>
+        <div class="graph-wrap">${svg}<aside class="card" id="nodeDetails">${details(full, state.cache.selected)}</aside></div>
+        <p class="mut">${esc(t('graphHint'))}</p></section>`;
   },
   mount() {
     const svg = document.getElementById('graph');
@@ -285,6 +324,26 @@ export async function editDirectory(edits) {
 export async function networkClick(target) {
   const graph = state.cache.network;
   if (!graph) return false;
+  if (target.closest('#layoutReset')) {
+    if (!confirm(t('confirmLayoutReset'))) return true;
+    await api('/api/layout', { reset: true });
+    state.cache.positions = null;
+    state.cache.dragged = {};
+    if (graph.layout) graph.layout = {};
+    hooks.render();
+    return true;
+  }
+  if (target.closest('#graphExport')) {
+    saveFile('network.json', JSON.stringify({ nodes: graph.nodes, edges: graph.edges, clusters: graph.clusters }, null, 2), 'application/json');
+    return true;
+  }
+  const picked = target.closest('[data-node-pick]');
+  if (picked) {
+    state.cache.selected = picked.getAttribute('data-node-pick');
+    state.view['network:tab'] = 'graph';
+    hooks.render();
+    return true;
+  }
   const nodeOf = (button_) => graph.nodes.find((entry) => entry.key === button_.getAttribute('data-node-key'));
   if (target.closest('#moveButton')) {
     const node = nodeOf(target.closest('#moveButton'));

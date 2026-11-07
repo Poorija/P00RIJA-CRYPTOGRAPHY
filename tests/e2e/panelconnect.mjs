@@ -41,7 +41,7 @@ const bin = tmp('bin');
 fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh
 echo "$*" >> "$FAKE_SSH_LOG"
 case "$FAKE_SSH" in
-  denied) echo "pooriya@relay.example: Permission denied (publickey,password)." >&2; exit 255 ;;
+  denied) echo "deploy@relay.example: Permission denied (publickey,password)." >&2; exit 255 ;;
   timeout) echo "ssh: connect to host relay.example port 22: Operation timed out" >&2; exit 255 ;;
   *) exec sleep 30 ;;
 esac
@@ -82,7 +82,9 @@ ${extra}`);
   const b = servers.find((server) => server.name === 'b');
   check('a server behind a jump knows the server it goes through', b?.ssh.jump?.host === 'a.example' && b.ssh.jump.user === 'op', JSON.stringify(b?.ssh.jump || null));
   const args = core.sshArgs(b.ssh).join(' ');
-  check('and its ssh goes through that server', args.includes(`ProxyCommand=ssh -p 22 -o BatchMode=yes -i '${path.join(home, '.ssh/deploy_key')}' -o IdentitiesOnly=yes op@a.example -W %h:%p`), args);
+  /* The jump takes a new host the same way the target does: trusted the first
+     time, refused if it ever changes (core.mjs, sshArgs). */
+  check('and its ssh goes through that server', args.includes(`ProxyCommand=ssh -p 22 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i '${path.join(home, '.ssh/deploy_key')}' -o IdentitiesOnly=yes op@a.example -W %h:%p`), args);
 
   /* ---- a refused key is tried once ---------------------------------------- */
   const deniedLog = path.join(tmp('log'), 'calls.log');

@@ -91,14 +91,37 @@ export function resolveKeyPath(key, { home = os.homedir(), hostSshDir = process.
 }
 
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
-export const sshArgs = (ssh, extra = []) => [
-  '-p', ssh.port, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
-  ...(process.env.POORIJA_PANEL_KNOWN_HOSTS ? ['-o', `UserKnownHostsFile=${process.env.POORIJA_PANEL_KNOWN_HOSTS}`] : []),
-  ...(ssh.key ? ['-i', ssh.key, '-o', 'IdentitiesOnly=yes'] : []),
-  /* Through a faster server, the way scripts/deploy.sh goes (its JUMP). */
-  ...(ssh.jump ? ['-o', `ProxyCommand=ssh -p ${ssh.jump.port || 22} -o BatchMode=yes${ssh.jump.key ? ` -i ${shellQuote(ssh.jump.key)} -o IdentitiesOnly=yes` : ''} ${ssh.jump.user}@${ssh.jump.host} -W %h:%p`] : []),
-  ...extra, `${ssh.user}@${ssh.host}`,
-];
+/* Host keys: a server met for the first time is trusted and remembered; a
+ * server whose key has CHANGED since is refused, as always.
+ *
+ * Without accept-new, BatchMode turned every new server into "Host key
+ * verification failed" — and that was filed as a refused key, so adding a
+ * server whose key was installed correctly said "SSH did not accept the key".
+ * The panel never asks a question at a terminal, so there was no way through.
+ *
+ * POORIJA_PANEL_KNOWN_HOSTS (set by the panel to a file in its state folder)
+ * is listed first, so a key learned here is written there and outlives the
+ * container; ~/.ssh/known_hosts — the copy of the operator's — is still read,
+ * so every server already known stays pinned to the key it had. */
+const knownHostsOption = () => {
+  const panelFile = process.env.POORIJA_PANEL_KNOWN_HOSTS;
+  if (!panelFile) return [];
+  const files = [panelFile, path.join(os.homedir(), '.ssh', 'known_hosts')];
+  return ['-o', `UserKnownHostsFile=${files.map((file) => `"${file}"`).join(' ')}`];
+};
+const HOST_KEY_OPTIONS = ['-o', 'StrictHostKeyChecking=accept-new'];
+export const sshArgs = (ssh, extra = []) => {
+  const known = knownHostsOption();
+  const jumpKnown = known.length ? ` -o ${shellQuote(known[1])}` : '';
+  return [
+    '-p', ssh.port, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+    ...HOST_KEY_OPTIONS, ...known,
+    ...(ssh.key ? ['-i', ssh.key, '-o', 'IdentitiesOnly=yes'] : []),
+    /* Through a faster server, the way scripts/deploy.sh goes (its JUMP). */
+    ...(ssh.jump ? ['-o', `ProxyCommand=ssh -p ${ssh.jump.port || 22} -o BatchMode=yes -o StrictHostKeyChecking=accept-new${jumpKnown}${ssh.jump.key ? ` -i ${shellQuote(ssh.jump.key)} -o IdentitiesOnly=yes` : ''} ${ssh.jump.user}@${ssh.jump.host} -W %h:%p`] : []),
+    ...extra, `${ssh.user}@${ssh.host}`,
+  ];
+};
 /* A script on stdin to `bash -s`: whatever the login shell, and nothing on
    a command line. */
 export const onServer = (ssh, script, timeout = 60000) => {
@@ -134,10 +157,16 @@ export function freePort() {
    address out after a few failed logins, and a tunnel that retried a wrong key
    every minute was exactly that. Only a network that did not answer is tried
    again, further apart each time. */
-export const SSH_FAILURES = new Set(['auth-failed', 'key-missing', 'host-unknown']);
+export const SSH_FAILURES = new Set(['auth-failed', 'key-missing', 'host-unknown', 'host-key-changed']);
 export function sshFailure(stderr) {
   const text = String(stderr || '');
-  if (/Permission denied|Too many authentication failures|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(text)) return 'auth-failed';
+  /* A server answering with a different key than the one remembered for it
+     is not a refused login key, and saying it was sent people looking at the
+     wrong thing. It is the one case that may mean somebody in the middle, so
+     it is named for what it is and never retried. With accept-new a plain
+     "verification failed" is that too (a new key is otherwise taken). */
+  if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed|Host key for .* has changed/i.test(text)) return 'host-key-changed';
+  if (/Permission denied|Too many authentication failures/i.test(text)) return 'auth-failed';
   if (/Could not resolve hostname|Name or service not known|nodename nor servname/i.test(text)) return 'host-unknown';
   return '';
 }

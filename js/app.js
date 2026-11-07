@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.98.85';
+const APP_VERSION_SEMVER = '2.98.90';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v178';
+  return 'chat-v183';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -60,14 +60,16 @@ window.PoorijaUpdate?.setEnabled(Boolean(on));
 syncUpdateCheckUi();
 }
 
-/* Offers a newer release, and opens the right file for this machine.
+/* Offers a newer release: the same kind of file as the one installed, for
+ * this machine (js/update-check.js).
  *
- * Nothing is installed here and nothing is fetched into the app's own memory:
- * accepting opens the asset in the system browser, which downloads it where
- * that person's downloads go, and they install it themselves. Neither phone
- * platform lets an app replace itself, and on the desktop a self-updater that
- * downloads and runs a binary is a remote code execution channel into a
- * cryptography app -- which is a poor trade for saving one click.
+ * On the desktop the shell downloads it itself, through the app's own proxy
+ * (the browser it used to be handed to downloaded nothing on a network only
+ * that proxy gets through), into the Downloads folder, and checks it against
+ * the release's SHA256SUMS. Nothing is installed or run here: the person
+ * opens the file and installs it, as before. A self-updater that runs what
+ * it downloaded is a remote code execution channel into a cryptography app.
+ * Where the shell cannot, the link still goes to the browser.
  */
 async function offerUpdate(latest) {
 const updater = window.PoorijaUpdate;
@@ -91,6 +93,39 @@ okLabel,
 cancelLabel: state.language === 'fa' ? 'بعداً' : 'Not now',
 });
 if (!accepted) return;
+const desktop = window.PoorijaDesktop;
+if (hasFile && desktop?.available && desktop.downloadUpdate && !window.__POORIJA_NATIVE_MOBILE__) {
+const fa = state.language === 'fa';
+const name = latest.asset.name;
+let stop = () => {};
+try {
+showNotification(fa ? `دانلود ${name} آغاز شد…` : `Downloading ${name}…`, 'info');
+let said = 0;
+stop = await desktop.onUpdateProgress(({ received, total }) => {
+const share = total ? Math.floor((received / total) * 4) * 25 : 0;
+if (share > said && share < 100) {
+said = share;
+showNotification(fa ? `دانلود ${name}: ${share}٪` : `Downloading ${name}: ${share}%`, 'info');
+}
+});
+const saved = await desktop.downloadUpdate(latest.asset.url, name);
+stop?.();
+const open = await PoorijaDialogs.confirm(fa
+? `${name} دانلود شد و با فهرست SHA256 انتشار جور بود:\n${saved.path}\n\nهمین حالا بازش کنم تا نصبش کنید؟`
+: `${name} is downloaded and matches the release’s SHA256 list:\n${saved.path}\n\nOpen it now to install it?`, {
+title: fa ? 'به‌روزرسانی دانلود شد' : 'The update is downloaded',
+okLabel: fa ? 'باز کردن' : 'Open',
+cancelLabel: fa ? 'نشان دادن در پوشه' : 'Show in folder',
+});
+await desktop.showDownload(saved.token, open).catch(() => {});
+return;
+} catch (error) {
+stop?.();
+showNotification(fa
+? `دانلود در خود برنامه نشد (${String(error?.message || error).slice(0, 120)})؛ لینک در مرورگر باز می‌شود.`
+: `The app could not download it (${String(error?.message || error).slice(0, 120)}); opening the link in the browser.`, 'warning');
+}
+}
 const target = hasFile ? latest.asset.url : latest.page;
 try {
 /* The native shells hand https links to the operating system; the browser
@@ -6616,7 +6651,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.85-chat-v178';
+const reloadKey = 'poorija-sw-reload-2.98.90-chat-v183';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6629,7 +6664,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.85-chat-v178', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.90-chat-v183', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();
@@ -11780,6 +11815,118 @@ function describeMediaError(error, want = 'both') {
  * push from the service worker instead. */
 function showNotification(message, type = 'info', { system = true } = {}) {
 if (!state.settings.notifications) return;
+drawToast(String(message || ''), type);
+if (system) void sendDesktopSystemNotification(message, type);
+}
+/* The toasts themselves are sileo's (vendor/sileo, built by
+ * tools/vendor-sileo): React and sileo live in that one script and are reached
+ * only through window.PoorijaSileo. Until it has run — it is deferred like
+ * everything else — or if it never does, the plain toast below draws instead,
+ * so a notice is never lost to a script that did not load.
+ *
+ * #toastStack stays the one host for both and stays the body's last child; see
+ * the note in showPlainToast for why. */
+const TOAST_TYPES = ['success', 'error', 'warning', 'info'];
+const TOAST_LOG_LIMIT = 50;
+/* The last few toasts, newest last, for the end-to-end suites: they read what
+   the page told the person from here instead of wrapping showNotification,
+   which only ever caught the calls that went through window.PoorijaApp and
+   missed every one made inside this file. In memory only, and no more than
+   the stack itself showed a moment ago. */
+const toastLog = [];
+let sileoToaster = null;
+let sileoToasterTheme = '';
+function toastStackHost() {
+let stack = document.getElementById('toastStack');
+if (!stack) {
+stack = document.createElement('div');
+stack.id = 'toastStack';
+stack.className = 'toast-stack';
+}
+if (stack.parentElement !== document.body || stack.nextSibling) {
+document.body.appendChild(stack);
+}
+return stack;
+}
+function toastTitle(type) {
+const fa = state.language === 'fa';
+return {
+success: fa ? 'انجام شد' : 'Done',
+error: fa ? 'خطا' : 'Error',
+warning: fa ? 'هشدار' : 'Warning',
+info: fa ? 'اطلاع' : 'Notice'
+}[type];
+}
+function sileoToasts() {
+const library = window.PoorijaSileo;
+if (!library?.mount || !library.sileo) return null;
+const theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+const stack = toastStackHost();
+try {
+if (!sileoToaster || !stack.isConnected || stack.dataset.toaster !== 'sileo') {
+stack.textContent = '';
+stack.className = 'toast-stack toast-stack-sileo';
+stack.dataset.toaster = 'sileo';
+sileoToaster = library.mount(stack, { position: 'top-center', theme });
+sileoToasterTheme = theme;
+} else if (sileoToasterTheme !== theme) {
+sileoToaster.update({ position: 'top-center', theme });
+sileoToasterTheme = theme;
+}
+} catch (_error) {
+sileoToaster = null;
+delete stack.dataset.toaster;
+stack.className = 'toast-stack';
+stack.textContent = '';
+return null;
+}
+/* The words line up with the language the app speaks; the frame around
+   them stays left to right (css/styles.css). */
+stack.dataset.dir = state.language === 'fa' ? 'rtl' : 'ltr';
+return library.sileo;
+}
+/* One notice's id, short and made only of letters, digits and dashes. sileo
+   names the SVG filter that rounds the corners where the pill meets the body
+   after the id and points at it with url(#…); the message itself — spaces,
+   Persian, a colon — made that url() invalid, the filter was dropped, and
+   those corners came out square. The same notice still gets the same id. */
+function toastId(kind, message) {
+let hash = 0x811c9dc5;
+for (let index = 0; index < message.length; index += 1) {
+hash = Math.imul(hash ^ message.charCodeAt(index), 0x01000193);
+}
+return `toast-${kind}-${(hash >>> 0).toString(36)}`;
+}
+function drawToast(message, type) {
+const kind = TOAST_TYPES.includes(type) ? type : 'info';
+toastLog.push({ type: kind, message, at: Date.now() });
+if (toastLog.length > TOAST_LOG_LIMIT) toastLog.shift();
+const sileo = sileoToasts();
+if (sileo) {
+try {
+sileo[kind]({
+/* sileo gives every toast one shared id unless told otherwise, so a
+   second notice replaced the first before it could be read. One id per
+   distinct notice keeps them stacked as before, and the same notice
+   raised again refreshes its own toast instead of adding a copy. */
+id: toastId(kind, message),
+/* Named on every toast: the Toaster hands its position to sileo only
+   once React has run its effects, so the first toast after mounting
+   landed in sileo's default corner, top right. */
+position: 'top-center',
+title: toastTitle(kind),
+description: message,
+/* Errors stay longer: they are the ones somebody has to act on. */
+duration: kind === 'error' ? 6500 : 4500
+});
+return;
+} catch (_error) {
+/* fall through to the plain toast */
+}
+}
+showPlainToast(message, kind);
+}
+function showPlainToast(message, type) {
 const colors = {
 success: 'linear-gradient(135deg, rgba(16,185,129,0.95), rgba(5,150,105,0.95))',
 error: 'linear-gradient(135deg, rgba(239,68,68,0.95), rgba(220,38,38,0.95))',
@@ -11787,7 +11934,11 @@ warning: 'linear-gradient(135deg, rgba(245,158,11,0.95), rgba(217,119,6,0.95))',
 info: 'linear-gradient(135deg, rgba(14,165,233,0.95), rgba(37,99,235,0.95))'
 };
 const icons = { success: 'check', error: 'exclamation', warning: 'triangle-exclamation', info: 'info' };
-let stack = document.getElementById('toastStack');
+/* A host sileo already drew into belongs to React; the plain toast takes a
+   fresh one rather than appending beside a tree it does not own. */
+const existing = document.getElementById('toastStack');
+if (existing?.dataset.toaster === 'sileo') return;
+let stack = existing;
 if (!stack) {
 stack = document.createElement('div');
 stack.id = 'toastStack';
@@ -11809,7 +11960,6 @@ div.style.background = colors[type] || colors.info;
 div.innerHTML = `<i class="fas fa-${icons[type] || icons.info}-circle"></i><div class="app-toast-message"></div>`;
 div.querySelector('.app-toast-message').textContent = String(message || '');
 stack.appendChild(div);
-if (system) void sendDesktopSystemNotification(message, type);
 setTimeout(() => {
 div.remove();
 if (!stack.children.length) stack.remove();
@@ -13512,6 +13662,12 @@ base64UrlToArrayBuffer,
 translations,
 getTranslatedText,
 showNotification,
+/* What the toasts said, newest last: { type, message, at }. clear() is for a
+   suite that wants only what one step raised. */
+toasts: Object.freeze({
+recent: (count = TOAST_LOG_LIMIT) => toastLog.slice(-count).map((entry) => ({ ...entry })),
+clear: () => { toastLog.length = 0; }
+}),
 encryptStorageData,
 decryptStorageData,
 escapeHTML,

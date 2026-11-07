@@ -1,0 +1,18 @@
+{
+  "name": "poorija-vendor-sileo",
+  "private": true,
+  "description": "Builds vendor/sileo/sileo.bundle.min.js: sileo, React and motion in one script the page loads without a bundler.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "sileo": "0.1.6"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

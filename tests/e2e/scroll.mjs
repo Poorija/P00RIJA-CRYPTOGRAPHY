@@ -43,8 +43,7 @@ async function app(tag){
   await page.evaluate(()=>document.getElementById('setupBtn')?.click());
   await page.waitForTimeout(2500);
   await page.evaluate((name)=>{window.__toasts=[];
-    const o=window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification=(m,t)=>{window.__toasts.push(`${t}: ${m}`);return o?.(m,t);};
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const w=navigator.clipboard.writeText.bind(navigator.clipboard);
     navigator.clipboard.writeText=(t)=>{window.__clip.push(t);return w(t).catch(()=>{});};
     const n=document.getElementById('chatDisplayName'); if(n){n.value=name;n.dispatchEvent(new Event('input',{bubbles:true}));}
@@ -84,6 +83,12 @@ const probe=(p)=>p.evaluate(()=>{
     bubbles: panel.querySelectorAll('.chat-message-bubble').length,
     firstVisible: visible[0]?.querySelector('.chat-message-text')?.textContent.trim().slice(0,24)||'',
     firstVisibleOffset: visible[0]? Math.round(visible[0].offsetTop-panel.scrollTop):null,
+    /* Where that message is on the SCREEN. The selection bar opens above the
+       thread and pushes the pane down by its height; the thread scrolls by the
+       same amount so the message under the pointer stays under it. Measured
+       inside the pane, that correct compensation reads as the content moving
+       by the bar's height. The pane's own rect carries no transform. */
+    firstVisibleScreen: visible[0]? Math.round(panel.getBoundingClientRect().top+visible[0].offsetTop-panel.scrollTop):null,
     animating: [...panel.querySelectorAll('.chat-message-bubble')].filter(b=>b.classList.contains('is-fresh')).length,
     selecting: !document.getElementById('chatSelectionBar')?.classList.contains('hidden'),
     selected: Number(document.getElementById('chatSelectionCount')?.textContent||'0'),
@@ -150,7 +155,7 @@ console.log('  after:  ' + JSON.stringify(after1));
 check('the long press turns selection on', held1.selecting && held1.selected===1, JSON.stringify(held1));
 check('and it survives letting go', after1.selecting && after1.selected===1, JSON.stringify({sel:after1.selecting,n:after1.selected}));
 check('the thread does NOT jump to the end', after1.bottomGap > 100, `bottom gap went ${before1.bottomGap} -> ${after1.bottomGap}`);
-check('the same message is still under the same pixel', after1.firstVisible===before1.firstVisible && Math.abs((after1.firstVisibleOffset??0)-(before1.firstVisibleOffset??0))<6, `${before1.firstVisible}@${before1.firstVisibleOffset} -> ${after1.firstVisible}@${after1.firstVisibleOffset}`);
+check('the same message is still under the same pixel', after1.firstVisible===before1.firstVisible && Math.abs((after1.firstVisibleScreen??0)-(before1.firstVisibleScreen??0))<6, `${before1.firstVisible}@${before1.firstVisibleScreen} -> ${after1.firstVisible}@${after1.firstVisibleScreen}`);
 
 console.log('\n===== 2. picking a second message keeps your place =====');
 const before2=await probe(A);
@@ -160,7 +165,10 @@ await A.waitForTimeout(600);
 const after2=await probe(A);
 console.log('  ' + JSON.stringify(after2));
 check('the second message is selected too', after2.selected===2, `${after2.selected} selected`);
-check('selecting does not replay the entry animation on every bubble', after2.animating===0, `${after2.animating} bubbles marked fresh`);
+/* The newest bubble keeps the class it arrived with until the next redraw;
+   the animation itself ran once, on arrival. What must not happen is picking a
+   message marking MORE bubbles fresh, which is a redraw replaying them all. */
+check('selecting does not replay the entry animation on every bubble', after2.animating<=before1.animating, `${before1.animating} -> ${after2.animating} bubbles marked fresh`);
 check('and the thread still has not moved', Math.abs(after2.scrollTop-before2.scrollTop)<6 && after2.bottomGap>100, `${before2.scrollTop} -> ${after2.scrollTop}`);
 
 console.log('\n===== 3. deselecting keeps your place =====');
@@ -179,7 +187,9 @@ await A.waitForTimeout(700);
 const after4=await probe(A);
 console.log('  ' + JSON.stringify(after4));
 check('selection mode is off', !after4.selecting, JSON.stringify({sel:after4.selecting}));
-check('the thread still has not moved', Math.abs(after4.scrollTop-before4.scrollTop)<6, `${before4.scrollTop} -> ${after4.scrollTop}`);
+/* The bar closing pulls the pane up by its height and the thread scrolls back
+   by the same amount, so scrollTop changes by design; the screen does not. */
+check('the thread still has not moved', after4.firstVisible===before4.firstVisible && Math.abs((after4.firstVisibleScreen??0)-(before4.firstVisibleScreen??0))<6, `${before4.firstVisible}@${before4.firstVisibleScreen} -> ${after4.firstVisible}@${after4.firstVisibleScreen}`);
 
 console.log('\n===== 5. someone else writing while you read older messages =====');
 const before5=await probe(A);

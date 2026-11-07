@@ -320,6 +320,17 @@ try {
   check('a launcher whose file changes while it waits for answers still finishes',
     changed.code === 0 && changed.out.includes('+ docker run -d') && !/unexpected EOF|syntax error/.test(changed.out), `exit ${changed.code} ${(changed.out.match(/.*(unexpected EOF|syntax error).*/) || [''])[0]}`);
 
+  /* Building update packages wants this computer's Docker inside the panel:
+     only when asked for, since the socket is the keys to this machine. */
+  const noBuilds = run(place(), START, '', { cwd: away });
+  check('the panel gets no Docker socket unless asked', noBuilds.runLine && !noBuilds.runLine.includes('docker.sock'), noBuilds.runLine);
+  const buildsHome = place();
+  const builds = run(buildsHome, [...START, '--builds', 'yes'], '', { cwd: away });
+  check('--builds yes hands it this computer’s Docker to build update packages with', builds.runLine.includes('-v /var/run/docker.sock:/var/run/docker.sock') && builds.runLine.includes('-e POORIJA_PANEL_BUILDS=1'), builds.runLine);
+  check('and is remembered', /^PANEL_BUILDS=yes$/m.test(settings(buildsHome)) && run(buildsHome, START, '', { cwd: away }).runLine.includes('docker.sock'), settings(buildsHome).replace(/\n/g, ' '));
+  const badBuilds = run(place(), [...START, '--builds', 'maybe'], '', { cwd: away });
+  check('it takes yes or no only', badBuilds.code !== 0, badBuilds.out.slice(-120));
+
   const stop = run(a, ['stop', '--dry-run']);
   check('stop stops the panel container', stop.out.includes('+ docker stop Poorija-Cryptography_ControlPanel'), stop.out.slice(-200));
   const help = run(a, ['--help']);

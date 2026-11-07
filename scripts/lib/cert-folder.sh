@@ -18,6 +18,21 @@
 # docker, and docker reads what root reads. Nothing is copied anywhere but a
 # private temporary directory, which is removed before the function returns.
 
+# The image the throwaway container runs: one already on this server, never
+# pulled. It was alpine:3, and a server that had only alpine:3.24.3 (or
+# alpine:latest) tried to pull alpine:3 from Docker Hub — which a server inside
+# Iran cannot reach — and every folder looked as if it were not there.
+_cert_image() {
+    if [[ -n "${_CERT_IMAGE:-}" ]]; then printf '%s' "$_CERT_IMAGE"; return 0; fi
+    local candidate
+    for candidate in alpine:3 alpine:latest $(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^(alpine|poorija-cert-renewer|busybox):' ); do
+        if docker image inspect "$candidate" >/dev/null 2>&1; then _CERT_IMAGE="$candidate"; printf '%s' "$candidate"; return 0; fi
+    done
+    _CERT_IMAGE="alpine:3"
+    printf '%s' "$_CERT_IMAGE"
+}
+_cert_docker() { docker run --rm --pull never --network none "$@"; }
+
 # cert_peek <file> <copy to>: a readable copy of a file this account may not
 # be able to read.
 cert_peek() {
@@ -29,8 +44,8 @@ cert_peek() {
         sudo -n cat "$file" > "$out" 2>/dev/null && return 0
     fi
     if command -v docker >/dev/null 2>&1; then
-        docker run --rm --network none -v "$(dirname "$file")":/c:ro alpine:3 \
-            cat "/c/$(basename "$file")" > "$out" 2>/dev/null && return 0
+        _cert_docker --entrypoint cat -v "$(dirname "$file")":/c:ro "$(_cert_image)" \
+            "/c/$(basename "$file")" > "$out" 2>/dev/null && return 0
     fi
     return 1
 }
@@ -46,8 +61,8 @@ cert_list() {
         sudo -n find "$dir" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null && return 0
     fi
     if command -v docker >/dev/null 2>&1; then
-        docker run --rm --network none -v "$dir":/c:ro alpine:3 \
-            find /c -maxdepth 1 -type f -exec basename {} \; 2>/dev/null && return 0
+        _cert_docker --entrypoint find -v "$dir":/c:ro "$(_cert_image)" \
+            /c -maxdepth 1 -type f -exec basename {} \; 2>/dev/null && return 0
     fi
     return 1
 }
@@ -59,7 +74,7 @@ cert_folder_exists() {
     [[ -d "$dir" ]] && return 0
     sudo -n test -d "$dir" 2>/dev/null && return 0
     command -v docker >/dev/null 2>&1 \
-        && docker run --rm --network none -v "$(dirname "$dir")":/p:ro alpine:3 test -d "/p/$(basename "$dir")" 2>/dev/null
+        && _cert_docker --entrypoint test -v "$(dirname "$dir")":/p:ro "$(_cert_image)" -d "/p/$(basename "$dir")" 2>/dev/null
 }
 
 _cert_pubkey_digest() {

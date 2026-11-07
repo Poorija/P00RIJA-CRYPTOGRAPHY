@@ -46,6 +46,8 @@ const DANGEROUS_PATHS = new Set([
   '/Monitor_Server/ops-stack-restart', '/Monitor_Server/ops-backup-delete', '/Monitor_Server/ops-backup-restore',
   '/Monitor_Server/ops-backup-download', '/Monitor_Server/ops-image-export', '/Monitor_Server/ops-bundle',
   '/Monitor_Server/ops-github-apply', '/Monitor_Server/ops-github-rollback', '/Monitor_Server/bootstrap-token',
+  /* The bot's token and chat: whoever sets them reads every alert. */
+  '/Monitor_Server/telegram',
 ]);
 
 /* The router matches paths without regard to case and with or without a

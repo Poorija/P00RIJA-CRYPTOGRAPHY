@@ -45,8 +45,7 @@ async function app(tag,w=1440,h=900,geo=null){
   await page.evaluate(()=>document.getElementById('setupBtn')?.click());
   await page.waitForTimeout(2500);
   await page.evaluate(()=>{window.__toasts=[];
-    const o=window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification=(m,t)=>{window.__toasts.push(`${t}: ${m}`);return o?.(m,t);};
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const w=navigator.clipboard.writeText.bind(navigator.clipboard);
     navigator.clipboard.writeText=(t)=>{window.__clip.push(t);return w(t).catch(()=>{});};
     document.getElementById('mobileInstallGate')?.classList.add('hidden'); window.switchTab?.('chat');});
@@ -233,16 +232,27 @@ if (card.addBtn === 1) {
 
 console.log('\n===== 5b. the Add path, with a contact nobody has =====');
 // The relay hands both harness peers the same identities, so the shared card
-// above landed on one B already knew. Inject a card for a fingerprint that
+// above landed on one B already knew. Inject a card for an identity that
 // exists nowhere and exercise the button for real.
-const fakeFp = 'ff' + Math.random().toString(16).slice(2, 10).padEnd(62, '0');
-const injected = await B.evaluate(async (fp) => {
+//
+// The card has to be a real one. The app works the fingerprint out from the
+// key (checkedIdentity) and refuses a card whose two disagree, because such a
+// card would pass a safety-number check while another key read every message.
+// A made-up fingerprint beside 'BASE64PUBLICKEYDATA' was exactly that card, so
+// the refusal it met was the app being right. A fresh P-256 key and the SHA-256
+// of its SPKI bytes are a card from somebody who simply is not known yet.
+const injected = await B.evaluate(async () => {
   const key = document.querySelector('#chatPeerList .chat-peer-card')?.getAttribute('data-chat-conversation');
   if (!key) return { ok: false };
+  const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const spki = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey));
+  const publicKeyData = btoa(String.fromCharCode(...spki));
+  const fp = [...new Uint8Array(await crypto.subtle.digest('SHA-256', spki))]
+    .map((byte) => byte.toString(16).padStart(2, '0')).join('');
   const before = document.querySelectorAll('#chatPeerList .chat-peer-card').length;
   window.__injectRichContact(key, {
     kind: 'contact', name: 'مخاطب آزمایشی', fingerprint: fp,
-    peerId: 'peer-' + fp.slice(0, 8), publicKeyData: 'BASE64PUBLICKEYDATA', avatarData: '',
+    peerId: 'peer-' + fp.slice(0, 8), publicKeyData, avatarData: '',
   });
   await new Promise(r => setTimeout(r, 500));
   const btn = document.querySelector('[data-chat-adopt-contact]');
@@ -254,7 +264,7 @@ const injected = await B.evaluate(async (fp) => {
     inState: (window.__peerFingerprints?.() || []).includes(fp),
     toast: (window.__toasts||[]).slice(-1)[0],
     flipped: !document.querySelector('[data-chat-adopt-contact]') };
-}, fakeFp);
+});
 console.log('  ' + JSON.stringify(injected));
 check('an unknown contact card offers Add and adding it works',
   injected.ok && injected.inState && injected.after > injected.before && injected.flipped,

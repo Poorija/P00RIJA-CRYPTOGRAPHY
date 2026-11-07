@@ -117,9 +117,17 @@ try {
     return { bad, held, recovery, screen, fallback: writes.at(-1), initial: writes[0] };
   });
   check('bad network reduces bitrate and preserves camera motion', adaptation.bad.encodings[0].maxBitrate === 150000 && adaptation.bad.degradationPreference === 'maintain-framerate');
-  check('recovery waits for three healthy samples', adaptation.held <= 180000 && adaptation.recovery.encodings[0].maxBitrate === 600000);
+  /* The rungs are ceilings (1.5, 3 and 8 Mbit/s for video) and the link's own
+     estimate wins below them: video takes 75% of it. "good" reports 3 Mbit/s,
+     so the bottom rung holds at 1.5 for two healthy samples and the third
+     climbs to the middle rung, where the estimate (2.25) is the limit. The old
+     600 kbit/s rung was removed on purpose in 718cc57: it pinned video far
+     below what the link had already said it could carry. */
+  check('recovery waits for three healthy samples', adaptation.held === 1500000 && adaptation.recovery.encodings[0].maxBitrate === 2250000,
+    `${adaptation.held} then ${adaptation.recovery.encodings[0].maxBitrate}`);
   check('screen sharing preserves readability', adaptation.screen.degradationPreference === 'maintain-resolution');
-  check('unsupported degradation hint retains bitrate fallback', adaptation.fallback.encodings[0].maxBitrate === 2000000 && !adaptation.fallback.degradationPreference);
+  check('unsupported degradation hint retains bitrate fallback', adaptation.fallback.encodings[0].maxBitrate === 2250000 && !adaptation.fallback.degradationPreference,
+    `${adaptation.fallback.encodings[0].maxBitrate} ${adaptation.fallback.degradationPreference || ''}`);
   const codecs = await page.evaluate(async () => {
     const a = new RTCPeerConnection(), b = new RTCPeerConnection();
     try {
@@ -143,7 +151,8 @@ try {
   });
   check('preferred SDP negotiates on real peer connections', codecs.stable, JSON.stringify(codecs.preferred));
   check('codec preference preserves every fallback payload', codecs.samePayloads);
-  check('real browser sender accepts the bitrate cap', codecs.appliedBitrate === 2000000, String(codecs.appliedBitrate));
+  // 75% of the 3 Mbit/s estimate, under the 8 Mbit/s top rung.
+  check('real browser sender accepts the bitrate cap', codecs.appliedBitrate === 2250000, String(codecs.appliedBitrate));
   const interval = await page.evaluate(() => {
     const pc = {};
     const sample = (t,l,r) => new Map([['x',{id:'x',type:'remote-inbound-rtp',timestamp:t,packetsLost:l,packetsReceived:r}]]);
@@ -166,7 +175,8 @@ try {
   });
   check('quality reads the selected path by ID across distinct stats objects', selected.rtt === 40 && selected.availableOutgoingBitrate === 1500000);
   await page.evaluate(() => closeFullSheet());
-  await page.locator('#toastStack').waitFor({state:'detached'}); // Let profile-operation toasts expire.
+  // Let profile-operation toasts expire: sileo keeps its host, so wait for the toasts themselves.
+  await page.waitForFunction(() => !document.querySelector('#toastStack [data-sileo-toast], #toastStack .app-toast'), null, { timeout: 15000 });
   // Exercise the shared mobile overlay CSS in both native and standalone modes.
   for (const shell of ['pwa-standalone', 'native-mobile']) {
     for (const width of [320, 390, 430]) {

@@ -24,12 +24,14 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { createFleet, waitUntil, sleep, short } from './_relay-fleet.mjs';
+import { createFleet, waitUntil, sleep, short, fetchJson, AUTH } from './_relay-fleet.mjs';
 
 const require = createRequire(import.meta.url);
 const ONLY = new Set(process.argv.slice(2));
 const wants = (name) => !ONLY.size || ONLY.has(name);
 const results = [];
+/* A card's lines start with a direction mark (right to left for Persian, left to right for English). */
+const plainText = (text) => String(text ?? '').replace(/[\u200E\u200F]/g, '');
 const check = (name, ok, detail = '') => {
   results.push({ name, ok: Boolean(ok) });
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
@@ -52,7 +54,7 @@ try {
     };
     const card = report.renderCard(report.cleanReport(raw));
     const has = (piece) => card.includes(piece);
-    check('a card opens with how serious it is and which server', card.startsWith('<b>⚠️ هشدار · رلهٔ IR3</b>'), card.split('\n')[0]);
+    check('a card opens with how serious it is and which server', plainText(card).startsWith('<b>⚠️ هشدار · رلهٔ IR3</b>'), card.split('\n')[0]);
     check('it names the server in full: name, address, where, cluster, gateway place, version, build and id',
       has('<b>رلهٔ IR3</b> — <code>ir.example.ir</code>') && has('🇮🇷 داخل ایران') && has('خوشهٔ <b>Iran</b>') && has('Gateway <b>2</b>')
         && has('<code>2.98.81</code> (chat-v174)') && has(`<code>${relayId.slice(0, 12)}</code>`));
@@ -77,7 +79,7 @@ try {
         { answered: true, report: report.cleanReport({ ...raw, problems: [{ level: 'critical', text: 'سرویس TURN اجرا نمی‌شود.' }], identity: { label: 'رلهٔ FL', host: 'fl.example', region: 'outside-iran', cluster: 'Outside' } }) },
       ],
     });
-    check('the summary counts the servers and who answered', fleet.startsWith('<b>📡 وضعیت سرورها</b> · 4 سرور · 3 پاسخ داد'), fleet.split('\n')[0]);
+    check('the summary counts the servers and who answered', plainText(fleet).startsWith('<b>📡 وضعیت سرورها</b> · 4 سرور · 3 پاسخ داد'), fleet.split('\n')[0]);
     check('it groups them by cluster', fleet.includes('<b>🇮🇷 خوشهٔ Iran</b>') && fleet.includes('<b>🌍 خوشهٔ Outside</b>'));
     check('each server one line of its state, and a server that did not answer by name',
       /🟢 <b>رلهٔ IR<\/b> · <code>ir\.example\.ca<\/code>/.test(fleet) && fleet.includes('👥 12 · 🔗 6/6 · 🧠 23٪ · 🧮 60٪ · 💽 40٪ · 📞 روشن') && fleet.includes('⛔️ <b>رلهٔ IR4</b> · پاسخ نداد'), fleet);
@@ -146,21 +148,21 @@ try {
       }, operator.privateKey);
       for (const name of ['ta', 'tb', 'tc']) await fleet.post(name, '/Monitor_Server/directory', doc);
       await waitUntil(async () => (await fleet.linked('ta')).size === 2, 30000);
-      const texts = () => sent.map((message) => String(message.text || ''));
-      check('the bot’s relay sends its own start as a card, in Telegram’s HTML', await waitUntil(() => sent.some((message) => message.parse_mode === 'HTML' && String(message.text).startsWith('<b>🔄 راه‌اندازی · relay-a</b>')), 30000), texts().join(' | ').slice(0, 300));
+      const texts = () => (sent.map((message) => String(message.text || ''))).map(plainText);
+      check('the bot’s relay sends its own start as a card, in Telegram’s HTML', await waitUntil(() => sent.some((message) => message.parse_mode === 'HTML' && plainText(message.text).startsWith('<b>🔄 راه‌اندازی · relay-a</b>')), 30000), texts().join(' | ').slice(0, 300));
       const startA = texts().find((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-a</b>')) || '';
       check('naming it in full and with its state of the moment', startA.includes('<code>a.example</code>') && startA.includes('خوشهٔ <b>Outside</b>') && startA.includes('📊 <b>وضعیت همین لحظه</b>') && startA.includes('👥 کاربران آنلاین'), startA);
       check('the others’ cards reach the chat through it, with the ids their links proved', await waitUntil(() => texts().some((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-b</b>') && text.includes(`<code>${short(tb.id).slice(0, 12)}</code>`)), 40000), texts().filter((text) => text.includes('relay-b')).join(' | ').slice(0, 300));
       const startB = texts().find((text) => text.startsWith('<b>🔄 راه‌اندازی · relay-b</b>')) || '';
       check('and with their own state of the moment', startB.includes('🇮🇷 داخل ایران') && startB.includes('خوشهٔ <b>Iran</b>') && startB.includes('📊 <b>وضعیت همین لحظه</b>'), startB);
       check('a problem on one without the bot arrives as a card', await waitUntil(() => texts().some((text) => /^<b>(⚠️ هشدار|🚨 بحرانی) · relay-b<\/b>/.test(text) && text.includes('دیسک تقریباً پر است')), 40000));
-      check('its commands are set', calls.some((call) => call.method === 'setMyCommands' && (call.json.commands || []).map((command) => command.command).join() === 'status,servers,help'), JSON.stringify(calls.filter((call) => call.method === 'setMyCommands').map((call) => call.json)).slice(0, 200));
+      check('its commands are set', calls.some((call) => call.method === 'setMyCommands' && (call.json.commands || []).map((command) => command.command).join() === 'status,servers,alerts,updates,version,mute,unmute,help'), JSON.stringify(calls.filter((call) => call.method === 'setMyCommands').map((call) => call.json)).slice(0, 200));
 
       const from = (chatId, text) => { updateId += 1; updates.push({ update_id: updateId, message: { message_id: updateId, chat: { id: Number(chatId) }, from: { id: Number(chatId) }, text } }); };
       await sleep(2000);
       const before = sent.length;
       from(CHAT, '/status');
-      check('/status from the operator’s chat answers with every server', await waitUntil(() => sent.slice(before).some((message) => String(message.chat_id) === CHAT && String(message.text).startsWith('<b>📡 وضعیت سرورها</b> · 3 سرور · 3 پاسخ داد')), 20000), texts().slice(before).join(' | ').slice(0, 400));
+      check('/status from the operator’s chat answers with every server', await waitUntil(() => sent.slice(before).some((message) => String(message.chat_id) === CHAT && plainText(message.text).startsWith('<b>📡 وضعیت سرورها</b> · 3 سرور · 3 پاسخ داد')), 20000), texts().slice(before).join(' | ').slice(0, 400));
       const summary = texts().slice(before).find((text) => text.startsWith('<b>📡 وضعیت سرورها</b>')) || '';
       check('grouped by cluster, each with its state', summary.includes('خوشهٔ Iran') && summary.includes('خوشهٔ Outside') && summary.includes('<b>relay-a</b>') && summary.includes('<b>relay-b</b>') && summary.includes('<b>relay-c</b>') && /🔗 2\/2/.test(summary), summary);
       check('and the one with a problem marked', /🟡 <b>relay-b<\/b>|🔴 <b>relay-b<\/b>/.test(summary));
@@ -179,6 +181,70 @@ try {
       await sleep(7000);
       check('the daily summary goes out at its hour, once', dailyCame && daily() === 1, `${daily()} sent; set for ${tehranNow}`);
       check('everything went to the operator’s chat alone', sent.every((message) => String(message.chat_id) === CHAT), [...new Set(sent.map((message) => message.chat_id))].join(','));
+
+      /* The central panel's Telegram section, on the relay with the bot. */
+      const read = (route) => fetchJson(`${ta.origin}${route}`, { headers: { Authorization: AUTH } });
+      const shown = await read('/Monitor_Server/telegram');
+      check('the panel reads the bot’s settings, the token masked', shown.ok && shown.sends === true && shown.settings.token.set && shown.settings.token.source === 'env' && !JSON.stringify(shown).includes(TOKEN.split(':')[1]) && shown.settings.chatId === CHAT, JSON.stringify(shown).slice(0, 300));
+      check('and what it may choose from', shown.choices.categories.includes('update') && shown.choices.commands.includes('mute') && shown.choices.alertKeys.includes('disk'));
+      check('a stranger who wrote to the bot is offered as a chat to send to', shown.chats.some((chat) => chat.id === '999'), JSON.stringify(shown.chats));
+      const refused = await fleet.post('ta', '/Monitor_Server/telegram', { settings: { checkSeconds: 1 } });
+      check('a setting out of range is refused, by name', refused.ok === false && refused.reason === 'checkSeconds', JSON.stringify(refused));
+      const badToken = await fleet.post('ta', '/Monitor_Server/telegram', { token: 'not-a-token' });
+      check('so is a token that is not a bot’s', badToken.ok === false && badToken.reason === 'token');
+      const english = await fleet.post('ta', '/Monitor_Server/telegram', { settings: { language: 'en', topics: { alerts: '77' }, templates: { footer: 'P00RIJA · {server}' }, commands: { version: true, servers: false } } });
+      check('the panel changes them while the relay runs', english.ok && english.settings.language === 'en', JSON.stringify(english).slice(0, 200));
+      check('the bot’s commands follow, in the new language', await waitUntil(() => calls.some((call) => call.method === 'setMyCommands' && (call.json.commands || []).some((command) => command.command === 'status' && command.description === 'Every server’s state, right now') && !(call.json.commands || []).some((command) => command.command === 'servers')), 10000));
+      const preview = await fleet.post('ta', '/Monitor_Server/telegram/preview', { category: 'warn' });
+      check('a preview draws a card as it would go, without sending it', preview.ok && plainText(preview.html).startsWith('<b>⚠️ Warning · relay-a</b>') && preview.html.includes('P00RIJA · relay-a') && preview.delivery.send, (preview.html || '').split('\n')[0]);
+      const beforeTest = sent.length;
+      const tested = await fleet.post('ta', '/Monitor_Server/alert-test', {});
+      check('the test goes out in English', tested.ok && await waitUntil(() => sent.slice(beforeTest).some((message) => plainText(message.text).startsWith('<b>🔔 Alert test · relay-a</b>') && String(message.text).includes('P00RIJA · relay-a')), 15000), texts().slice(beforeTest).join(' | ').slice(0, 300));
+      await fleet.post('ta', '/Monitor_Server/telegram', { settings: { enabled: false } });
+      const offTest = await fleet.post('ta', '/Monitor_Server/alert-test', {});
+      check('with its bot off a relay sends no test, and says why', offTest.ok === false && offTest.reason === 'bot-off', JSON.stringify(offTest));
+      await fleet.post('ta', '/Monitor_Server/telegram', { settings: { enabled: true } });
+      const designed = await fleet.post('ta', '/Monitor_Server/telegram/preview', { category: 'warn', settings: { templates: { style: 'boxed' } } });
+      check('a preview draws the design being edited before it is saved', designed.ok && designed.html.includes('<blockquote>') && (await read('/Monitor_Server/telegram')).settings.templates.style === 'classic', (designed.html || designed.reason || '').slice(0, 120));
+      const beforeVersion = sent.length;
+      from(CHAT, '/version');
+      check('/version answers with this relay’s version', await waitUntil(() => sent.slice(beforeVersion).some((message) => plainText(message.text).startsWith('🏷 <b>relay-a</b>: version <code>')), 15000), texts().slice(beforeVersion).join(' | ').slice(0, 200));
+      const beforeOff = sent.length;
+      from(CHAT, '/servers');
+      await sleep(3000);
+      check('a command the panel turned off is not answered', !sent.slice(beforeOff).some((message) => String(message.text).includes('This family’s servers')));
+      const beforeMute = sent.length;
+      from(CHAT, '/mute 30m');
+      check('/mute silences the bot, and says until when', await waitUntil(() => sent.slice(beforeMute).some((message) => plainText(message.text).startsWith('🔕 Messages are silent until')), 15000));
+      check('and the settings show it', (await read('/Monitor_Server/telegram')).settings.muteUntil > Date.now());
+      const beforeSilent = sent.length;
+      await fleet.post('ta', '/Monitor_Server/telegram', { settings: { categories: { security: { on: true, silent: false } } } });
+      await fleet.post('ta', '/Monitor_Server/telegram', { settings: { label: 'Relay A' } });
+      const startCard = await waitUntil(() => sent.slice(beforeSilent).length > 0, 2000);
+      check('a muted bot sends what it sends without a sound', !startCard || sent.slice(beforeSilent).every((message) => message.disable_notification === true || /^<b>🚨/.test(String(message.text))), JSON.stringify(sent.slice(beforeSilent).map((message) => [String(message.text).slice(0, 30), message.disable_notification])));
+      updateId += 1;
+      updates.push({ update_id: updateId, callback_query: { id: 'cb1', from: { id: Number(CHAT) }, data: 'status', message: { message_id: 5, chat: { id: Number(CHAT) } } } });
+      const beforeButton = sent.length;
+      check('the status button under an alert answers like /status', await waitUntil(() => sent.slice(beforeButton).some((message) => plainText(message.text).startsWith('<b>📡 Server status</b>')), 20000) && calls.some((call) => call.method === 'answerCallbackQuery' && call.json.callback_query_id === 'cb1'));
+      const beforeUnmute = sent.length;
+      from(CHAT, '/unmute');
+      check('/unmute ends it', await waitUntil(() => sent.slice(beforeUnmute).some((message) => plainText(message.text).startsWith('🔔 Messages come with sound again')), 15000) && (await read('/Monitor_Server/telegram')).settings.muteUntil === 0);
+      /* A fresh alert: the relay without the bot starts again, its disk as
+         full as before. */
+      const beforeTopic = sent.length;
+      await fleet.stop('tb');
+      await fleet.start('tb');
+      check('an alert goes to its forum topic, with its buttons', await waitUntil(() => sent.slice(beforeTopic).some((message) => message.message_thread_id === 77 && Array.isArray(message.reply_markup?.inline_keyboard)), 60000),
+        JSON.stringify(sent.slice(beforeTopic).map((message) => [String(message.text).slice(0, 25), message.message_thread_id, Boolean(message.reply_markup)])));
+      await fleet.post('ta', '/Monitor_Server/telegram', { settings: { categories: { warn: { on: false }, critical: { on: false }, start: { on: false } } } });
+      const beforeOffCards = sent.length;
+      await fleet.stop('tb');
+      await fleet.start('tb');
+      const skipped = await waitUntil(async () => (await read('/Monitor_Server/telegram/log')).sent.filter((entry) => entry.skipped === 'category-off').length >= 2, 60000);
+      check('a category turned off is not sent, and the log says why', skipped && !sent.slice(beforeOffCards).some((message) => /^<b>(⚠️|🚨|🔄)/.test(String(message.text))),
+        JSON.stringify((await read('/Monitor_Server/telegram/log')).sent.slice(0, 3)));
+      const reset = await fleet.post('ta', '/Monitor_Server/telegram', { reset: true });
+      check('reset brings back .env’s settings, the token kept', reset.ok && reset.settings.language === 'fa' && reset.settings.chatId === CHAT && reset.settings.token.set);
     } finally {
       await fleet.stopAll();
       telegram.close();

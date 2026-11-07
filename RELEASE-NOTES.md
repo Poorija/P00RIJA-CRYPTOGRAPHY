@@ -1,3 +1,464 @@
+# P00RIJA Cryptography 2.98.90
+
+Version 2.98.90 · build chat-v183
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## ربات تلگرام · The Telegram bot
+
+- **پیام سرورهای دیگر:** اگر ربات روی سرورِ صاحب توکن خاموش بود، آزمایش خود آن سرور
+  باز هم می‌رسید ولی کارت همهٔ سرورهای دیگر دور ریخته می‌شد. حالا آزمایش هم از کلید
+  ربات پیروی می‌کند و می‌گوید خاموش است؛ پس از آزمایش سروری که توکن ندارد، پنل از سرور
+  صاحب توکن می‌پرسد کارت فرستاده شد یا چرا نه؛ و اگر ربات صاحب توکن خاموش باشد، بالای
+  بخش تلگرام هشدار داده می‌شود.
+- **طرح کارت:** شش طرح (کلاسیک، کادردار، فشرده، ساده، کامل و طراحی خودتان با جاها و
+  نشانه‌های ساده)، خط جداکننده، جهت متن، نمادها و کادر جمع‌شونده، با نمایش همهٔ طرح‌ها
+  کنار هم پیش از ذخیره. کادر تلگرام همان جعبهٔ گوشه‌گرد و نیمه‌شفاف است؛ رنگ و گوشهٔ خود
+  پیام را تلگرام می‌کشد و ربات نمی‌تواند عوضش کند.
+- **راست‌چین و چپ‌چین درست:** هر سطر کارت با علامت جهت شروع می‌شود، پس کارت فارسی در هر
+  تلگرامی راست به چپ و کارت انگلیسی چپ به راست است.
+- **کارت کامل:** کارت بلند از پیامش کوتاه می‌شود و هرگز از میان نشانه‌گذاری بریده نمی‌شود؛
+  تلگرام کارت نیمه‌کاره را رد می‌کرد.
+
+- **Other servers' cards:** with the bot off on the server that holds the
+  token, that server's own test still arrived while every other server's card
+  was dropped. A test now obeys the bot's switch and says the bot is off.
+  After a test from a server without the token, the panel asks the token
+  holder whether the card was sent, or why not. With the holder's bot off,
+  the Telegram section says so at the top.
+- **Card designs:** six designs (classic, boxed, compact, minimal, detailed,
+  and your own, with placeholders and simple marks), the separator, the
+  direction, icons, and a folding box, every design previewed side by side
+  before saving. Telegram's quote is the rounded, tinted box; the message's
+  own colour and corners are Telegram's, and no bot can change them.
+- **Right to left and left to right, right:** every line of a card starts with
+  a direction mark, so a Persian card reads right to left and an English one
+  left to right in every Telegram.
+- **A whole card:** a long card is shortened in its message, never cut through
+  its markup; Telegram used to refuse a card cut in half.
+
+## مدیران و فرستادن تنظیمات · Admins, and settings sent between them
+
+- **چند مدیر با کلید خودشان:** بخش مدیران، با افزودن و برداشتن مدیر از فهرست امضاشدهٔ
+  خانواده، و یک «کلید جعبه» برای هر مدیر در مرورگر خودش.
+- **فرستادن تنظیمات:** فهرست سرورها، میرورها، یادداشت شریک‌ها، چیدمان نقشه، انتخاب‌های صفحه
+  و تنظیمات ربات (بدون توکن) برای مدیر دیگر، در مرورگر شما با کلید جعبهٔ او و یک رمز پیچیده
+  قفل و با کلید شما امضا می‌شود. فقط مرورگر او با همان رمز، و فقط اگر شما در فهرست مدیران
+  باشید، بازش می‌کند؛ اعمالش کد دومرحله‌ای می‌خواهد. کلید اپراتور، کلیدهای SSH، رمزها،
+  توکن و ورود پنل هرگز در آن نیست.
+
+- **Several admins, each with their own key:** an Admins section that adds and
+  removes admins in the signed family list, and a box key for each admin in
+  their own browser.
+- **Sending settings:** the server list, mirrors, notes on partners, the map's
+  layout, the page's choices, and the bot's settings (no token) go to another
+  admin sealed in your browser with their box key and a complex password, and
+  signed with your key. Only their browser opens it, with that password, and
+  only if you are a listed admin; applying it takes an authenticator code. The
+  operator key, SSH keys, passwords, the token, and the panel login are never
+  in it.
+
+## پنل · The panel
+
+- **sudo:** گزینهٔ «کاربر دسترسی sudo دارد» و جای رمز sudo در پنجرهٔ نصب، دکمهٔ آزمایش
+  دسترسی، و بررسی دسترسی در شروع هر نصب. رمز فقط درون اتصال SSH می‌رود و جایی نمی‌ماند.
+- **نمودار زنده:** تازه‌سازی هر ۱، ۳، ۵، ۱۰، ۳۰ یا ۶۰ ثانیه، و نمایش یک سرور به‌تنهایی با همهٔ
+  نمودارها و عددهایش.
+- **سریع‌تر:** خواندن‌ها بین بخش‌ها مشترک است و دادهٔ بخش‌ها پس از ورود در پس‌زمینه خوانده
+  می‌شود، پس رفتن بین بخش‌ها فوری است.
+- **بارگذاری:** صفحهٔ بارگذاری با دکمهٔ بارگذاری دوباره، چرخنده برای هر بخش، نوار خواندن، و
+  هشدار وقتی پنل پاسخ ندهد.
+- **دسته‌بندی و نمودار بیشتر:** هر جدول سرورها تک‌تک، بر اساس خوشه یا منطقه؛ نمودار در بخش‌های
+  سرورها، شریک‌ها و عملیات سرورها.
+- **امنیت نصب داکر:** داکر از مخزنی نصب می‌شود که با کلیدهای امضای خود داکر (داخل اسکریپت)
+  تنظیم شده؛ هیچ میروری نمی‌تواند کلید یا بستهٔ خودش را جا بزند.
+
+- **Sudo:** "the user has sudo" and a sudo password field in the install
+  dialog, a Test access button, and an access check at the start of every
+  install. The password travels inside the SSH connection only and is kept
+  nowhere.
+- **Live graphs:** refreshed every 1, 3, 5, 10, 30, or 60 seconds, and one
+  server shown on its own with every graph and number of it.
+- **Faster:** reads are shared between sections and every section's data is
+  read in the background after login, so switching sections is immediate.
+- **Loading:** a loading screen with a Reload button, a spinner for each
+  section, a reading bar, and a banner when the panel does not answer.
+- **More grouping and charts:** every server table one by one, by cluster, or
+  by region; charts in Servers, Partners, and Server operations.
+- **A safer Docker install:** Docker comes from a repository set up with
+  Docker's own signing keys, written into the script; no mirror can pass off
+  a key or packages of its own.
+
+## نصب سرور تازه با deploy.sh · Installing a fresh server with deploy.sh
+
+- **نصب اول:** سروری که هنوز `.env` ندارد، اول نصب می‌شود. اسکریپت دامنه را می‌پرسد، گواهی موجود روی سرور را پیدا می‌کند (مثلاً گواهی 3X-UI در `/root/cert/<دامنه>/`)، و پیشنهاد می‌دهد همان گواهی استفاده شود (تمدید با همین سرور در همان پوشه، یا با صاحب فعلی‌اش)، یا یک گواهی تازه از Let's Encrypt گرفته شود، یا یک گواهی خودامضا ساخته شود. برای Let's Encrypt ایمیل را هم می‌پرسد (اختیاری). همهٔ پاسخ‌ها را می‌شود با `--domain`، `--email`، `--cert` و `--cert-dir` هم داد.
+- **کلید SSH:** کلیدی که به شکل `~/.ssh/<نام>` نوشته شده بود (پنل این‌طور می‌نویسد) کنار گذاشته می‌شد و ورود با خطای «بدون رمز نمی‌شود وارد شد» رد می‌شد، با این‌که کلید روی سرور بود. حالا درست خوانده می‌شود، و رد شدن کلید از سروری که جواب نمی‌دهد جدا گفته می‌شود.
+- **گواهی روی سرور داخل ایران:** خواندن پوشهٔ گواهی از ایمیجی استفاده می‌کند که روی همان سرور هست و هرگز چیزی دانلود نمی‌کند. قبلاً روی سروری که ایمیج `alpine:3` نداشت، دانلود از Docker Hub (بسته از داخل ایران) شکست می‌خورد و گواهی موجود «پیدا نمی‌شد».
+
+- **A first install:** a server with no `.env` yet is installed first. The script asks for the domain, finds a certificate already on the server (3X-UI's in `/root/cert/<domain>/`, say), and offers to use it (renewed by this server in that folder, or by whoever renews it now), a new one from Let's Encrypt, or a self-signed one. For Let's Encrypt it asks for an email (optional). Every answer can also be given with `--domain`, `--email`, `--cert`, and `--cert-dir`.
+- **The SSH key:** a key written as `~/.ssh/<name>` (as the panel writes it) was left out, and the login failed with "Cannot log in without a password" although the key was on the server. It is read right now, and a refused key is told apart from a server that does not answer.
+- **A certificate on a server inside Iran:** reading the certificate's folder uses an image already on that server and never downloads one. On a server without the `alpine:3` image, the download from Docker Hub (blocked inside Iran) used to fail and the certificate already there was "not found".
+
+## پنل: نصب، sudo و تنظیمات فرستاده‌شده · The panel: installing, sudo, and settings sent
+
+- **میرور رجیستری:** حالا یک فهرست انتخابی است، با گزینهٔ «میرور دیگر» برای نوشتن دستی. پنجرهٔ پرکردن خودکار رمز مرورگر دیگر رویش باز نمی‌شود.
+- **آزمایش دسترسی sudo:** کد دومرحله‌ای می‌خواهد، و برای هر سرور حداکثر سه بار در ده دقیقه انجام می‌شود.
+- **اعمال تنظیمات فرستاده‌شده:** سروری که در پنل هست بی‌صدا جایگزین نمی‌شود. تغییرهایش فیلد به فیلد نشان داده می‌شود و فقط با تیک جایگزین می‌شود، و کلید SSH همان پنل را نگه می‌دارد.
+- **نقشهٔ راه:** وضعیت چهار فاز برنامهٔ تاب‌آوری شبکهٔ رله‌ها، یعنی آنچه انجام شده، نیمه‌کاره است یا مانده، در `docs/RELAY-RESILIENCE-ROADMAP.md`.
+
+- **The registry mirror:** a list to pick from now, with "Another mirror" to type one. The browser's password filler no longer covers it.
+- **The sudo test:** takes an authenticator code, at most three times per server in ten minutes.
+- **Applying settings sent by another admin:** a server already on the panel is never replaced silently. Its changes are shown field by field, it is replaced only when ticked, and it keeps the panel's own SSH key.
+- **The roadmap:** the four phases planned for the relay network's resilience — what is done, half done, and left — are in `docs/RELAY-RESILIENCE-ROADMAP.md`.
+
+---
+
+# P00RIJA Cryptography 2.98.89
+
+Version 2.98.89 · build chat-v182
+
+---
+
+## پنل مرکزی بازچیده شد · The central panel, rearranged
+
+- **دسته‌بندی همه‌جا:** نوار کناری پنج گروه دارد (اصلی، مدیریت، پایش، عملیات، راهنما
+  و درباره). هر بخش چندقسمتی زیربخش دارد، و هر فهرست بلند را می‌توان بر اساس سرور،
+  خوشه، منطقه یا ویژگی خود همان فهرست دسته‌بندی کرد، گروه‌ها را بست و جستجو کرد. این
+  انتخاب‌ها در همان مرورگر می‌مانند.
+- **عملیات سرورها:** بخش‌های «سرور و پشتیبان»، «سیستم» و «نصب خام» یکی شدند، با
+  زیربخش‌های وضعیت سرورها، پشتیبان‌ها، به‌روزرسانی، کانتینرها، ایمیج‌ها و پاک‌سازی، نصب
+  و پیش‌نیازها، و سیستم.
+- **گزارش‌ها:** گزارش هر سرور در سه سطح، تماس‌های زنده، رویدادهای سرورها، رویدادهای
+  پنل (که از بخش جدای خود به این‌جا آمد) و مرکز خروجی: پانزده جدول، برای همهٔ سرورها،
+  یک خوشه یا یک سرور، با قالب CSV، TSV، JSON، اکسل، HTML قابل چاپ یا Markdown.
+- **راهنمای پنل** و **درباره پروژه** در انتهای نوار کناری اضافه شدند.
+
+- **Grouped everywhere:** the sidebar has five groups (main, management,
+  monitoring, operations, and help). A section with several parts has
+  sub-tabs, and every long list can be grouped by server, cluster, region, or
+  what that list has, its groups folded, and searched. The choices stay in
+  the browser.
+- **Server operations:** Server and backups, System, and Fresh install are one
+  section, with sub-tabs for the servers, backups, updates, containers, images
+  and clean-up, install and prerequisites, and the system.
+- **Reports:** each server at three levels, live calls, the servers' events,
+  the panel's own events (moved here from a section of their own), and an
+  export centre: fifteen tables, for every server, one cluster, or one server,
+  as CSV, TSV, JSON, Excel, printable HTML, or Markdown.
+- **A panel guide** and **About the project** close the sidebar.
+
+## نمودارهای زنده · Live graphs
+
+- **نمای کلی:** کاشی‌های وضعیت همین حالا و نمودار زندهٔ هر سرور، تک‌سرور، بر اساس
+  خوشه، بر اساس منطقه یا همه با هم، در دسته‌های منابع، ترافیک، کاربران، و شبکه و صف.
+  بازه از ۱۵ دقیقه تا ۷ روز است، نمودارها هر ۱۵ ثانیه خودشان تازه می‌شوند و اشاره‌گر
+  مقدار هر سرور را در همان لحظه نشان می‌دهد. یک هفته خوانش در خود پنل نگه داشته می‌شود.
+- **ترافیک:** نمودارهای زنده به تفکیک سرور، خوشه یا منطقه، سهم هر سرور، خوشه و منطقه،
+  پرترافیک‌ترین کاربران و ترافیک بین رله‌ها. صف‌ها، رله‌ها و کانتینرها هم نمودار گرفتند.
+
+- **Overview:** tiles with what is true now, and a live graph of every server,
+  one at a time, by cluster, by region, or all together, in four categories:
+  resources, traffic, users, and the network and its queues. The range runs
+  from 15 minutes to 7 days, the graphs refresh every 15 seconds, and the
+  pointer reads each server's value at that moment. The panel keeps a week of
+  readings itself.
+- **Traffic:** live graphs by server, cluster, or region, each server's,
+  cluster's, and region's share, the busiest users, and the traffic between
+  relays. The queues, the relays, and the containers have charts too.
+
+## ساخت و بسته‌بندی، و نصب روی سرور تازه · Building, and installing on a fresh server
+
+- **ساخت و بسته‌بندی:** پوشهٔ برنامه روی کامپیوتر خودتان را در پنل بدهید؛ بررسی
+  می‌شود و در همان پوشه، در `dist/server/<نسخه>/`، بستهٔ به‌روزرسانی امضاشده با
+  ایمیج‌های سرور و آرشیو برنامه، ایمیج‌های Docker Hub به صورت آرشیو، و در صورت ورود به
+  Docker Hub انتشار در آن ساخته می‌شود. همین کار با `scripts/build-server-package.sh`
+  دستی هم انجام می‌شود. هر فایل ساخته‌شده دانلود می‌شود یا مستقیم به سرورها می‌رود.
+- **به‌روزرسانی از همین کامپیوتر:** بستهٔ ساخته‌شده، پوشه یا فایل فشرده، یا آرشیو
+  ایمیج‌ها روی سرورها آپلود و اعمال می‌شود؛ به‌روزرسانی از گیت‌هاب هم مثل قبل هست.
+- **پیش‌نیازها خودکار:** نصب روی سرور تازه اول داکر و افزونهٔ compose را می‌گذارد،
+  فقط اگر نباشند. سرور داخلی از میرورهای داخل ایران استفاده می‌کند و میرور رجیستری
+  هم می‌گیرد؛ سروری که به هیچ منبعی نرسد، فایل‌ها را از خود پنل از راه SSH می‌گیرد.
+
+- **Build & package:** name the app's folder on your own computer in the
+  panel; it is looked over and, in that same folder, in
+  `dist/server/<version>/`, the signed update package with the server images
+  and the app's archive, the Docker Hub images as an archive, and, once logged
+  in to Docker Hub, the push are made. `scripts/build-server-package.sh` does
+  the same by hand. Every file made downloads or goes straight to servers.
+- **Updates from this computer:** a build, a folder or an archive, or an image
+  archive is uploaded to servers and applied; updates from GitHub stay too.
+- **Prerequisites by themselves:** installing on a fresh server first puts
+  Docker and its compose plugin in, only if missing. A server inside Iran uses
+  the mirrors there and gets registry mirrors too; a server that reaches
+  nothing gets the files from the panel itself, over SSH.
+
+## خوشه‌ها، شبکه، کاربران، شریک‌ها · Clusters, the network, users, partners
+
+- **خوشه‌ها:** هر خوشه در یک نگاه با اقدام روی همهٔ سرورهایش، ادغام دو خوشه، جابه‌جایی
+  سرور، جای Gateway هر رله، و نشانی داخلی برای همهٔ سرورها؛ برای سرور خارجی هم یک
+  نشانی IP، تا اگر DNSها کلاً از کار افتادند باز در دسترس بماند.
+- **شبکه:** نقشه با نمایش یک خوشه، فقط پیوندهای قطع یا بدون شریک‌ها، چیدمان از نو و
+  خروجی JSON؛ و جدول گره‌ها و پیوندها، دسته‌بندی‌شده.
+- **کاربران:** کاربران هر رله، رله‌هایی که با هم در ارتباط‌اند (ماتریس لینک‌ها)، و مرکز
+  پیام که به همهٔ سرورها، یک خوشه، یک سرور یا چند سرور انتخابی می‌فرستد.
+- **صف پیام‌ها و رله‌ها:** صندوق‌ها بر اساس اندازه یا عمر و دفتر انقضا بر اساس علت؛
+  لینک رله‌ها بر اساس وضعیت، نوع یا رلهٔ مقابل.
+- **شریک‌ها** بخش خود را گرفتند: افزودن، پذیرش، رد، قطع، و یادداشت خودتان دربارهٔ هر
+  شریک که فقط روی پنل می‌ماند.
+
+- **Clusters:** each cluster at a glance with actions on all of its servers,
+  merging two clusters, moving a server, each relay's gateway place, and inside
+  addresses for every server; for a server outside Iran too an IP address, so
+  that it stays reachable if DNS is gone altogether.
+- **Network:** the map can show one cluster, only the links that are down, or
+  no partners, be laid out afresh, and be exported as JSON; the nodes and the
+  links are grouped tables too.
+- **Users:** the people on each relay, the relays in contact with each other
+  (a matrix of links), and a message centre that sends to every server, one
+  cluster, one server, or a few picked by hand.
+- **Queues and relays:** mailboxes by size or age and the expiry ledger by
+  reason; relay links by state, kind, or the relay at the other end.
+- **Partners** have a section of their own: add, approve, reject, disconnect,
+  and your own notes on each partner, kept on the panel only.
+
+---
+
+# P00RIJA Cryptography 2.98.88
+
+Version 2.98.88 · build chat-v181
+
+---
+
+## به‌روزرسانی سرورها از پنل مرکزی · Server updates from the central panel
+
+- **سه راه برای نسخهٔ تازه:** پوشهٔ برنامه، یک فایل فشرده (یا بسته‌ای که قبلاً
+  ساخته شده)، یا آخرین انتشار گیت‌هاب که با `SHA256SUMS` آن سنجیده می‌شود. از
+  پوشه فقط بخش‌هایی که دیپلوی لازم دارد فرستاده می‌شود.
+- **بستهٔ امضاشده:** پنل ایمیج‌ها را یک بار روی همین کامپیوتر می‌سازد و بسته را با
+  کلید اپراتور امضا می‌کند. سرور بسته‌ای را که امضای اپراتور ندارد، یا از نسخهٔ
+  فعلی‌اش تازه‌تر نیست، نمی‌پذیرد. برای ساختن بسته پنل را با
+  `bash scripts/panel.sh update --builds yes` راه بیندازید؛ این کار داکرِ همین
+  کامپیوتر را به پنل می‌دهد و با دسترسی root برابر است.
+- **زمان اعمال:** هوشمند (وقتی کمترین کاربر آنلاین است)، در تاریخ و ساعت مشخص، یا
+  همین حالا. دو دقیقه پیش از شروع، برنامه به کاربران آنلاین می‌گوید سرور در حال
+  به‌روزرسانی است و چند دقیقه صبر کنند.
+- **زنجیره‌ای:** هر سرور نسخهٔ امضاشدهٔ تازه‌تر را از هر عضو خانواده که به آن
+  می‌رسد می‌گیرد، پس سروری که پنل مستقیم به آن دسترسی ندارد هم به‌روز می‌شود.
+- **امن در شکست:** سرور پیش از کار پشتیبان می‌گیرد. اگر به‌روزرسانی شکست بخورد،
+  نسخهٔ قبلی روشن می‌ماند، گزارش می‌شود و خودبه‌خود دوباره تلاش نمی‌شود.
+
+- **Three ways to bring a release:** the app's folder, an archive (or a
+  package made before), or GitHub's latest release, checked against its
+  `SHA256SUMS`. From a folder, only what a deploy uses is sent.
+- **A signed package:** the panel builds the images once, on this computer,
+  and signs the package with the operator key. A server refuses a package the
+  operator did not sign, or one that is not newer than what it runs. To build
+  packages, start the panel with `bash scripts/panel.sh update --builds yes`;
+  that gives the panel this computer's Docker, which is as good as root.
+- **When it applies:** smart (when the fewest people are online), at a set
+  date and time, or now. Two minutes before it starts, the app tells the
+  people online that the server is updating and to wait a few minutes.
+- **A chain:** each server takes a newer signed version from any member of
+  the family it can reach, so a server the panel cannot reach directly is
+  updated too.
+- **Safe when it fails:** a server backs up first. A failed update leaves the
+  previous version running, is reported, and is never retried by itself.
+
+## ربات تلگرام در پنل مرکزی · The Telegram bot in the central panel
+
+- **همه‌چیزِ ربات از یک بخش:** توکن، چت، نام روی کارت‌ها، فارسی یا انگلیسی،
+  منطقهٔ زمانی، کاربرانی که اجازهٔ دستور دارند، هر دسته (روشن، خاموش، بی‌صدا)،
+  هر نوع هشدار، همهٔ آستانه‌ها، فاصلهٔ بررسی، یادآوری و فاصلهٔ بین پیام‌ها، ساعت
+  سکوت، بی‌صدایی، گزارش روزانه، هر دستور، تاپیک‌های گروه، و قالب کارت.
+- **پیش‌نمایش و گزارش:** هر کارت را همان‌طور که فرستاده می‌شود می‌بینید، و
+  فهرستی از آنچه فرستاده شده و آنچه نشده با دلیلش.
+- **دستورهای تازه:** `/alerts`، `/updates`، `/version`، `/mute` و `/unmute`،
+  و دکمه‌های «بی‌صدا» و «وضعیت» زیر هر هشدار. هر مرحلهٔ به‌روزرسانی سرور هم به
+  ربات گفته می‌شود.
+- **توکن فقط روی سرور خارجی:** توکن پوشیده نشان داده می‌شود و فقط روی سروری
+  گذاشته می‌شود که برای خانواده می‌فرستد. سرور داخلی توکن لازم ندارد و هشدارهایش
+  را از راه لینک رله به سرور خارجی می‌سپارد. ذخیرهٔ تنظیمات امضا می‌شود.
+
+- **Everything about the bot in one section:** the token, the chat, the name
+  on the cards, Persian or English, the time zone, the people allowed to give
+  commands, each category (on, off, silent), each kind of alert, every
+  threshold, how often to check, remind, and space messages, quiet hours,
+  mute, the daily report, each command, group topics, and the card's template.
+- **Preview and log:** see any card as it would be sent, and a list of what
+  was sent and what was not, and why.
+- **New commands:** `/alerts`, `/updates`, `/version`, `/mute`, and
+  `/unmute`, and Mute and Status buttons under each alert. Each step of a
+  server update is told to the bot too.
+- **The token on the outside server alone:** it is shown masked and set only
+  on the server that sends for the family. An inside server needs none and
+  hands its alerts to the outside server over the relay link. Saving the
+  settings is signed.
+
+## به‌روزرسانی برنامهٔ نیتیو · Updating the native app
+
+- **دانلود از داخل برنامه:** وقتی نسخهٔ تازه‌ای در گیت‌هاب هست، برنامه خودش آن را
+  از همان پروکسی برنامه دانلود می‌کند و پیشرفت را نشان می‌دهد؛ دیگر به مرورگری که
+  شاید به گیت‌هاب نرسد نیازی نیست.
+- **دقیقاً همان نسخه:** مک Apple Silicon همان aarch64 را می‌گیرد نه universal،
+  مک universal همان universal را، ویندوز همان x64 یا arm64 و همان setup یا msi
+  را، و لینوکس همان deb، rpm یا AppImage را.
+- **بررسی‌شده و بی‌خطر:** فایل فقط از انتشارهای همین برنامه گرفته می‌شود، با
+  `SHA256SUMS` سنجیده می‌شود، روی هیچ فایلی نوشته نمی‌شود و فقط بعد از پرسیدن باز
+  می‌شود.
+
+- **Downloaded in the app:** when GitHub has a newer release, the app
+  downloads it itself, through the app's own proxy, and shows the progress;
+  a browser that cannot reach GitHub no longer stands in the way.
+- **Exactly the same build:** an Apple Silicon Mac gets the aarch64 build,
+  not the universal one, a universal Mac gets the universal one, Windows the
+  same x64 or arm64 and the same setup or msi, and Linux the same deb, rpm,
+  or AppImage.
+- **Checked and safe:** the file comes only from this app's own releases, is
+  checked against `SHA256SUMS`, never writes over a file, and is opened only
+  after asking.
+
+## پنل مرکزی: نصب بدون دامنه · The central panel: installing without a domain
+
+- **خطای `bad-options` برطرف شد:** نصب از پنل روی سروری که دامنه به آن داده
+  نشده بود رد می‌شد. حالا دامنه اختیاری است و نصب با IP عمومی سرور و گواهی
+  خودامضا انجام می‌شود. هر فیلدی که رد شود با نامش و به زبان ساده گفته می‌شود.
+
+- **The `bad-options` error is fixed:** installing from the panel on a server
+  given no domain was refused. The domain is now optional, and the install
+  uses the server's public IP with a self-signed certificate. A field that is
+  refused is named, in words.
+
+---
+
+# P00RIJA Cryptography 2.98.87
+
+Version 2.98.87 · build chat-v180
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## اعلان‌ها · Notifications
+
+- **گوشه‌ها دوباره گرد شدند:** جایی که برچسب بالای اعلان به متن آن می‌رسد، حالا
+  گوشه‌ای نرم و گرد دارد، همان‌طور که sileo طراحی کرده است. در نسخهٔ 2.98.86 این
+  گوشه‌ها تیز بودند.
+- **متن خواناتر شد:** متن اعلان و عنوان آن ضخیم‌تر شده‌اند و در فارسی و انگلیسی
+  وسط‌چین‌اند.
+
+- **The corners are round again:** where the label at the top of a notice
+  meets its message, the corner is soft and round again, as sileo draws it. In
+  2.98.86 those corners were square.
+- **Easier to read:** the message and its title are heavier, and centred in
+  Persian and English alike.
+
+## پنل مرکزی: گواهی و mirror در نصب · The central panel: certificates and mirrors at install
+
+- **گواهی موجود سرور استفاده می‌شود:** نصب از پنل اول دنبال گواهی‌ای می‌گردد که
+  سرور از قبل برای دامنه دارد، با هر برنامه‌ای که گرفته شده باشد، و همان را به کار
+  می‌برد. فقط اگر چیزی پیدا نشود گواهی تازه می‌گیرد. گواهی‌ای که در پوشهٔ برنامهٔ
+  دیگری است، همان برنامه تمدیدش می‌کند.
+- **mirrorهای Docker برای سرورهای داخل ایران:** پنجرهٔ نصب چند mirror پیشنهاد
+  می‌دهد که از داخل ایران جواب دادند. mirrorی که دستی بنویسید برای دفعهٔ بعد نگه
+  داشته می‌شود.
+
+- **The server's own certificate is used:** installing from the panel first
+  looks for a certificate the server already has for the domain, whichever
+  program got it, and serves that. Only when none is found does it get a new
+  one. A certificate kept in another program's folder is renewed by that
+  program.
+- **Docker mirrors for servers inside Iran:** the Install dialog offers a few
+  mirrors that answered from inside Iran, and a mirror typed by hand is kept
+  for next time.
+
+---
+
+# P00RIJA Cryptography 2.98.86
+
+Version 2.98.86 · build chat-v179
+
+متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
+
+Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## اعلان‌های تازه · New notifications
+
+- **اعلان‌ها با sileo کشیده می‌شوند:** اعلانی نرم و فنری که بالای صفحه، وسط، و
+  روی همهٔ پنجره‌ها می‌نشیند. متن فارسی راست‌به‌چپ است و متن انگلیسی چپ‌به‌راست.
+- **دو اعلان، دو اعلان‌اند:** اعلان دوم دیگر جای اولی را نمی‌گیرد، و همان اعلان
+  اگر دوباره بیاید فقط خودش تازه می‌شود.
+- **آفلاین کار می‌کند:** همه‌چیز در یک فایل همراه برنامه است و از هیچ جای دیگری
+  بار نمی‌شود. اگر آن فایل بار نشود، اعلان ساده‌ٔ قبلی نشان داده می‌شود و هیچ
+  اعلانی گم نمی‌شود.
+
+- **Notifications are drawn by sileo:** a soft, spring-like notice that sits at
+  the top, centred, and above every dialog. Persian runs right to left, and
+  English left to right.
+- **Two notices are two notices:** a second one no longer takes the place of
+  the first, and the same notice raised again only refreshes itself.
+- **It works offline:** all of it ships in one file with the app and nothing is
+  fetched from anywhere else. If that file cannot load, the earlier plain
+  notice is shown instead, so no notice is lost.
+
+## انتخاب پیام با ماوس · Picking messages with a mouse
+
+- نگه داشتن طولانی روی یک پیام با ماوس، حالا آن پیام را انتخاب‌شده نگه می‌دارد.
+  قبلاً رها کردن دکمه همان پیام را از انتخاب درمی‌آورد و حالت انتخاب بسته می‌شد.
+
+- A long press on a message with a mouse now keeps it picked. Letting go of the
+  button used to unpick it, and selection closed at once.
+
+## پنل مرکزی: افزودن سرور و نصب خام · The central panel: adding a server, and a fresh install
+
+- **سرور تازه با کلید درست اضافه می‌شود:** پنل سروری را که بار اول می‌بیند در همان
+  ورود اول می‌پذیرد و کلیدش را نگه می‌دارد، و دیگر «SSH کلید را نپذیرفت» نمی‌گوید.
+  اگر کلید خود سرور بعداً عوض شود، پنل آن را نمی‌پذیرد و همین را با نام خودش
+  می‌گوید.
+- **کاربر SSH باید نوشته شود:** پنل دیگر آن را حدس نمی‌زند.
+- **نصب خام تا آخر اجرا می‌شود:** فرمان نصب دیگر با «no .env template found in the
+  bundle» نمی‌ایستد. تنظیمات سرور تازه را خودش می‌سازد، با رمزهای تصادفی و تازه،
+  دامنه‌ای که می‌پرسد (یا نشانی عمومی سرور)، و رمز داشبورد که یک بار در پایان نشان
+  داده می‌شود. اجرای دوباره تنظیمات موجود را دست نمی‌زند.
+- **امن‌تر:** بستهٔ نصب خام دیگر هیچ نسخه‌ای از فایل تنظیمات سروری که از آن می‌آید
+  را با خود نمی‌برد. توکن نصب، همان‌طور که پنل می‌گوید، یک بار مصرف می‌شود.
+  دامنه یا نشانی‌ای که چیزی جز حروف مجاز داشته باشد رد می‌شود.
+
+- **A new server with the right key is added:** the panel trusts a server it
+  meets for the first time on that first login and keeps its key, and no
+  longer says "SSH refused the key". If the server's own key changes later,
+  the panel refuses it and says so by name.
+- **The SSH user must be filled in:** the panel no longer guesses it.
+- **A fresh install runs to the end:** the install command no longer stops
+  with "no .env template found in the bundle". It writes the new server's
+  settings itself, with fresh random secrets, the domain it asks for (or the
+  server's public address), and the dashboard password shown once at the end.
+  Running it again leaves existing settings alone.
+- **Safer:** the fresh-install bundle no longer carries any copy of the
+  settings file of the server it comes from. The install token is used once,
+  as the panel says. A domain or address with anything but allowed characters
+  is refused.
+
+## تست‌ها · Tests
+
+- آزمون‌هایی که با تغییرهای عمدی برنامه کهنه شده بودند به‌روز شدند: سقف‌های بیت‌ریت
+  تماس، سقف ۲۰۰ مگابایتی فایل در صف، کارت مخاطب با کلید واقعی، نوار انتخاب، و
+  جای پیام روی صفحه. README هم سقف ۲۰۰ مگابایت را درست می‌گوید.
+
+- Suites that had fallen behind deliberate changes now test what the app does:
+  the call bitrate ceilings, the 200 MB queued-file limit, a contact card with a
+  real key, the selection bar, and where a message sits on screen. The README
+  now states the 200 MB limit too.
+
+---
+
 # P00RIJA Cryptography 2.98.85
 
 Version 2.98.85 · build chat-v178

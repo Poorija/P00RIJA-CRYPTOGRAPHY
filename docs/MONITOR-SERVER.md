@@ -254,6 +254,23 @@ and `/help`. Once a day at `CHAT_STATUS_REPORT_AT` (09:00 Tehran time) the same
 summary arrives on its own. If the bot has a webhook, or something else reads
 its updates, the commands are left to that.
 
+From 2.98.88 everything about the bot is set from the central panel's
+**Telegram bot** section ([CONTROL-PANEL.md](CONTROL-PANEL.md)) while the relay
+runs: the token, the chat, Persian or English, the time zone, each category
+and kind of alert, the thresholds, quiet hours, mute, forum topics, the
+commands and the card's last line. The bot also answers `/alerts` (what is open
+on every server), `/updates` (each server's version and any update ready),
+`/version`, `/mute 30m|2h|1d` and `/unmute`; the **Mute** and **Status** buttons
+under an alert do the same. Each step of a server update is told: arrived,
+about to start, started, done, or failed.
+
+From 2.98.90 a card has a design (classic, boxed, compact, minimal, detailed,
+or the operator's own template), every line starts with a direction mark so
+Persian reads right to left and English left to right, and a card too long for
+Telegram is shortened in its message, never cut through its markup. A relay's
+test obeys its bot's main switch: with the bot off it answers `bot-off`
+instead of sending. Details are in [CONTROL-PANEL.md](CONTROL-PANEL.md).
+
 ## هشدار در تلگرام (از نسخهٔ 2.98.81)
 
 یکی از رله‌های خانواده ربات را دارد (`TELEGRAM_BOT_TOKEN` و
@@ -269,6 +286,21 @@ its updates, the commands are left to that.
 `/servers` (نام و جای کامل هر سرور) و `/help`. هر روز ساعت `CHAT_STATUS_REPORT_AT`
 (۹ صبح به وقت تهران) همین خلاصه خودش می‌آید. اگر ربات webhook داشته باشد یا چیز دیگری
 پیام‌هایش را بخواند، دستورها به همان سپرده می‌شوند.
+
+از نسخهٔ 2.98.88 همه‌چیزِ ربات از بخش **ربات تلگرام** پنل مرکزی
+([CONTROL-PANEL.md](CONTROL-PANEL.md)) و در حالی که رله روشن است تنظیم می‌شود:
+توکن، چت، فارسی یا انگلیسی، منطقهٔ زمانی، هر دسته و هر نوع هشدار، آستانه‌ها، ساعت
+سکوت، بی‌صدایی، تاپیک‌های گروه، دستورها و سطر پایانی کارت. ربات به `/alerts`
+(مشکل‌های باز همهٔ سرورها)، `/updates` (نسخهٔ هر سرور و به‌روزرسانی آماده)،
+`/version`، `/mute 30m|2h|1d` و `/unmute` هم جواب می‌دهد و دکمه‌های **بی‌صدا** و
+**وضعیت** زیر هر هشدار همین کار را می‌کنند. هر مرحلهٔ به‌روزرسانی سرور هم گفته
+می‌شود: رسید، به‌زودی شروع می‌شود، شروع شد، انجام شد یا ناموفق بود.
+
+از نسخهٔ 2.98.90 هر کارت طرح دارد (کلاسیک، کادردار، فشرده، ساده، کامل یا قالب خود اپراتور)،
+هر سطر با علامت جهت شروع می‌شود تا فارسی راست به چپ و انگلیسی چپ به راست خوانده شود، و کارتی که
+برای تلگرام بلند است از پیامش کوتاه می‌شود و هرگز از میان نشانه‌گذاری‌اش بریده نمی‌شود. آزمایش هر
+رله از کلید اصلی ربات آن پیروی می‌کند: با ربات خاموش، به‌جای فرستادن، `bot-off` پاسخ می‌دهد.
+جزئیات در [CONTROL-PANEL.md](CONTROL-PANEL.md) است.
 
 ## متغیرهای محیطی
 
@@ -289,8 +321,13 @@ its updates, the commands are left to that.
 | `CHAT_ALERT_TELEGRAM_CHAT_ID` | — | چت تلگرامی که هشدارها به آن می‌رود (با `TELEGRAM_BOT_TOKEN`)؛ رلهٔ بدون این دو، هشدار را از لینک transit به رلهٔ دیگر می‌دهد |
 | `CHAT_ALERT_PEERS` | — | شناسهٔ رله‌هایی که هشدار به آن‌ها فرستاده یا از آن‌ها پذیرفته می‌شود (با کاما)؛ خالی یعنی همهٔ اعضای خانوادهٔ امضاشده |
 | `CHAT_ALERT_LABEL` | نام میزبان | نام این رله روی کارت‌های تلگرام (کنار نشانی، خوشه، نسخه و شناسهٔ آن) |
-| `CHAT_STATUS_REPORT_AT` | 09:00 | ساعت گزارش روزانهٔ همهٔ سرورها به وقت تهران؛ `off` برای خاموش |
-| `CHAT_TELEGRAM_COMMANDS` | 1 | `0`: ربات به دستورهای `/status`، `/servers` و `/help` جواب نمی‌دهد |
+| `CHAT_STATUS_REPORT_AT` | 09:00 | ساعت گزارش روزانهٔ همهٔ سرورها به وقت تهران (یا منطقه‌ای که پنل انتخاب کرده)؛ `off` برای خاموش |
+| `CHAT_TELEGRAM_COMMANDS` | 1 | `0`: ربات به هیچ دستوری جواب نمی‌دهد |
+| `CHAT_TELEGRAM_LANGUAGE` | fa | زبان پیام‌های ربات (`fa` یا `en`) تا وقتی پنل آن را عوض نکرده |
+| `CHAT_TELEGRAM_SETTINGS_PATH` | `telegram-settings.json` کنار داده‌ها | آنچه پنل در تنظیمات ربات تغییر داده |
+| `CHAT_TELEGRAM_TOKEN_PATH` | `telegram-token` کنار داده‌ها | توکنی که از پنل گذاشته شده (فقط برای صاحبش)؛ بر `TELEGRAM_BOT_TOKEN` مقدم است |
+| `CHAT_UPDATES_DIR` | `updates` کنار داده‌ها | بسته‌های به‌روزرسانی سرور و وضعیت آن‌ها |
+| `CHAT_UPDATE_NOTICE_MS` | 120000 | چند میلی‌ثانیه پیش از به‌روزرسانی به کاربران آنلاین خبر داده می‌شود |
 | `CHAT_FAMILY_LINKS_MS` | 60000 | هر چند وقت رله به اعضای خانواده می‌گوید با کدام اعضا لینک دارد |
 | `CHAT_GATEWAY_STABLE_MS` | 60000 | مدتی که لینک یک Gateway باید پایدار بماند تا دوباره ترافیک ببرد |
 | `CHAT_GATEWAY_HANDOFF_MS` | 120000 | مدتی که Gateway کنارگذاشته‌شده لینک‌های شریک‌ها را تا بالا آمدن Gateway تازه نگه می‌دارد |

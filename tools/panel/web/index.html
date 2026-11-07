@@ -18,7 +18,22 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<section id="loginView" class="login">
+<!-- Shown until the page has started: a spinner, and, if it takes long, a
+     way to load the page again (a plain link, so it works even if a script
+     failed to load). -->
+<div id="boot" class="boot" role="status" aria-live="polite">
+  <img src="/logo.svg" alt="" width="84" height="84">
+  <div class="brand-name">P00RIJÃ Cryptography</div>
+  <div class="spinner" aria-hidden="true"></div>
+  <div class="boot-text"><span lang="fa">در حال بارگذاری پنل…</span> · <span lang="en">Loading the panel…</span></div>
+  <div class="boot-late"><p class="mut"><span lang="fa">بیش از معمول طول کشید.</span> <span lang="en">This is taking longer than usual.</span></p>
+    <a class="btn acc-btn" href="/"><i class="fa-solid fa-rotate"></i> <span lang="fa">بارگذاری دوباره</span> · <span lang="en">Reload</span></a></div>
+</div>
+<div id="busyBar" class="busy-bar" aria-hidden="true"></div>
+<div id="offline" class="offline" role="alert" hidden><i class="fa-solid fa-plug-circle-xmark"></i>
+  <span data-t="offline">ارتباط با پنل قطع است؛ دوباره تلاش می‌شود…</span>
+  <a class="btn" href="/"><i class="fa-solid fa-rotate"></i> <span data-t="reloadPage">بارگذاری دوباره</span></a></div>
+<section id="loginView" class="login" hidden>
   <form id="loginForm" class="login-card" autocomplete="on">
     <div class="brand">
       <img id="loginLogo" src="/logo.svg" alt="" width="72" height="72">
@@ -81,6 +96,7 @@
     <div class="row end"><button id="dialogClose" data-t="close">بستن</button></div>
   </div>
 </div>
+<div id="chartTip" class="chart-tip" role="tooltip" hidden></div>
 <script type="module" src="/app.js"></script>
 </body>
 </html>

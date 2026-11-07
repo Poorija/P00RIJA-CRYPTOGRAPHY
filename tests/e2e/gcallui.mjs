@@ -43,8 +43,7 @@ async function app(tag){
   await page.evaluate(()=>document.getElementById('setupBtn')?.click());
   await page.waitForTimeout(2500);
   await page.evaluate(()=>{window.__toasts=[];
-    const o=window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification=(m,t)=>{window.__toasts.push(`${t}: ${m}`);return o?.(m,t);};
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const w=navigator.clipboard.writeText.bind(navigator.clipboard);
     navigator.clipboard.writeText=(t)=>{window.__clip.push(t);return w(t).catch(()=>{});};
     document.getElementById('mobileInstallGate')?.classList.add('hidden'); window.switchTab?.('chat');});

@@ -91,6 +91,25 @@ try {
   const refused = await panel.request('/api/servers/test', { method: 'POST', body: { fields: { SSH_HOST: 'c.example', SSH_USER: 'op', SSH_KEY: '~/.ssh/deploy_key' } }, cookie });
   check('a refused key is said plainly', refused.json?.ok === false && refused.json?.problem === 'auth-failed', JSON.stringify(refused.json));
 
+  /* A server met for the first time is not a refused key. ssh in BatchMode
+     used to stop at the unknown host key, and "Host key verification failed"
+     was filed as auth-failed: a server added with the right key installed was
+     reported as refusing it. */
+  const testArgs = panel.calls().at(-1) || '';
+  check('a server met for the first time is trusted on first use, never asked about',
+    testArgs.includes('StrictHostKeyChecking=accept-new'), testArgs.slice(0, 160));
+  check('and what it learns is kept in the panel’s own state, the operator’s known hosts still read',
+    testArgs.includes(`UserKnownHostsFile="${path.join(panel.dirs.state, 'known_hosts')}" "${path.join(panel.dirs.home, '.ssh', 'known_hosts')}"`), testArgs.slice(0, 240));
+  panel.ssh('hostkey');
+  const changed = await panel.request('/api/servers/test', { method: 'POST', body: { fields: { SSH_HOST: 'c.example', SSH_USER: 'op', SSH_KEY: '~/.ssh/deploy_key' } }, cookie });
+  check('a server whose own key changed is named for that, not as a refused login key',
+    changed.json?.ok === false && changed.json?.problem === 'host-key-changed', JSON.stringify(changed.json));
+  const callsBeforeUser = panel.calls().length;
+  const noUser = await panel.request('/api/servers/test', { method: 'POST', body: { fields: { SSH_HOST: 'c.example', SSH_KEY: '~/.ssh/deploy_key' } }, cookie });
+  check('an empty user is asked for, not replaced by whoever runs the panel',
+    noUser.json?.ok === false && noUser.json?.problem === 'user-missing' && panel.calls().length === callsBeforeUser, JSON.stringify(noUser.json));
+  panel.ssh('denied');
+
   /* deploy.sh sources deploy.conf and puts some of it into commands a shell
      runs (a jump's ProxyCommand): what the panel writes is held to plain
      characters, so nothing written here can become a command there. */
@@ -150,6 +169,53 @@ try {
   const sent = panel.lastInput();
   check('it takes the installer and the compose file with it, and the options given', /docker-install\.sh --yes --domain 'c\.example' --registry 'mirror\.example\.ir'/.test(sent) && sent.includes('base64 -d'), sent.slice(-200));
   check('and its output never reaches the audit log', !panel.audit().includes('Password:') && !panel.audit().includes('Abc123FirstSecret') && /install on c/.test(panel.audit()));
+  /* A certificate the server already has (3X-UI's /root/cert/<domain>/) is
+     served in place: found by the installer, or the folder named here, and
+     renewed by this server or by its owner, as asked. */
+  const installWith = async (extra) => {
+    const started = await panel.request('/api/servers/install', { method: 'POST', body: { name: 'c', domain: 'c.example', code: panel.code(), ...extra }, cookie });
+    for (let i = 0; i < 40 && started.json?.job; i += 1) {
+      if ((await panel.request(`/api/jobs?id=${started.json.job}`, { cookie })).json?.done) break;
+      await sleep(150);
+    }
+    return { status: started.status, json: started.json, sent: panel.lastInput() };
+  };
+  const here = await installWith({ certRenew: 'here' });
+  check('a certificate found on the server is renewed by this server when asked, as on the servers set up by hand', here.status === 200 && /docker-install\.sh --yes --domain 'c\.example' --letsencrypt/.test(here.sent), here.sent.slice(-160));
+  const owner = await installWith({ certRenew: 'owner' });
+  check('or left to its owner', owner.status === 200 && /docker-install\.sh --yes --domain 'c\.example'\s*<|docker-install\.sh --yes --domain 'c\.example' </.test(owner.sent) && !/--letsencrypt|--new-cert|--cert-dir/.test(owner.sent.split('docker-install.sh --yes').pop()), owner.sent.slice(-160));
+  const folder = await installWith({ certDir: '/root/cert/c.example', certRenew: 'here' });
+  check('a folder named in the page is the one served', folder.status === 200 && /--cert-dir '\/root\/cert\/c\.example' --letsencrypt/.test(folder.sent), folder.sent.slice(-160));
+  const fresh = await installWith({ newCert: true, certRenew: 'here' });
+  check('and a new certificate can be asked for instead', fresh.status === 200 && /--new-cert/.test(fresh.sent) && !/--cert-dir/.test(fresh.sent.split('docker-install.sh --yes').pop()), fresh.sent.slice(-160));
+  for (const bad of ['relative/cert', '/root/my cert', "/root/x';reboot;'", '/root/$(id)']) {
+    const refused = await panel.request('/api/servers/install', { method: 'POST', body: { name: 'c', domain: 'c.example', certDir: bad, code: panel.code() }, cookie });
+    check(`a certificate folder that is not a plain whole path is refused, by name (${bad})`, refused.status === 400 && refused.json?.reason === 'bad-cert-dir', `${refused.status} ${JSON.stringify(refused.json)}`);
+  }
+  const badRenew = await panel.request('/api/servers/install', { method: 'POST', body: { name: 'c', domain: 'c.example', certRenew: 'someone', code: panel.code() }, cookie });
+  check('and so is a renewer other than this server or the owner', badRenew.status === 400, String(badRenew.status));
+
+  /* Registry mirrors for a server inside Iran: a few that worked from two
+     Iranian providers come with the panel, and one typed by hand is kept. */
+  const mirrors = await panel.request('/api/servers/mirrors', { cookie });
+  check('a handful of registry mirrors for Iran come with the panel', mirrors.json?.mirrors?.length >= 5 && mirrors.json.mirrors.includes('docker.mobinhost.com') && mirrors.json.mirrors.every((name) => /^[a-z0-9.-]+$/.test(name)), JSON.stringify(mirrors.json));
+  const typed = await installWith({ registry: 'my-mirror.example.ir', certRenew: 'here' });
+  const afterTyped = await panel.request('/api/servers/mirrors', { cookie });
+  check('and a mirror typed by hand is offered from then on', typed.status === 200 && afterTyped.json?.mirrors?.includes('my-mirror.example.ir') && /--registry 'my-mirror\.example\.ir'/.test(typed.sent), JSON.stringify(afterTyped.json?.mirrors));
+  const kept = fs.readdirSync(panel.dirs.state).find((file) => /mirror/.test(file));
+  check('kept in the panel’s state, readable by it alone', kept && (fs.statSync(path.join(panel.dirs.state, kept)).mode & 0o077) === 0, kept || 'no file');
+
+  /* The domain may be left empty: the installer then takes the server's
+     public address. Every refusal says which field it was about. */
+  const noDomain = await installWith({ domain: '', certRenew: 'here' });
+  check('an empty domain installs on the server’s own address instead of being refused', noDomain.status === 200 && !/--domain/.test(noDomain.sent.split('docker-install.sh --yes').pop()), `${noDomain.status} ${JSON.stringify(noDomain.json)} ${noDomain.sent.slice(-120)}`);
+  const pasted = await installWith({ registry: 'https://focker.ir/', certRenew: 'owner' });
+  check('a mirror pasted as a link is taken as its name', pasted.status === 200 && /--registry 'focker\.ir'/.test(pasted.sent), pasted.sent.slice(-120));
+  for (const [field, value, reason] of [['domain', 'chat example.com', 'bad-domain'], ['email', 'not an email', 'bad-email'], ['registry', 'mirror;reboot', 'bad-registry'], ['certRenew', 'someone', 'bad-renew']]) {
+    const refused = await panel.request('/api/servers/install', { method: 'POST', body: { name: 'c', domain: 'c.example', [field]: value, code: panel.code() }, cookie });
+    check(`a bad ${field} is refused as ${reason}`, refused.status === 400 && refused.json?.reason === reason, `${refused.status} ${JSON.stringify(refused.json)}`);
+  }
+
   const command = await panel.request('/api/servers/deploy-command?name=c', { cookie });
   check('the deploy.sh command for a server is offered', command.json?.command === 'bash scripts/deploy.sh --skip-bump --prebuilt --server c', JSON.stringify(command.json));
 

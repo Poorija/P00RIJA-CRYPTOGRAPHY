@@ -377,6 +377,44 @@ renderActivePeer();
 renderMessages();
 ackRelayMessage(message.relayId);
 }
+/* A relay about to update (scripts/lib/relay-updates.js) says so a couple of
+   minutes before it restarts. The banner stays until the relay is back — its
+   welcome on the new connection — so the pause reads as an update and not a
+   failure; twenty minutes at most, in case it never comes back. */
+let serverUpdateTimer = null;
+function hideServerUpdateNotice() {
+const banner = document.getElementById('serverUpdateBanner');
+if (banner) banner.hidden = true;
+chatState.serverUpdating = false;
+clearTimeout(serverUpdateTimer);
+}
+function showServerUpdateNotice(notice = {}) {
+let banner = document.getElementById('serverUpdateBanner');
+if (!banner) {
+banner = document.createElement('div');
+banner.id = 'serverUpdateBanner';
+banner.className = 'server-update-banner';
+banner.setAttribute('role', 'status');
+banner.setAttribute('aria-live', 'polite');
+document.body.appendChild(banner);
+}
+const minutes = Math.max(1, Math.min(30, Math.round(Number(notice.minutes) || 5)));
+banner.textContent = t(
+`سرور در حال به‌روزرسانی است. لطفاً چند دقیقه (حدود ${minutes} دقیقه) صبر کنید تا به‌روزرسانی کامل شود؛ پیام‌ها پس از بازگشت سرور فرستاده می‌شوند.`,
+`The server is updating. Please wait a few minutes (about ${minutes}) for the update to finish; messages go out once it is back.`);
+banner.hidden = false;
+chatState.serverUpdating = true;
+clearTimeout(serverUpdateTimer);
+serverUpdateTimer = setTimeout(hideServerUpdateNotice, 20 * 60 * 1000);
+}
+/* The two frames that move it, for the socket handler below. */
+function handleServerUpdateFrame(message) {
+if (message?.type === 'server-update') { showServerUpdateNotice(message); return true; }
+if (message?.type === 'welcome' && chatState.serverUpdating) hideServerUpdateNotice();
+return false;
+}
+window.PoorijaServerUpdateNotice = { show: showServerUpdateNotice, hide: hideServerUpdateNotice, handleFrame: handleServerUpdateFrame };
+
 function connectPresence() {
 if (chatState.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(chatState.ws.readyState)) {
 return;
@@ -406,6 +444,7 @@ console.warn('Invalid chat signal payload:', error);
 return;
 }
 	if (message.type === 'pong') return;
+	if (handleServerUpdateFrame(message)) return;
 	/* The relay checks that the client it is talking to holds the private half
 	   of the identity it claimed on the query string. Only the holder can
 	   answer, and a failure here is logged rather than fatal: an old server

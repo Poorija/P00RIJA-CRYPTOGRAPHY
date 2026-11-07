@@ -9,7 +9,8 @@
  * and its log. Every change here asks for a current authenticator code; a
  * change to the family list is signed by this browser's listed key.
  */
-import { state, t, $, esc, api, show, explain, hooks, fmtTime } from './ui.js';
+import { state, t, $, esc, api, show, explain, hooks, fmtTime, kpi, viewOf, groupItems } from './ui.js';
+import { donut, colorOf } from './charts.js';
 import { signHeader } from './sign.js';
 
 const NAME_RULE = /^[a-z][a-z0-9]{0,11}$/;
@@ -24,6 +25,8 @@ const reasonText = (answer) => {
   if (reason === 'locked') return t('loginLocked');
   if (reason === 'read-only') return t('readOnlyConfig');
   if (reason === 'bad-password') return t('badPassword');
+  if (reason === 'user-missing') return t('user-missing');
+  if (['bad-domain', 'bad-email', 'bad-registry', 'bad-cert-dir', 'bad-renew'].includes(reason)) return t(reason);
   return explain(answer);
 };
 const refreshAll = async () => { await hooks.reload?.(); };
@@ -88,6 +91,14 @@ const formFields = () => {
   return fields;
 };
 
+/* What the last check of a server's prerequisites found (Server operations → Install). */
+function prereqCell(name) {
+  const facts = state.cache.prereqs?.[name];
+  if (!facts) return `<span class="mut">—</span>`;
+  if (facts.error) return tagOf(facts.error, 'bad');
+  return `${facts.docker ? tagOf(`Docker ${facts.docker}`, 'good') : tagOf(t('dockerMissing'), 'bad')} ${facts.compose ? '' : tagOf(t('composeMissing'), 'warn')}`;
+}
+
 function stateOf(name) {
   const live = (state.data?.servers || []).find((server) => server.name === name);
   if (!live) return tagOf(t('notConnected'), 'warn');
@@ -100,7 +111,9 @@ export const servers = {
   async load() { state.cache.serversConfig = await api('/api/servers-config'); },
   render() {
     const config = state.cache.serversConfig || {};
-    const rows = (config.servers || []).map(({ name, fields }) => `<tr data-server-row="${esc(name)}">
+    const mode = viewOf('servers:rows', 'cluster');
+    const keyOf = ({ fields }) => (mode === 'cluster' ? fields.CLUSTER || t('noCluster') : mode === 'region' ? (fields.REGION === 'inside-iran' ? t('insideIran') : fields.REGION === 'outside-iran' ? t('outsideIran') : '—') : '');
+    const rowOf = ({ name, fields }) => `<tr data-server-row="${esc(name)}">
       <td><strong>${esc(name)}</strong></td>
       <td class="mono">${esc(fields.SSH_USER || '')}@${esc(fields.SSH_HOST || '')}${fields.SSH_PORT && fields.SSH_PORT !== '22' ? `:${esc(fields.SSH_PORT)}` : ''}</td>
       <td class="mono">${esc(String(fields.SSH_KEY || '').split('/').pop())}</td>
@@ -108,12 +121,22 @@ export const servers = {
       <td class="mono">${esc(fields.PUBLIC_URL || '—')}</td>
       <td>${esc(fields.CLUSTER || '—')}</td>
       <td>${stateOf(name)}</td>
+      <td>${prereqCell(name)}</td>
       <td class="actions"><button data-srv-edit="${esc(name)}">${esc(t('edit'))}</button><button data-srv-test="${esc(name)}">${esc(t('test'))}</button>
-        <button data-srv-install="${esc(name)}">${esc(t('install'))}</button><button data-srv-deploy="${esc(name)}">deploy.sh</button>
-        <button class="bad" data-srv-remove="${esc(name)}">${esc(t('remove'))}</button></td></tr>`).join('');
-    const head = ['serverName', 'ssh', 'sshKey', 'jump', 'publicUrl', 'cluster', 'state', ''].map((key) => `<th>${key ? esc(t(key)) : ''}</th>`).join('');
+        <button data-prereq-check="${esc(name)}">${esc(t('prerequisites'))}</button><button data-srv-install="${esc(name)}">${esc(t('install'))}</button><button data-srv-deploy="${esc(name)}">deploy.sh</button>
+        <button class="bad" data-srv-remove="${esc(name)}">${esc(t('remove'))}</button></td></tr>`;
+    const list = config.servers || [];
+    const rows = mode === 'none' ? list.map(rowOf).join('') : groupItems(list, keyOf).map(([label, members]) => `<tr class="group"><td colspan="9">${esc(label)} <span class="count">${members.length}</span></td></tr>${members.map(rowOf).join('')}`).join('');
+    const live = (name) => (state.data?.servers || []).find((server) => server.name === name);
+    const up = list.filter(({ name }) => live(name)?.reachable).length;
+    const notConnected = list.filter(({ name }) => !live(name)).length;
+    const summary = `<div class="kpis">${kpi('servers', String(list.length))}${kpi('reachable', `${up}/${list.length}`, '', up === list.length ? 'good' : 'warn')}${kpi('clusters', String(new Set(list.map(({ fields }) => fields.CLUSTER || '—')).size))}${kpi('insideIran', String(list.filter(({ fields }) => fields.REGION === 'inside-iran').length))}${kpi('outsideIran', String(list.filter(({ fields }) => fields.REGION === 'outside-iran').length))}</div>
+      <div class="charts">${donut({ title: t('serversByState'), items: [{ label: t('reachable'), value: up, color: '#34d399' }, { label: t('unreachable'), value: list.length - up - notConnected, color: '#f87171' }, { label: t('notConnected'), value: notConnected, color: '#94a3b8' }] })}
+        ${donut({ title: t('serversByCluster'), items: groupItems(list, ({ fields }) => fields.CLUSTER || t('noCluster')).map(([label, members], index) => ({ label, value: members.length, color: colorOf(index) })) })}</div>
+      <div class="table-tools"><label class="picker"><span class="mut">${esc(t('rowsBy'))}</span> <select data-view="servers:rows">${['none', 'cluster', 'region'].map((value) => `<option value="${value}"${value === mode ? ' selected' : ''}>${esc(t(`rows_${value}`))}</option>`).join('')}</select></label></div>`;
+    const head = ['serverName', 'ssh', 'sshKey', 'jump', 'publicUrl', 'cluster', 'state', 'prerequisites', ''].map((key) => `<th>${key ? esc(t(key)) : ''}</th>`).join('');
     const note = config.writable ? '' : `<p class="warn-text">${esc(t('readOnlyConfig'))}</p>`;
-    return card(t('servers'), `${note}<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="8" class="mut">${esc(t('noServers'))}</td></tr>`}</tbody></table></div>
+    return card(t('servers'), `${note}${summary}<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="9" class="mut">${esc(t('noServers'))}</td></tr>`}</tbody></table></div>
       <div id="serverFormHost"></div><p class="mut">${esc(t('addServerHelp'))}</p>`,
     config.writable ? `<button id="addServer" class="acc"><i class="fa-solid fa-plus"></i> ${esc(t('addServer'))}</button>` : '');
   },
@@ -263,6 +286,8 @@ export async function adminClick(target) {
     const fields = formFields();
     if (!NAME_RULE.test(name)) { $('serverFormError').textContent = t('badServerName'); return true; }
     if (!fields.SSH_HOST) { $('serverFormError').textContent = t('hostNeeded'); return true; }
+    /* The placeholder says root; an empty box is not root. */
+    if (!fields.SSH_USER) { $('serverFormError').textContent = t('user-missing'); return true; }
     const answer = await api('/api/servers/save', { name, fields, code: value('serverCode') });
     if (!answer.ok) { $('serverFormError').textContent = reasonText(answer); return true; }
     show(`${name}: ${t('saved')}`);
@@ -287,17 +312,75 @@ export async function adminClick(target) {
   }
   if (attr('data-srv-install')) {
     const name = attr('data-srv-install');
+    /* The domain starts as the one the server's public address names. */
+    const fields = ((state.cache.serversConfig || {}).servers || []).find((server) => server.name === name)?.fields || {};
+    let domain = '';
+    try { domain = fields.PUBLIC_URL ? new URL(fields.PUBLIC_URL).hostname : ''; } catch (_error) { domain = ''; }
     openDialog(`<h2>${esc(t('installOn'))} ${esc(name)}</h2><p class="mut">${esc(t('installHelp'))}</p><div class="form-grid">
-      <label><span>${esc(t('domain'))}</span><input id="installDomain" placeholder="chat.example.com"></label>
-      <label><span>${esc(t('email'))}</span><input id="installEmail" placeholder="you@example.com"></label>
-      <label><span>${esc(t('registry'))}</span><input id="installRegistry" placeholder="${esc(t('registryPh'))}"></label>
+      <label><span>${esc(t('domain'))}</span><input id="installDomain" name="p00rija-install-domain" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" value="${esc(domain)}" placeholder="${esc(t('domainPh'))}"></label>
+      <label><span>${esc(t('email'))}</span><input id="installEmail" name="p00rija-install-email" type="email" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="you@example.com"></label>
+      <label class="wide"><span>${esc(t('certificate'))}</span><select id="installCert"><option value="found" selected>${esc(t('certFound'))}</option><option value="new">${esc(t('certNew'))}</option></select></label>
+      <label><span>${esc(t('certDir'))}</span><input id="installCertDir" name="p00rija-cert-dir" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" spellcheck="false" dir="ltr" placeholder="${esc(t('certDirPh'))}"></label>
+      <label class="wide"><span>${esc(t('renewBy'))}</span><select id="installRenew"><option value="here" selected>${esc(t('renewHere'))}</option><option value="owner">${esc(t('renewOwner'))}</option></select></label>
+      <label><span>${esc(t('registry'))}</span><select id="installRegistryPick"><option value="">${esc(t('registryNone'))}</option><option value="__other">${esc(t('registryOther'))}</option></select>
+        <input id="installRegistry" name="p00rija-registry-mirror" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" spellcheck="false" dir="ltr" hidden placeholder="${esc(t('registryPh'))}"></label>
+      <label class="wide check"><input type="checkbox" id="installPrepare" checked> ${esc(t('installPrereqsFirst'))}</label>
+      <label class="wide check"><input type="checkbox" id="installSudo"> ${esc(t('installSudo'))}</label>
+      <label class="wide"><span>${esc(t('sudoPassword'))}</span><span class="row"><input id="installSudoPass" name="p00rija-sudo-password" type="password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="${esc(t('sudoPasswordPh'))}"><button type="button" id="installAccessTest" data-install-name="${esc(name)}">${esc(t('accessTest'))}</button></span><span id="installAccess" class="mut small"></span></label>
       <label><span>${esc(t('code'))}</span>${codeInput('installCode')}</label>
       <div class="wide row"><button id="installRun" class="acc" data-install-name="${esc(name)}">${esc(t('install'))}</button></div></div><div id="installError" class="bad-text"></div>`);
+    /* A folder and who renews only mean something for a certificate already
+       there; a new one hides them. */
+    $('installCert').addEventListener('change', () => {
+      const fresh = value('installCert') === 'new';
+      for (const id of ['installCertDir', 'installRenew']) $(id).closest('label').hidden = fresh;
+    });
+    /* The mirrors that come with the panel, and any typed by hand before, in
+       a list of its own: a text box with suggestions was taken by browsers'
+       password managers for a user name (the sudo password is just below)
+       and covered with their own box. "Another…" opens a box for one typed
+       by hand, marked so password managers leave it alone. */
+    api('/api/servers/mirrors').then((answer) => {
+      const pick = $('installRegistryPick');
+      if (!pick) return;
+      const other = pick.querySelector('option[value="__other"]');
+      for (const mirror of answer.mirrors || []) {
+        const option = document.createElement('option');
+        option.value = mirror;
+        option.textContent = mirror;
+        pick.insertBefore(option, other);
+      }
+    });
+    $('installRegistryPick').addEventListener('change', () => {
+      const chosen = $('installRegistryPick').value;
+      const typed = $('installRegistry');
+      typed.hidden = chosen !== '__other';
+      typed.value = chosen === '__other' ? '' : chosen;
+      if (chosen === '__other') typed.focus();
+    });
+    return true;
+  }
+  if (id === 'installAccessTest') {
+    const name = target.closest('#installAccessTest').getAttribute('data-install-name');
+    $('installAccess').textContent = t('testing');
+    /* Each test takes a current code, like the install itself. */
+    if (!value('installCode')) { $('installAccess').textContent = t('codeFirst'); return true; }
+    const answer = await api('/api/servers/access', { name, sudoPassword: $('installSudoPass')?.value || '', code: value('installCode') });
+    if ($('installCode')) $('installCode').value = '';
+    const what = answer.access || answer.reason || 'failed';
+    $('installAccess').textContent = `${answer.user ? `${answer.user}: ` : ''}${t(`access_${what}`) === `access_${what}` ? t(what) : t(`access_${what}`)}${answer.dockerGroup ? ` · ${t('inDockerGroup')}` : ''}`;
+    if (['sudo', 'sudo-password'].includes(answer.access) && $('installSudo')) $('installSudo').checked = true;
     return true;
   }
   if (id === 'installRun') {
     const name = target.closest('#installRun').getAttribute('data-install-name');
-    const answer = await api('/api/servers/install', { name, domain: value('installDomain'), email: value('installEmail'), registry: value('installRegistry'), code: value('installCode') });
+    const answer = await api('/api/servers/install', {
+      name, domain: value('installDomain'), email: value('installEmail'), registry: value('installRegistry'), code: value('installCode'),
+      newCert: value('installCert') === 'new', certDir: value('installCertDir'), certRenew: value('installRenew') || 'here',
+      prepare: $('installPrepare') ? $('installPrepare').checked : true,
+      sudo: Boolean($('installSudo')?.checked), sudoPassword: $('installSudoPass')?.value || '',
+    });
+    if ($('installSudoPass')) $('installSudoPass').value = '';
     if (!answer.ok) { $('installError').textContent = reasonText(answer); return true; }
     await watchJob(answer.job, `${t('installOn')} ${name}`);
     return true;

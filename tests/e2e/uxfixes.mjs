@@ -201,12 +201,12 @@ await page.waitForTimeout(1500);
    hit-test failure gets reported against the identity sheet when the real
    answer is that setup never finished. */
 /* Let any toast finish first. `.toast-stack` is pointer-events:none but each
-   `.app-toast` inside it is pointer-events:auto so it can be tapped away, and
+   toast inside it (sileo's, or the plain `.app-toast`) is pointer-events:auto so it can be tapped away, and
    the stack sits at the top centre — exactly where this hit test aims. A toast
    raised by the setup above was therefore answering elementFromPoint for the
    three seconds it lives, and reporting "the chat UI is covered", which is a
    statement about a toast rather than about the chat UI. */
-await page.waitForFunction(() => !document.querySelector('#toastStack .app-toast'),
+await page.waitForFunction(() => !document.querySelector('#toastStack [data-sileo-toast], #toastStack .app-toast'),
   null, { timeout: 8000 }).catch(() => {});
 const chatOnTop = await page.evaluate(() => {
   const rail = document.querySelector('#content-chat .chat-rail');

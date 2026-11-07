@@ -1573,6 +1573,50 @@ line-height: 1.65;
 font-size: 0.92rem;
 font-weight: 700;
 }
+/* The same host when sileo draws into it (js/app.js, drawToast). Its viewport
+   is position: fixed, and a transform on an ancestor would make that fixed to
+   the host instead of the window — so the host drops the centring transform
+   and is a zero-size box whose only job is the z-index above. sileo's own
+   viewport sits at 50; inside this stacking context that is harmless. */
+.toast-stack.toast-stack-sileo {
+top: 0;
+left: 0;
+display: block;
+width: 0;
+height: 0;
+transform: none;
+--sileo-width: min(350px, calc(100vw - 1.5rem));
+}
+/* sileo measures and places its shape in left-to-right terms; under the
+   page's dir="rtl" the pill and the body it draws around came apart. The
+   frame is laid out left to right, and only the words follow their language
+   (below). */
+.toast-stack-sileo [data-sileo-viewport] {
+direction: ltr;
+padding-top: max(0.75rem, var(--pwa-safe-top, 0px));
+}
+/* sileo is written for left-to-right English; most of what this app says is
+   Persian. The text takes its direction from its first strong letter and is
+   centred in either language, and the app's font replaces the browser's —
+   heavier than sileo's, whose weights were too thin to read at a glance. */
+.toast-stack-sileo [data-sileo-description],
+.toast-stack-sileo [data-sileo-title] {
+font-family: inherit;
+unicode-bidi: plaintext;
+text-align: center;
+}
+.toast-stack-sileo [data-sileo-description] {
+overflow-wrap: anywhere;
+line-height: 1.65;
+font-weight: 600;
+}
+.toast-stack-sileo[data-dir="rtl"] [data-sileo-description] {
+direction: rtl;
+}
+.toast-stack-sileo [data-sileo-title] {
+text-transform: none;
+font-weight: 700;
+}
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -2680,6 +2724,12 @@ grid-template-columns: minmax(0, 1fr);
 }
 .toast-stack {
 top: calc(4.5rem + var(--pwa-safe-top, 0px));
+}
+.toast-stack.toast-stack-sileo {
+top: 0;
+}
+.toast-stack-sileo [data-sileo-viewport] {
+padding-top: calc(4.5rem + var(--pwa-safe-top, 0px));
 }
 .dashboard-orb {
 width: 16rem;
@@ -28578,3 +28628,26 @@ html body #mainApp #content-chat .chat-nav-bar .chat-nav-search { margin-inline-
   html body #mainApp #content-chat .chat-nav-bar .chat-nav-item { padding-inline: 0.4rem !important; }
   html body #mainApp #content-chat .chat-nav-bar .chat-nav-search { padding-inline: 0.6rem !important; }
 }
+
+/* A relay about to update says so (js/chat/30-file-transfer-2.js): a banner at
+   the top, above every dialog, until the relay is back. */
+.server-update-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100000;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+.server-update-banner[hidden] { display: none; }
+

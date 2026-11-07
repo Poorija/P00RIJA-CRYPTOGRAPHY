@@ -44,8 +44,7 @@ async function setup(page){
   await page.waitForTimeout(4000);
   await page.evaluate(()=>{window.__toasts=[];window.__err=[];
     window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
-    const o=window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-    window.PoorijaApp.showNotification=(m,t)=>{window.__toasts.push(`${t}: ${m}`);return o?.(m,t);};
+    Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
     const w=navigator.clipboard.writeText.bind(navigator.clipboard);
     window.__clip=[]; navigator.clipboard.writeText=(t)=>{window.__clip.push(t);return w(t).catch(()=>{});};
     document.getElementById('mobileInstallGate')?.classList.add('hidden');});
@@ -132,8 +131,7 @@ await A.evaluate((p)=>{const el=document.getElementById('unlockPassword'); if(el
 await A.evaluate(()=>window.unlockApp?.());
 await A.waitForTimeout(3500);
 await A.evaluate(()=>{window.__toasts=[];window.__err=[];
-  const o=window.PoorijaApp.showNotification?.bind(window.PoorijaApp);
-  window.PoorijaApp.showNotification=(m,t)=>{window.__toasts.push(`${t}: ${m}`);return o?.(m,t);};
+  Object.defineProperty(window, '__toasts', { configurable: true, get: () => window.PoorijaApp.toasts.recent().map((e) => `${e.type}: ${e.message}`), set: () => window.PoorijaApp.toasts.clear() });
   const w=navigator.clipboard.writeText.bind(navigator.clipboard);
   window.__clip=[]; navigator.clipboard.writeText=(t)=>{window.__clip.push(t);return w(t).catch(()=>{});};
   document.getElementById('mobileInstallGate')?.classList.add('hidden');});
@@ -340,12 +338,20 @@ const multi = await A.evaluate(async ()=>{
   await new Promise(r=>setTimeout(r,400));
   return { entered, count: document.getElementById('chatSelectionCount')?.textContent,
     selected: document.querySelectorAll('#chatMessages .chat-message-bubble.is-selected').length,
-    hasActions: document.querySelectorAll('.chat-selection-actions button').length };
+    /* What the bar shows, not what it holds: the save button (03d3f4f) is in
+       the bar too and stays hidden until a picked message carries a file, and
+       these two are text. Counting every button read it as a fourth action. */
+    shown: [...document.querySelectorAll('.chat-selection-actions button')]
+      .filter((button) => !button.classList.contains('hidden') && button.offsetParent !== null)
+      .map((button) => button.id) };
 });
 console.log('  ' + JSON.stringify(multi));
 check('a long press starts multi-select', multi.entered===true, JSON.stringify(multi));
 check('tapping a second message adds it', Number(multi.count)>=2 && multi.selected>=2, JSON.stringify(multi));
-check('the bar offers copy, forward and delete', multi.hasActions===3, String(multi.hasActions));
+check('the bar offers copy, forward and delete',
+  ['chatSelectionCopyBtn','chatSelectionForwardBtn','chatSelectionDeleteBtn'].every((id)=>multi.shown.includes(id)),
+  multi.shown.join(','));
+check('and no save button while only text is picked', !multi.shown.includes('chatSelectionDownloadBtn'), multi.shown.join(','));
 const copied = await A.evaluate(async ()=>{
   document.getElementById('chatSelectionCopyBtn')?.click();
   await new Promise(r=>setTimeout(r,900));
