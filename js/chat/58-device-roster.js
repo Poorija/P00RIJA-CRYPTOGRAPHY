@@ -338,7 +338,14 @@ async function adoptRoster(next) {
 function rosterAnswered() {
   return Boolean(chatState.ws) && deviceRosterState.answeredWs === chatState.ws;
 }
-async function handleRelayRoster(remote) {
+async function handleRelayRoster(remote, { guest = false } = {}) {
+  /* A guest relay's empty answer means it holds nothing, not that the account
+     has no roster: nothing is founded on it, and nothing is pushed there to
+     be refused. */
+  if (guest && !remote) {
+    renderAccountDeviceViews();
+    return;
+  }
   deviceRosterState.answeredWs = chatState.ws;
   deviceRosterState.relayRoster = remote || null;
   const local = currentRoster();
@@ -421,6 +428,8 @@ async function obeyRevocation({ pinned }) {
    is the primary (claimPrimaryDevice) — guessing would be a coin toss. */
 async function maybeFoundRoster() {
   if (currentRoster() || !rosterAnswered() || deviceRosterState.relayRoster || deviceRosterState.founding) return;
+  /* Founding is the home relay's business, never a guest relay's. */
+  if (typeof guestStayActive === 'function' && guestStayActive()) return;
   const origin = chatState.identity?.origin || '';
   const neverHadSiblings = !origin && !chatState.hasLinkedDevices && !chatState.profile.hasLinkedDevices
     && (typeof siblingBeacons === 'undefined' || siblingBeacons.size === 0)

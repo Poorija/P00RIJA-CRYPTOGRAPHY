@@ -124,6 +124,7 @@ export const servers = {
       <td>${prereqCell(name)}</td>
       <td class="actions"><button data-srv-edit="${esc(name)}">${esc(t('edit'))}</button><button data-srv-test="${esc(name)}">${esc(t('test'))}</button>
         <button data-prereq-check="${esc(name)}">${esc(t('prerequisites'))}</button><button data-srv-install="${esc(name)}">${esc(t('install'))}</button><button data-srv-deploy="${esc(name)}">deploy.sh</button>
+        <button data-qr-server="${esc(name)}" title="${esc(t('qrConnect'))}"><i class="fa-solid fa-qrcode"></i> QR</button>
         <button class="bad" data-srv-remove="${esc(name)}">${esc(t('remove'))}</button></td></tr>`;
     const list = config.servers || [];
     const rows = mode === 'none' ? list.map(rowOf).join('') : groupItems(list, keyOf).map(([label, members]) => `<tr class="group"><td colspan="9">${esc(label)} <span class="count">${members.length}</span></td></tr>${members.map(rowOf).join('')}`).join('');
@@ -175,7 +176,7 @@ export const family = {
          <div class="row"><input id="opFile" type="file" accept="application/json,.json"><button id="opImport">${esc(t('importKey'))}</button></div>`);
     const relays = (fam.relays || []).map((relay) => `<tr><td><strong>${esc(relay.name)}</strong></td><td class="mono">${esc(relay.id.slice(0, 16))}…</td><td class="mono">${esc(relay.origins.join(' '))}</td>
       <td>${esc(relay.region || '—')}</td><td>${esc(relay.cluster || '—')}</td><td>${relay.gateway || '—'}</td><td class="mono">${esc(relay.inside.join(' ') || '—')}</td>
-      <td>${fam.canEdit ? `<button class="bad" data-fam-remove="${esc(relay.name)}">${esc(t('remove'))}</button>` : ''}</td></tr>`).join('');
+      <td class="actions"><button data-qr-server="${esc(relay.name)}" title="${esc(t('qrConnect'))}"><i class="fa-solid fa-qrcode"></i> QR</button>${fam.canEdit ? `<button class="bad" data-fam-remove="${esc(relay.name)}">${esc(t('remove'))}</button>` : ''}</td></tr>`).join('');
     const notListed = (state.cache.serversConfig?.servers || []).filter((server) => !(fam.relays || []).some((relay) => relay.name === server.name));
     const addable = fam.canEdit && notListed.length ? `<div class="row"><span class="mut">${esc(t('notInFamily'))}</span>${notListed.map((server) => `<button data-fam-add="${esc(server.name)}">+ ${esc(server.name)}</button>`).join('')}</div>` : '';
     const listCard = card(t('familyList'), `<div class="scroll"><table><thead><tr>${['serverName', 'relayId', 'origins', 'region', 'cluster', 'gateway', 'insideAddresses', ''].map((key) => `<th>${key ? esc(t(key)) : ''}</th>`).join('')}</tr></thead><tbody>${relays}</tbody></table></div>${addable}
@@ -383,6 +384,25 @@ export async function adminClick(target) {
     if ($('installSudoPass')) $('installSudoPass').value = '';
     if (!answer.ok) { $('installError').textContent = reasonText(answer); return true; }
     await watchJob(answer.job, `${t('installOn')} ${name}`);
+    return true;
+  }
+  if (attr('data-qr-server')) {
+    /* What a person scans in the app to use this server (js/local-link.js):
+       the address, the operator key's fingerprint and the relay's id. The
+       SVG is the panel's own drawing (tools/panel/qr.mjs). */
+    const name = attr('data-qr-server');
+    const answer = await api(`/api/servers/qr?name=${encodeURIComponent(name)}`);
+    if (!answer.ok) { show(reasonText(answer)); return true; }
+    const svg = String(answer.svg || '').startsWith('<svg') ? answer.svg : '';
+    openDialog(`<h2>${esc(t('qrConnect'))} — ${esc(name)}</h2><p class="mut">${esc(t('qrConnectHelp'))}</p>
+      <div class="qr-box">${svg}</div><pre id="qrCodeText" class="mono">${esc(answer.code || '')}</pre>
+      ${answer.verified ? '' : `<p class="warn-text">${esc(t('qrUnverified'))}</p>`}
+      <div class="row"><button id="qrCopy">${esc(t('qrCopy'))}</button></div>`);
+    return true;
+  }
+  if (target.closest('#qrCopy')) {
+    const text = $('qrCodeText')?.textContent || '';
+    try { await navigator.clipboard.writeText(text); show(t('copied')); } catch (_error) { /* the text is selectable */ }
     return true;
   }
   if (attr('data-srv-deploy')) {

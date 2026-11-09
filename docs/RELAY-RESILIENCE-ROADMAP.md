@@ -1,6 +1,6 @@
 # برنامهٔ تاب‌آوری شبکهٔ رله‌ها — وضعیت و نقشهٔ راه · Relay network resilience — status and roadmap
 
-آخرین به‌روزرسانی: ۷ نوامبر ۲۰۲۶، نسخهٔ 2.98.90 · Last updated: 7 November 2026, version 2.98.90
+آخرین به‌روزرسانی: ۸ نوامبر ۲۰۲۶، نسخهٔ 2.98.90 · Last updated: 8 November 2026, version 2.98.90
 
 متن اول فارسی است و بعد انگلیسی. · Persian first, English after.
 
@@ -20,10 +20,10 @@
 
 | فاز | کار | وضعیت |
 |---|---|---|
-| ۱ | فهرست امضاشدهٔ رله‌ها | 🟡 نیمه‌کاره: سمت رله‌ها کامل، سمت برنامهٔ کاربر انجام نشده |
-| ۲ | حالت مهمان (failover) | ❌ شروع نشده |
-| ۳ | انتخاب هوشمند رله و پخش بار | ❌ شروع نشده |
-| ۴ | پخش زنجیره‌ای آپدیت | 🟢 بیشترش انجام شده؛ بررسی سلامت با برگشت خودکار و پخش مرحله‌ای مانده |
+| ۱ | فهرست امضاشدهٔ رله‌ها | 🟢 انجام شده؛ سمت برنامه روی main است و هنوز منتشر نشده |
+| ۲ | حالت مهمان (failover) | 🟢 انجام شده؛ روی main است و هنوز منتشر نشده. پشت کلید «میزبان مهمان» هر رله که پیش‌فرض خاموش است |
+| ۳ | انتخاب هوشمند رله و پخش بار | 🟢 انجام شده؛ کارت «بهترین سرور» با سه حالت، پیش‌فرض خودکار |
+| ۴ | پخش زنجیره‌ای آپدیت | 🟢 انجام شده؛ برگشت خودکار و قناری روی main هستند و هنوز منتشر نشده‌اند. کلید جدا برای انتشار اختیاری است |
 | اختیاری | کپی صندوق روی رلهٔ دوم | ❌ شروع نشده |
 
 ### زیربنایی که پیش از این برنامه بود
@@ -50,53 +50,40 @@
 | 2.98.85 | مدیریت فهرست خانواده، خوشه‌ها، کلیدهای مدیر و کلید اپراتور از پنل مرکزی، با امضای مرورگر |
 | 2.98.89–2.98.90 | نشانی داخلی (IP) برای سرورهای خارج از ایران هم، برای وقتی DNS از کار بیفتد؛ ادغام و جابه‌جایی خوشه؛ چند مدیر با کلید خودشان |
 
-**مانده — سمت برنامهٔ کاربر:** برنامه هنوز `/relay-directory` را نمی‌گیرد. رله‌های دیگر را فقط از `/transit-peers` و آدرس‌های جایگزین رلهٔ خودش می‌شناسد. کارهای لازم:
+**سمت برنامه، انجام شده پس از 2.98.90 (روی main، هنوز منتشر نشده):**
 
-1. **لنگر اعتماد:** کلید اپراتور در نخستین اتصال موفق به رلهٔ خانه، یا از لینک دعوت یا QR، ثبت می‌شود و پس از آن هیچ رله‌ای نمی‌تواند عوضش کند. عوض شدن کلید اپراتور برای کلاینت قاعدهٔ خودش را می‌خواهد، مثلاً اعلامیه‌ای که کلید قبلی امضا کرده و کلید تازه را نام می‌برد. چرخش کلید در پنل فعلاً فقط رله‌ها را، سرور به سرور و از راه SSH، عوض می‌کند.
-2. **گرفتن و بررسی:** گرفتن `/relay-directory` از رلهٔ خانه (و از هر رلهٔ دیگر فهرست وقتی خانه جواب نمی‌دهد)؛ بررسی امضا، شناسهٔ اپراتور و سریال صعودی با همان قواعد `relay-directory.js` (کد مشترک یا معادل مرورگری‌اش)؛ نگه داشتن آخرین فهرست معتبر در IndexedDB.
-3. **استفاده:** فهرست، نامزدهای فاز ۲ و ۳ را می‌دهد. کلید هر رله از فهرست می‌آید، نه از خود رله.
-4. **رابط کاربری:** در تنظیمات اتصال، رله‌های خانواده و رلهٔ خانه دیده شوند.
-5. **تست:** فهرست با امضای نادرست، سریال قدیمی‌تر، کلید اپراتور دیگر و رلهٔ ابطال‌شده رد شود؛ فهرست بی‌اتصال هم از IndexedDB خوانده شود.
-
-تخمین: ۲ تا ۳ روز.
+- **لنگر اعتماد:** نخستین فهرست معتبر از نشانی اصلیِ تنظیم‌شده (نه آدرس پشتیبان یا رلهٔ دیگر)، روی HTTPS یا شبکهٔ محلی، و از رله‌ای که هویتش ثبت شده و در فهرست هست، کلید اپراتور را ثبت می‌کند. یا QR آن را از پیش می‌گوید. لنگر در پروفایل رمزنگاری‌شدهٔ چت می‌ماند و هیچ رله‌ای نمی‌تواند بی‌صدا عوضش کند.
+- **گرفتن و بررسی:** بعد از هر اتصال و هر ۶ ساعت، از رلهٔ خانه، آدرس پشتیبان در حال استفاده، و بعد رله‌های دیگر فهرست. همان قواعد رله‌ها در مرورگر (`js/chat/61-relay-directory.js`) و یک شرط بیشتر: رلهٔ خانه باید در فهرست باشد. پاسخ بیش از ۵۱۲ کیلوبایت خوانده نمی‌شود. آخرین فهرست معتبر بدون اینترنت هم هست.
+- **تحویل کلید:** چرخش کلید در پنل با کلید قبلی یک تحویل امضا می‌کند و رله‌ها آن را در `/operator-handover` نگه می‌دارند. برنامه با آن کلید تازه را بی‌پرسش می‌پذیرد؛ بدون آن از کاربر می‌پرسد و تا جواب، فهرست تازه را باور نمی‌کند.
+- **QR:** `P0R1|<نشانی>/#op=<شناسهٔ اپراتور>&relay=<شناسهٔ رله>`، که برنامه‌های قدیمی همچنان فقط نشانی را از آن می‌خوانند. پنل کنار هر سرور و هر رله آن را نشان می‌دهد و «نمایش نشانی به‌صورت QR» در برنامه هم آن را می‌سازد. کد اسکن‌شده تا وقتی برنامه به همان نشانی وصل نشده کاری نمی‌کند، و هرگز هویتِ ثبت‌شدهٔ یک رله را بازنویسی نمی‌کند.
+- **تنظیمات:** کارت «خانوادهٔ رله‌ها» در «اتصال و TURN»: اپراتور، منبع اعتماد، سریال، رله‌ها با رلهٔ خانه، و «بررسی کن».
+- **تست:** `tests/e2e/clientdirectory.mjs` (۵۲ بررسی) و بخش `handover` در `tests/e2e/relaydirectory.mjs`.
 
 ### فاز ۲ — حالت مهمان (failover)
 
 **هدف:** وقتی رلهٔ خانه قطع است، کلاینت با همان هویت روی رلهٔ دیگری از فهرست ثبت‌نام موقت می‌کند، و پیام‌های تازه به آن‌جا می‌رسند. وقتی خانه برگشت، کلاینت برمی‌گردد و از هر دو صندوق تحویل می‌گیرد.
 
-**وضعیت:** شروع نشده. پیش‌نیازش فهرست سمت کلاینت در فاز ۱ است.
+**وضعیت:** انجام شده پس از 2.98.90 (روی main، هنوز منتشر نشده). طراحی کامل در `docs/RELAY-NETWORK.md`، بخش «حالت مهمان».
 
-**طرح:**
-
-1. **تشخیص قطعی:** همان منطق فعلی (۲۵ ثانیه سکوت)، پس از آن‌که همهٔ آدرس‌های جایگزین رلهٔ خانه هم آزموده شدند.
-2. **انتخاب رلهٔ مهمان:** از فهرست امضاشده، با کلیدی که فهرست برای آن رله داده. اول هم‌خوشه‌ای‌ها، بعد بقیه. اگر فاز ۳ آماده باشد، بر اساس امتیاز آن.
-3. **ثبت‌نام موقت:** hello با علامت «مهمان»، شناسهٔ رلهٔ خانه، و اثبات هویت همان کلید کاربر. رلهٔ مهمان فقط کاربرانی را می‌پذیرد که رلهٔ خانه‌شان در فهرست همان خانواده است، با سهمیه و مدت محدود.
-4. **مسیریابی:** رلهٔ مهمان به `route-query` پاسخ «پیش من است، به‌عنوان مهمان» می‌دهد. پیام‌های تازه به آن‌جا می‌روند و پیام‌هایی که در راه رلهٔ خانه بودند در صندوق خانه می‌مانند.
-5. **اعلان push:** ثبت دوبارهٔ اشتراک push روی رلهٔ مهمان، و برداشتنش هنگام برگشت.
-6. **چنددستگاهی، گروه‌ها و تماس:** هر دستگاه جدا مهمان می‌شود؛ گروه‌ها از راه `route-query` عضو مهمان را پیدا می‌کنند؛ اعتبار TURN از رلهٔ مهمان گرفته می‌شود.
-7. **برگشت:** کلاینت هر چند دقیقه رلهٔ خانه را می‌آزماید. وقتی خانه برگشت، کلاینت دوباره به آن ثبت‌نام می‌کند، صندوق رلهٔ مهمان را تحویل می‌گیرد، ثبت‌نام مهمان را می‌بندد و پیام‌های تکراری با شناسهٔ پیام کنار گذاشته می‌شوند.
-8. **رابط کاربری:** نشانگر «موقتاً روی رلهٔ X»، و کلیدی در تنظیمات که حالت مهمان را خاموش کند.
-9. **حریم خصوصی:** رلهٔ مهمان همان چیزی را می‌بیند که رلهٔ خانه می‌بیند (IP و آدرس‌دهی پیام‌ها، نه محتوا). این در راهنما گفته شود.
-10. **تست:** خاموش کردن رلهٔ خانه در میانهٔ گفتگو؛ رسیدن پیام تازه به کاربر مهمان؛ برگشت و تحویل از هر دو صندوق بدون تکرار؛ گروه و تماس در حالت مهمان؛ رد شدن کاربر غریبه از رلهٔ مهمان.
-
-تخمین: ۱ تا ۲ هفته.
+- **کی مهمان می‌شود:** وقتی رلهٔ خانه و همهٔ آدرس‌های پشتیبان و درهای ورودی‌اش ۲ دقیقه در دسترس نبودند. برنامه رله‌هایی از خانواده را که «میزبان مهمان» هستند (حداکثر ۸ تا) هم‌زمان از دستگاه خود کاربر می‌سنجد و کلید هرکدام را اثبات می‌کند: اول هم‌خوشه، بعد هم‌منطقه، بعد سریع‌ترین. رلهٔ فیلترشده برای کاربر جواب نمی‌دهد و انتخاب نمی‌شود.
+- **مهمان، نه ساکن:** نشانی تنظیم‌شده عوض نمی‌شود، کارت هنوز خانه را نام می‌برد، و رلهٔ مهمان هرگز کاربر را ساکن خود اعلام نمی‌کند. برنامه هر دقیقه خانه را می‌آزماید و بعد از دو اثبات پشت سر هم برمی‌گردد. آنچه روی رلهٔ مهمان مانده به خانه می‌رود و آنچه هنوز می‌رسد ۷ روز دنبالش می‌رود.
+- **امنیت:** رله‌های خانواده فهرست دستگاه‌های هر حساب را به‌صورت مهروموم‌شده با کلیدی از اثر انگشت حساب نگه می‌دارند؛ دستگاهِ لغوشده مهمان نمی‌شود. مسیر مهمان فقط با بیانیهٔ امضاشدهٔ خود مخاطب پذیرفته می‌شود و نشانی ذخیره‌شدهٔ هیچ مخاطبی جابه‌جا نمی‌شود.
+- **خانه‌ای که فقط برای یک نفر فیلتر است:** با اعلامیهٔ امضاشدهٔ خود کاربر، رلهٔ خانه پیام‌هایش را به رلهٔ مهمان می‌دهد؛ بعد از ۳ روز برنامه با دلیل‌ها پیشنهاد انتقال دائمی می‌دهد و انتخاب با کاربر است. دستگاه‌های دیگر حساب دنبال انتقال می‌روند.
+- **push، چنددستگاهی، گروه و تماس:** رلهٔ مهمان اعلان می‌دهد و خانه برای آن دستگاه ساکت می‌ماند؛ دو دستگاه روی دو رلهٔ مهمان هر دو پیام می‌گیرند؛ گروه و تماس (با TURN رلهٔ مهمان) کار می‌کنند.
+- **تست:** `tests/e2e/relayguests.mjs` (سطح رله، ۱۲۲ بررسی) و `tests/e2e/guestmode.mjs` (برنامه روی سه رلهٔ یک خانواده).
 
 ### فاز ۳ — انتخاب هوشمند رله و پخش بار
 
 **هدف:** کلاینت تأخیر و پایداری هر رله را از جای خودش می‌سنجد، و هر رله بار خودش را اعلام می‌کند. کاربر تازه روی کم‌بارترین رلهٔ در دسترس می‌نشیند، و رلهٔ پر به‌جای رد کردن خشک، کاربر را به رلهٔ خلوت (به‌صورت مهمان) می‌فرستد.
 
-**وضعیت:** شروع نشده. فقط `/ready` با پاسخ ۵۰۳ نزدیک سقف وجود دارد.
+**وضعیت:** انجام شده در ۹ نوامبر ۲۰۲۶. طراحی کامل در `docs/RELAY-NETWORK.md`، بخش «بهترین سرور».
 
-**طرح:**
-
-1. **اعلام بار:** رله در `/relay-directory` یا یک نقطهٔ سبک کنارش، بار فعلی را به‌صورت عدد تقریبی منتشر کند (اتصال‌ها نسبت به سقف، صف، پردازنده)، بدون هیچ اطلاعاتی از کاربران.
-2. **سنجش از دستگاه کاربر:** کلاینت در پس‌زمینه و کم‌مصرف، تأخیر و موفقیت اتصال به هر رلهٔ فهرست را می‌سنجد و نتیجه فقط روی همان دستگاه می‌ماند. برای کاربر داخل ایران، دسترس‌پذیری (فیلترینگ) بیشترین وزن را دارد.
-3. **امتیاز:** ترکیب دسترس‌پذیری، تأخیر، پایداری چند روز اخیر و بار اعلام‌شده.
-4. **کاربر تازه:** انتخاب رلهٔ خانه بر اساس امتیاز، نه فقط آدرسی که برنامه از آن باز شده.
-5. **رلهٔ پر:** به‌جای ۵۰۳ خشک، فهرست رله‌های خلوت را برمی‌گرداند و کلاینت به‌صورت مهمان (فاز ۲) به یکی از آن‌ها می‌رود.
-6. **تست:** رلهٔ پر کاربر تازه را به رلهٔ خلوت بفرستد؛ رلهٔ فیلترشده از جای کاربر انتخاب نشود؛ هیچ داده‌ای از سنجش از دستگاه بیرون نرود.
-
-تخمین: ۳ تا ۵ روز.
+- **سنجش از دستگاه کاربر:** پاسخ‌گویی و نوسانش، پایداری، سرعت دانلود (حداکثر روزی یک بار، حدود ۲۵۶ کیلوبایت)، و میزان پر بودن هر رله که خودش در `/chat-health` اعلام می‌کند. نتیجه فقط روی دستگاه می‌ماند.
+- **امتیاز:** پایداری ۰٫۵، پاسخ‌گویی ۰٫۳، سرعت ۰٫۲؛ رلهٔ بالای ۸۰٪ پر انتخاب نمی‌شود و بین ۶۰ تا ۸۰٪ امتیاز کمتری می‌گیرد.
+- **کاربر تازه:** همان اول روی بهترین رلهٔ خانواده می‌نشیند.
+- **کاربر فعلی:** فقط وقتی رلهٔ دیگری ۳ روز جدا دست‌کم ۳۰٪ بهتر بود، یا خانه بالای ۸۵٪ پر شد، منتقل می‌شود؛ بین دو انتقال حداقل ۳۰ روز. انتقال مستقیم است (بدون مهمان شدن) و با همان بیانیهٔ امضاشدهٔ فاز ۲.
+- **کارت «بهترین سرور»** در «اتصال و TURN»: خودکار (پیش‌فرض، بی‌پرسش)، فقط پیشنهاد (با دلیل‌ها)، یا خاموش (با هشدار)؛ «الان بسنج» و «انتقال به اینجا». با یک رله پنهان است.
+- **تست:** `tests/e2e/relaychoice.mjs`.
 
 ### فاز ۴ — پخش زنجیره‌ای آپدیت
 
@@ -112,13 +99,16 @@
 - **از پنل مرکزی:** ساخت بسته از پوشه، فایل فشرده، گیت‌هاب یا «ساخت و بسته‌بندی»؛ فرستادن به سرورها؛ و نصب از راه SSH روی سروری که هنوز به‌روزرسان ندارد.
 - **برنامهٔ کاربر:** PWA از service worker رلهٔ جدید به‌روز می‌شود، و برنامهٔ نیتیو فقط فایل دقیقاً هم‌نوع خودش را دانلود و با `SHA256SUMS` چک می‌کند.
 
-**مانده:**
+**انجام شده پس از 2.98.90 (روی main، هنوز منتشر نشده):**
 
-1. **بررسی سلامت پس از نصب و برگشت خودکار:** پشتیبان پیش از نصب گرفته می‌شود، ولی برگرداندنش هنوز دستی است (`scripts/server-backup.sh --restore`). کار لازم این است که پس از بالا آمدن، `/chat-health`، رسیدن لینک‌های خانواده و نسخهٔ سرو‌شده سنجیده شوند؛ اگر در زمان معین سالم نشد، همان پشتیبان خودکار برگردد و به پنل و تلگرام گزارش شود.
-2. **پخش مرحله‌ای:** اول یک رله (قناری)، و فقط اگر آن رله در مدت معین سالم ماند، بقیه. پیشنهاد: جای قناری در سیاست امضاشده بیاید و رله‌های دیگر تا گزارش سلامت قناری صبر کنند.
-3. **(اختیاری) کلید جدا برای انتشار:** فعلاً کلید اپراتور بسته را امضا می‌کند. اگر رله‌های اپراتورهای دیگر هم بخواهند از نسخهٔ توسعه‌دهنده آپدیت بگیرند، یک کلید جدا برای انتشار لازم است.
+- **بررسی سلامت پس از نصب و برگشت خودکار:** `scripts/apply-update.sh` پیش از جایگزینی، یک کپی از درخت قدیمی نگه می‌دارد. پس از بالا آمدن، رله را دو دقیقه از راه nginx می‌پاید: باید به `/chat-health` جواب بدهد، نسخهٔ تازه را سرو کند، در این مدت ری‌استارت نشود، و اگر پیش از آپدیت به خانواده لینک داشت، دوباره لینک بگیرد. اگر کپی، `sync-to-server.sh` تازه یا این پایش ناموفق بود، درخت قدیمی برمی‌گردد و `sync-to-server.sh` همان درخت قدیمی نسخهٔ قبلی را با ایمیج‌هایی که هر دیپلوی نگه می‌دارد بالا می‌آورد. `.env` و `data/` هیچ‌وقت دست نمی‌خورند، پس پیامی که در این فاصله رسیده گم نمی‌شود. کد خروج ۳ یعنی برگردانده شد و ۴ یعنی برگرداندن هم ناموفق بود.
+- **گزارش و جلوگیری از حلقه:** رله‌ای که بالا می‌آید منتظر حرف مرحلهٔ نصب (`result.json`) می‌ماند و نسخهٔ خودش را دلیل موفقیت نمی‌گیرد. برگشت را با دلیلش به پنل و تلگرام می‌گوید، آن نسخه را دیگر به بقیه نمی‌دهد و هرگز دوباره از همتایان نمی‌گیرد. فقط پنل می‌تواند عمداً دوباره بفرستدش.
+- **قناری:** زمانِ امضاشدهٔ اپراتور می‌تواند یک رله را قناری کند و مدتی را بگوید (۵ تا ۱۴۴۰ دقیقه، پیش‌فرض ۳۰). قناری سر زمانش اعمال می‌کند و بقیه صبر می‌کنند تا قناری این مدت با نسخهٔ تازه سالم بماند. اگر قناری نسخه را برگرداند، بقیه متوقف می‌مانند تا اپراتور تصمیم بگیرد. خبر قناری در پیشنهاد (offer) هر رله دست‌به‌دست می‌شود، پس رله‌ای که به قناری راه ندارد هم باخبر می‌شود. زمانِ بی‌قناری درست مثل قبل امضا می‌شود، و زمانِ امضاشده همراه بسته از رله‌ای هم که آن را اعمال کرده می‌رود.
+- **از پنل:** انتخاب سرور قناری و مدت در فرم ارسال و فرم زمان، و نمایش مرحله‌های «منتظر قناری»، «متوقف» و «برگردانده شد» با دلیل.
 
-تخمین مانده: ۲ تا ۴ روز.
+**نکته‌های انتشار:** برگشت خودکار از آپدیتِ *بعد از* نسخه‌ای که آن را نصب می‌کند کار می‌کند، چون همیشه `apply-update.sh` نصب‌شده اجرا می‌شود. قناری وقتی کامل کار می‌کند که همهٔ رله‌ها این نسخه را داشته باشند؛ رلهٔ قدیمی‌تر زمانِ قناری‌دار را «بدون زمان» می‌گیرد و در کم‌کاربرترین ساعت اعمال می‌کند.
+
+**مانده (اختیاری):** کلید جدا برای انتشار. فعلاً کلید اپراتور بسته را امضا می‌کند. اگر رله‌های اپراتورهای دیگر هم بخواهند از نسخهٔ توسعه‌دهنده آپدیت بگیرند، یک کلید جدا برای انتشار لازم است.
 
 ### اختیاری — کپی صندوق روی رلهٔ دوم
 
@@ -132,11 +122,20 @@
 
 ### ترتیب پیشنهادی برای ادامه
 
-1. سمت برنامهٔ فاز ۱ (۲ تا ۳ روز)
-2. فاز ۲، حالت مهمان (۱ تا ۲ هفته). بیشترین سود، یعنی ادامهٔ کار کاربر وقتی رله‌اش قطع است، همین‌جاست.
-3. مانده‌های فاز ۴: برگشت خودکار و پخش مرحله‌ای (۲ تا ۴ روز)
-4. فاز ۳ (۳ تا ۵ روز). وقتی معنی پیدا می‌کند که تعداد کاربران به سقف ظرفیت رله‌ها نزدیک شود.
-5. کپی صندوق (حدود ۱ هفته)
+این ترتیب در ۸ نوامبر ۲۰۲۶ جای ترتیب روز اول (۱ ← ۲ ← ۴ ← ۳) را گرفت.
+
+1. ✅ **مانده‌های فاز ۴: بررسی سلامت با برگشت خودکار، بعد پخش مرحله‌ای.** انجام شد در ۸ نوامبر ۲۰۲۶ (روی main، هنوز منتشر نشده). پخش زنجیره‌ای همین حالا روشن است و یک بستهٔ خراب در یک دور به همهٔ رله‌ها می‌رسد. برگرداندن دستی روی سرورهای داخل ایران سخت است. فاز ۱ و ۲ پروتکل رله را عوض می‌کنند و با قناری هر کدام اول روی یک رله آزموده می‌شود.
+2. ✅ **سمت برنامهٔ فاز ۱.** انجام شد در ۸ نوامبر ۲۰۲۶ (روی main، هنوز منتشر نشده). پیش از کد، لنگر اعتماد و قاعدهٔ عوض شدن کلید اپراتور برای کلاینت تصمیم گرفته شود: کلیدی که روی دستگاه کاربران ثبت شد را نمی‌شود از راه دور اصلاح کرد. لنگر بهتر است از لینک دعوت یا QR بیاید تا از نخستین اتصال.
+3. ✅ **فاز ۲، حالت مهمان.** انجام شد در ۸ نوامبر ۲۰۲۶ (روی main، هنوز منتشر نشده)، در این تکه‌ها و پشت کلیدی که پیش‌فرض خاموش است:
+   - الف) اول محیط تست سه‌رله‌ای که رلهٔ خانه را در میانهٔ گفتگو خاموش می‌کند؛
+   - ب) ثبت‌نام مهمان، رسیدن پیام تازهٔ یک‌به‌یک، و برگشت به خانه بدون پیام تکراری؛
+   - ج) اعلان push؛
+   - د) چنددستگاهی، گروه و تماس؛
+   - هـ) پیشنهاد انتقال دائمی برای خانه‌ای که فقط برای یک نفر فیلتر است.
+
+   سنجش دسترس‌پذیری از دستگاه کاربر (قدم ۲ فاز ۳) به همین فاز می‌آید: برای کاربر داخل ایران، رلهٔ مهمانِ فیلترشده یعنی رفتن از یک رلهٔ مرده به رلهٔ مردهٔ دیگر.
+4. ✅ **فاز ۳، انتخاب هوشمند رله.** انجام شد در ۹ نوامبر ۲۰۲۶: هر کاربر روی بهترین رلهٔ غیرشلوغ خانواده، از دید اینترنت خودش.
+5. **کپی صندوق (حدود ۱ هفته).** بعد از فاز ۲ سنجیده شود چند پیام پشت رلهٔ قطع‌شده می‌ماند و قطعی‌ها چقدر طول می‌کشند. اگر قطعی‌ها کوتاه‌اند، شاید لازم نشود.
 
 ### برنامه‌های دیگر در صف
 
@@ -162,10 +161,10 @@ The plan was written on 23 October 2026 in four phases and an optional part. The
 
 | Phase | Work | Status |
 |---|---|---|
-| 1 | Signed relay directory | 🟡 Partly done: relay side complete, app side not started |
-| 2 | Guest mode (failover) | ❌ Not started |
-| 3 | Smart relay choice and load spreading | ❌ Not started |
-| 4 | Chained updates | 🟢 Mostly done; health check with automatic revert, and a staged rollout, remain |
+| 1 | Signed relay directory | 🟢 Done; the app side is on main, not released yet |
+| 2 | Guest mode (failover) | 🟢 Done; on main, not released yet. Behind each relay's "takes guests" switch, off by default |
+| 3 | Smart relay choice and load spreading | 🟢 Done; the "Best relay" card with three settings, Automatic by default |
+| 4 | Chained updates | 🟢 Done; the automatic revert and the canary are on main, not released yet. A separate release key is optional |
 | Optional | A mailbox copy on a second relay | ❌ Not started |
 
 ### What was there before the plan
@@ -192,53 +191,40 @@ The plan was written on 23 October 2026 in four phases and an optional part. The
 | 2.98.85 | The family list, clusters, admin keys, and the operator key managed from the central panel, signed in the browser |
 | 2.98.89–2.98.90 | Inside (IP) addresses for servers outside Iran too, for when DNS is gone; merging clusters and moving servers between them; several admins, each with their own key |
 
-**Left — the app side:** the app does not fetch `/relay-directory` yet. It knows other relays only from `/transit-peers` and its own relay's other addresses. To do:
+**The app side, done after 2.98.90 (on main, not released yet):**
 
-1. **A trust anchor:** the operator key is recorded at the first successful connection to the home relay, or from an invite link or QR code, and no relay can change it after that. A change of operator key needs its own rule for the client, such as a statement signed by the old key that names the new one. The panel's key rotation changes only the relays today, server by server over SSH.
-2. **Fetch and check:** fetch `/relay-directory` from the home relay (and from any other relay of the list when home does not answer); check the signature, the operator id, and a rising serial with the same rules as `relay-directory.js` (shared code or a browser equivalent); keep the last valid list in IndexedDB.
-3. **Use:** the list gives phases 2 and 3 their candidates. Each relay's key comes from the list, not from the relay itself.
-4. **Interface:** the connection settings show the family's relays and the home relay.
-5. **Tests:** a list with a wrong signature, an older serial, another operator's key, or a revoked relay is refused; with no connection the list is read from IndexedDB.
-
-Estimate: 2 to 3 days.
+- **The anchor:** the first valid list from the configured address (not a mirror or another relay of the list), over HTTPS or a local network, from a relay whose identity is pinned and listed, records the operator key. Or a QR code names it beforehand. The anchor lives in the encrypted chat profile, and no relay can change it unnoticed.
+- **Fetching and checking:** after each connect and every 6 hours, from the home relay, the mirror in use, then the list's other relays. The relays' own rules in the browser (`js/chat/61-relay-directory.js`), and one more: the home relay must be on the list. A reply past 512 KB is not read. The last valid list is there offline.
+- **Key handovers:** the panel's key rotation signs a handover with the old key, and relays keep it at `/operator-handover`. The app follows it without asking; without one it asks the person and does not believe the new list meanwhile.
+- **QR:** `P0R1|<address>/#op=<operator id>&relay=<relay id>`, which older apps still read as a plain address. The panel shows it beside every server and relay, and the app's "show address as QR" draws it too. A scanned code does nothing until the app is connected to that address, and never replaces a relay's pinned identity.
+- **Settings:** a "Relay family" card in Connection and TURN: the operator, where the trust came from, the serial, the relays with the home one marked, and "check now".
+- **Tests:** `tests/e2e/clientdirectory.mjs` (52 checks) and the `handover` section of `tests/e2e/relaydirectory.mjs`.
 
 ### Phase 2 — guest mode (failover)
 
 **Aim:** when the home relay is down, the client registers temporarily, with the same identity, on another relay of the list, and new messages reach it there. When home is back, the client returns and collects from both mailboxes.
 
-**Status:** not started. It needs the app-side list of phase 1 first.
+**Status:** done after 2.98.90 (on main, not released yet). The full design is in `docs/RELAY-NETWORK.md`, "Guest mode".
 
-**Design:**
-
-1. **Detecting the outage:** the logic there is today (25 seconds of silence), once every other address of the home relay was tried as well.
-2. **Choosing the guest relay:** from the signed list, with the key the list gives for it; cluster mates first, then the rest; by phase 3's score once that exists.
-3. **A temporary registration:** a hello marked "guest", with the home relay's id and proof of the user's own key. A guest relay takes only users whose home relay is in the same family's list, within a quota and for a limited time.
-4. **Routing:** the guest relay answers `route-query` with "here, as a guest". New messages go there; those already on their way to the home relay stay in its mailbox.
-5. **Push:** the push subscription is registered again on the guest relay, and removed on return.
-6. **Several devices, groups, and calls:** each device becomes a guest on its own; groups find a guest member through `route-query`; TURN credentials come from the guest relay.
-7. **Returning:** the client tries the home relay every few minutes. When home is back it registers there again, collects the guest relay's mailbox, closes the guest registration, and drops duplicates by message id.
-8. **Interface:** a "temporarily on relay X" badge, and a setting that turns guest mode off.
-9. **Privacy:** a guest relay sees what a home relay sees (the IP and how messages are addressed, never their content). The guide says so.
-10. **Tests:** the home relay stopped mid-conversation; a new message reaching the guest user; the return, with both mailboxes collected and no duplicates; groups and calls as a guest; a stranger refused by the guest relay.
-
-Estimate: 1 to 2 weeks.
+- **When:** the home relay, every backup address of it, and every front door have been unreachable for 2 minutes. The app measures the family's relays that take guests (at most 8) in parallel from the person's own device and proves each one's key: a cluster mate first, then one in home's region, then the fastest. A relay filtered for the person does not answer, so it is never chosen.
+- **A guest, never a resident:** the configured address does not change, the card still names home, and the guest relay never claims the person as its resident. Home is tried every minute; two proofs in a row and the app goes back. What waited on the guest relay goes home, and anything still arriving follows for 7 days.
+- **Security:** the family's relays keep each account's device roster, sealed under a key made from the account's fingerprint; a revoked device cannot become a guest. A guest route is believed only on the contact's own signed statement, and no contact's stored address ever moves.
+- **A home filtered for one person:** on the person's signed notice, the home relay hands their mail to the guest relay; after 3 days the app offers a permanent move, says why, and the person decides. The account's other devices follow.
+- **Push, devices, groups, and calls:** the guest relay wakes the device and home stays quiet for it; two devices on two guest relays both receive; groups and calls (with the guest relay's TURN) work.
+- **Tests:** `tests/e2e/relayguests.mjs` (relay level, 122 checks) and `tests/e2e/guestmode.mjs` (the app on three relays of one family).
 
 ### Phase 3 — smart relay choice and load spreading
 
 **Aim:** the client measures each relay's latency and stability from where it is, and each relay announces its load. A new user sits on the least loaded relay it can reach, and a full relay, instead of a flat refusal, sends the user to a quiet one (as a guest).
 
-**Status:** not started. Only `/ready` answering 503 near capacity exists.
+**Status:** done on 9 November 2026. The full design is in `docs/RELAY-NETWORK.md`, "Best relay".
 
-**Design:**
-
-1. **Announcing load:** a relay publishes its current load as a rough number (connections against capacity, queue, processor) in `/relay-directory` or a light route beside it, with nothing about its users.
-2. **Measuring from the user's device:** in the background, cheaply, the client measures latency and connection success to each relay of the list; the results stay on that device. For a user inside Iran, reachability (filtering) weighs most.
-3. **A score:** reachability, latency, stability over the last few days, and the announced load.
-4. **A new user:** chooses a home relay by score, not only the address the app was opened from.
-5. **A full relay:** instead of a bare 503 it returns a list of quiet relays, and the client goes to one of them as a guest (phase 2).
-6. **Tests:** a full relay sends a new user to a quiet one; a relay filtered where the user is is not chosen; nothing measured leaves the device.
-
-Estimate: 3 to 5 days.
+- **Measured from the person's device:** how fast each relay answers and how much that varies, how steadily, download speed (at most once a day, about 256 KB), and how full each relay says it is in `/chat-health`. Results stay on the device.
+- **Score:** steadiness 0.5, latency 0.3, speed 0.2; a relay over 80% full is not chosen, and 60–80% counts for less.
+- **A new account** takes the family's best relay at once.
+- **An existing account** moves only when another relay has been at least 30% better on 3 separate days, or home is over 85% full; at least 30 days between moves. The move is direct (no guest stay), with phase 2's signed statement.
+- **The "Best relay" card** in Connection and TURN: Automatic (default, no question), Suggest only (with the reasons), or Off (with a warning); "Measure now" and "Move here". Hidden with one relay.
+- **Tests:** `tests/e2e/relaychoice.mjs`.
 
 ### Phase 4 — chained updates
 
@@ -254,13 +240,16 @@ Estimate: 3 to 5 days.
 - **From the central panel:** packages built from a folder, an archive, GitHub, or Build & package; sent to servers; installed over SSH on a server with no updater yet.
 - **The app:** the PWA updates from the new relay's service worker, and the native app downloads only its own exact kind of build and checks it against `SHA256SUMS`.
 
-**Left:**
+**Done after 2.98.90 (on main, not released yet):**
 
-1. **A health check after installing, and an automatic revert:** the backup is taken, but restoring it is still by hand (`scripts/server-backup.sh --restore`). To do: once the stack is up, check `/chat-health`, the family links coming back, and the version served; if it is not healthy within a set time, restore that backup by itself and report to the panel and Telegram.
-2. **A staged rollout:** one relay first (a canary), and the rest only if it stays healthy for a set time. Suggested: the canary is named in the signed policy, and the other relays wait for its health report.
-3. **(Optional) a separate release key:** today the operator key signs packages. If other operators' relays are to take the developer's releases too, a separate release key is needed.
+- **A health check after installing, and an automatic revert:** `scripts/apply-update.sh` keeps a copy of the old tree before it replaces it. Once the stack is up, it watches the relay for two minutes through nginx: it must answer `/chat-health`, serve the new version, not restart in that time, and, if it was linked to its family before, be linked again. When the copy, the new `sync-to-server.sh`, or the watch fails, the old tree goes back, and the old tree's own `sync-to-server.sh` brings the previous version up from the images every deploy keeps. `.env` and `data/` are never touched, so nothing that arrived in between is lost. Exit code 3 means put back; 4 means putting it back failed too.
+- **Reporting, and no loop:** the relay that comes up waits for the apply step's word (`result.json`) instead of taking its own version as proof. It reports a revert, with the reason, to the panel and Telegram, stops handing that version on, and never takes it from a peer again. Only the panel can hand it over again, on purpose.
+- **The canary:** the operator's signed time may name one relay as the canary and a hold (5 to 1440 minutes, 30 by default). The canary applies at its time, and the others wait until it has run the new version healthily for the hold. If the canary puts the version back, the others hold until the operator decides. Word of the canary travels in every relay's offer, so a relay that cannot reach the canary still learns it. A time with no canary is signed exactly as before, and a signed time travels with the package even from a relay that has applied it.
+- **From the panel:** a canary server and its hold in the send and time forms, and the "waiting for the canary", "held", and "put back" steps shown with the reason.
 
-Estimate for what is left: 2 to 4 days.
+**Release notes:** the automatic revert works from the update *after* the version that installs it, since the installed `apply-update.sh` always runs. The canary works fully once every relay runs this version; an older relay takes a time with a canary as no time and applies at its quietest hour.
+
+**Left (optional):** a separate release key. Today the operator key signs packages. If other operators' relays are to take the developer's releases too, a separate release key is needed.
 
 ### Optional — a mailbox copy on a second relay
 
@@ -274,11 +263,20 @@ Estimate: about 1 week.
 
 ### The suggested order from here
 
-1. The app side of phase 1 (2 to 3 days)
-2. Phase 2, guest mode (1 to 2 weeks). The biggest gain, users carrying on when their relay is down, is here.
-3. What is left of phase 4: the automatic revert and the staged rollout (2 to 4 days)
-4. Phase 3 (3 to 5 days). It starts to matter as the number of users nears the relays' capacity.
-5. The mailbox copy (about 1 week)
+This order replaced the first day's (1, then 2, then 4, then 3) on 8 November 2026.
+
+1. ✅ **What is left of phase 4: a health check with an automatic revert, then a staged rollout.** Done on 8 November 2026 (on main, not released yet). The chain is live today, and one broken package reaches every relay in one pass. Reverting by hand on the servers inside Iran is hard. Phases 1 and 2 change the relay protocol, and with a canary each is tried on one relay first.
+2. ✅ **The app side of phase 1.** Done on 8 November 2026 (on main, not released yet). Before any code, decide the client's trust anchor and its rule for a new operator key: a key pinned on people's devices cannot be fixed from afar. The anchor is better brought by the invite link or QR than by the first connection.
+3. ✅ **Phase 2, guest mode.** Done on 8 November 2026 (on main, not released yet), in these slices and behind a switch that is off by default:
+   - a) first, a three-relay test bed that stops the home relay in the middle of a chat;
+   - b) the guest sign-up, new one-to-one messages arriving, and the return home with no duplicates;
+   - c) push;
+   - d) several devices, groups, and calls;
+   - e) offering a permanent move when home is filtered for one person.
+
+   Measuring reachability from the user's device (step 2 of phase 3) moves into this phase: for a user inside Iran, a filtered guest relay means going from one dead relay to another.
+4. ✅ **Phase 3, smart relay choice.** Done on 9 November 2026: everyone on the family's best non-full relay, as seen from their own internet.
+5. **The mailbox copy (about 1 week).** After phase 2, measure how many messages are held behind a relay that is down and how long outages last. If outages are short, it may never be needed.
 
 ### Other plans waiting
 

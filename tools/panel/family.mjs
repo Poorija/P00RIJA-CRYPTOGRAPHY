@@ -17,6 +17,11 @@
  * no list it holds is signed by.
  */
 
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { signHandover } = require('../../scripts/lib/relay-directory.js');
+
 const CLUSTER_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$/u;
 export const validCluster = (name) => CLUSTER_NAME.test(String(name || ''));
 
@@ -73,6 +78,13 @@ export function planClusterChange(draft, change) {
     default:
       throw new Error(`unknown cluster change ${String(change?.op).slice(0, 20)}`);
   }
+}
+
+/* The old key's word for the new one (scripts/lib/relay-directory.js): an
+   app that trusts the old key follows it instead of asking its user whether
+   this is a different operator. Key files as operator-key.json holds them. */
+export function handoverFor(oldKey, nextKey, at = new Date().toISOString()) {
+  return signHandover({ from: { id: oldKey.id, key: oldKey.publicKey }, to: { id: nextKey.id, key: nextKey.publicKey }, at }, oldKey.privateKey);
 }
 
 /* Server by server: the new key, then at once the list signed with it. The

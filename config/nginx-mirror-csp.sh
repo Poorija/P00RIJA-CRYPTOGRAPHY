@@ -92,6 +92,49 @@ server {
 }
 FRONT
 done
+# The relays of this relay's signed family (guest mode and best relay reach
+# them from the page: js/chat/62-guest-mode.js, 63-relay-choice.js), read from
+# the relay itself — https addresses only, each with its wss twin. The list is
+# read now, for a few seconds while the relay comes up, and again every few
+# minutes below, so a relay added to the family reaches the page without a
+# restart.
+family_list() {
+  body=$(wget -q -T 3 -O - http://chat-signal:9000/relay-directory 2>/dev/null) || return 0
+  for origin in $(printf '%s' "$body" | grep -oE 'https://[A-Za-z0-9.-]+(:[0-9]+)?' | sort -u); do
+    printf ' %s wss://%s' "$origin" "${origin#https://}"
+  done
+}
 # Only origin characters survive into the policy.
-list=$(printf '%s' "$list" | tr -cd 'A-Za-z0-9.:/ -')
-sed -i "s|__MIRROR_CONNECT__|${list}|" "$template"
+clean() { printf '%s' "$1" | tr -cd 'A-Za-z0-9.:/ -'; }
+list=$(clean "$list")
+base="$target_dir/.csp-base.template"
+cp "$template" "$base"
+printf '%s' "$list" > "$target_dir/.csp-base-list"
+family=""
+tries=0
+while [ "$tries" -lt 10 ]; do
+  family=$(clean "$(family_list)")
+  [ -n "$family" ] && break
+  tries=$((tries + 1))
+  sleep 1
+done
+printf '%s' "$family" > "$target_dir/.csp-family"
+sed -i "s|__MIRROR_CONNECT__|${list}${family}|" "$template"
+
+# The refresher: the same rendering nginx's own entrypoint does
+# (20-envsubst-on-templates.sh), then a reload, only when the family changed.
+every="${APP_FAMILY_REFRESH_SECONDS:-300}"
+case "$every" in ''|*[!0-9]*) every=300 ;; esac
+output_dir="${NGINX_ENVSUBST_OUTPUT_DIR:-/etc/nginx/conf.d}"
+(
+  while sleep "$every"; do
+    next=$(clean "$(family_list)")
+    [ -n "$next" ] || continue
+    [ "$next" = "$(cat "$target_dir/.csp-family" 2>/dev/null)" ] && continue
+    printf '%s' "$next" > "$target_dir/.csp-family"
+    sed "s|__MIRROR_CONNECT__|$(cat "$target_dir/.csp-base-list")${next}|" "$base" > "$template"
+    defined_envs=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print name } }" < /dev/null))
+    envsubst "$defined_envs" < "$template" > "$output_dir/default.conf"
+    nginx -t >/dev/null 2>&1 && nginx -s reload >/dev/null 2>&1
+  done
+) </dev/null >/dev/null 2>&1 &

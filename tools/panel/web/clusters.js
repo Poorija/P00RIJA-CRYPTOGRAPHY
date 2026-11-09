@@ -90,12 +90,13 @@ export const clusters = {
     } else if (tabs.current === 'addresses') {
       const fieldsOf = (name) => (state.cache.serversConfig?.servers || []).find((entry) => entry.name === name)?.fields || {};
       body = `<p class="mut">${esc(t('insideHelp'))}</p>${!canChange ? `<p class="warn-text">${esc(t(fam.canEdit ? 'signNeeded' : 'directoryReadOnly'))}</p>` : ''}`
-        + table(['server', 'cluster', 'region', 'origins', 'insideAddresses', 'withoutDns', ''], relays.map((relay) => {
+        + table(['server', 'cluster', 'region', 'origins', 'insideAddresses', 'withoutDns', 'takesGuests', ''], relays.map((relay) => {
           const ipReach = [...(relay.origins || []), ...(relay.inside || [])].some(byIp);
           const suggestion = suggestedInside(fieldsOf(relay.name));
           return `<tr><td><strong>${esc(relay.name)}</strong></td><td>${esc(relay.cluster || '—')}</td><td>${esc(regionText(relay.region))}</td><td class="mono small">${esc((relay.origins || []).join(' ') || '—')}</td>
             <td><input class="mono wide" data-inside-of="${esc(relay.name)}" value="${esc((relay.inside || []).join(', '))}" placeholder="${esc(suggestion || 'https://203.0.113.10:8585')}"${canChange ? '' : ' disabled'}></td>
             <td>${ipReach ? tag(t('reachableByIp'), 'good') : tag(t('needsDns'), 'warn')}</td>
+            <td><label class="row" title="${esc(t('takesGuestsHint'))}"><input type="checkbox" data-guests-of="${esc(relay.name)}"${relay.guests ? ' checked' : ''}${canChange ? '' : ' disabled'}></label></td>
             <td class="row">${canChange ? `${suggestion ? `<button data-inside-suggest="${esc(relay.name)}" data-value="${esc(suggestion)}" title="${esc(suggestion)}">${esc(t('useSshAddress'))}</button>` : ''}<button data-inside-save="${esc(relay.name)}" class="acc">${esc(t('save'))}</button>` : ''}</td></tr>`;
         }));
     } else if (tabs.current === 'gateways') {
@@ -157,6 +158,18 @@ export async function clustersClick(target, { runGroup }) {
     if (cluster === '__new') cluster = (window.prompt(t('newClusterPrompt')) || '').trim();
     if (cluster === null || !window.confirm(`${t('confirmMoveCluster')} ${name} → ${cluster || t('noCluster')}`)) return true;
     await editDirectory([{ op: 'cluster', name, cluster }]);
+    await loadClusterAdmin();
+    hooks.render();
+    return true;
+  }
+  /* Guest mode: whether this relay takes in people whose home relay is
+     unreachable. Signed into the family list like the rest. */
+  if (attr('data-guests-of')) {
+    const box = target.closest('[data-guests-of]');
+    const name = box.getAttribute('data-guests-of');
+    const guests = Boolean(box.checked);
+    if (!window.confirm(`${t(guests ? 'confirmGuestsOn' : 'confirmGuestsOff')} ${name}`)) { box.checked = !guests; return true; }
+    await editDirectory([{ op: 'guests', name, guests }]);
     await loadClusterAdmin();
     hooks.render();
     return true;

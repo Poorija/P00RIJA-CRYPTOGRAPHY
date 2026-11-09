@@ -284,8 +284,11 @@ family_sync() {
 # brings only the layers it does not hold yet, so every server runs the same
 # image digests and a release after the first moves only what changed. The
 # registry stays up between deploys for that reason (poorija-deploy-registry).
+# The server's end of the tunnel is a port of each pull's own, and a pull
+# first ends what an earlier one left behind: scripts/lib/pull-tunnel.sh.
 REGISTRY_PORT="${POORIJA_REGISTRY_PORT:-5055}"
 REGISTRY="127.0.0.1:$REGISTRY_PORT"
+. "$(dirname "$0")/lib/pull-tunnel.sh" || { echo "scripts/lib/pull-tunnel.sh is missing" >&2; exit 1; }
 # What scripts/server-backup.sh runs as alpine:latest, pinned here.
 ALPINE_TAG="3.24.3"
 coturn_image() { sed -n 's/^ *image: *\(coturn\/coturn:[^ ]*\).*/\1/p' "$(dirname "$0")/../config/docker-compose.yaml" | head -1; }
@@ -1094,13 +1097,27 @@ fi
 
 # The images built here, pulled through a reverse tunnel to the registry on
 # this machine's 127.0.0.1: only the layers this server lacks travel.
+#
+# The server's end of the tunnel is a random port of this pull's own, not
+# $REGISTRY_PORT: a pull whose link died leaves its sshd session holding its
+# port on the server for a long while, and with one fixed port every deploy
+# after it failed at once. A port something else on the server already
+# listens on is answered with another port, twice at most; any other failure
+# is the answer.
 prebuilt_pull() {
-    local version coturn
+    local version coturn port try status=1 out
     version="$(tree_version)"; coturn="$(coturn_image)"
     log "Pulling the images built here (only the layers this server lacks)"
-    ssh "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes -R "$REGISTRY:$REGISTRY" "$USER_NAME@$HOST" 'bash -s' <<PULL 2>&1 | sed 's/^/  /'
+    out="$(mktemp "${TMPDIR:-/tmp}/poorija-pull.XXXXXX")" || { fail "no temporary file for the pull's output"; return 1; }
+    for try in 1 2 3; do
+        port="$(pull_tunnel_port)"
+        ssh "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes -R "127.0.0.1:$port:$REGISTRY" "$USER_NAME@$HOST" "bash -s $PULL_MARK $port" <<PULL 2>&1 | tee "$out" | sed 's/^/  /'
 set -e
-R="$REGISTRY"
+PULL_MARK=$PULL_MARK
+$(declare -f _pull_proc pull_tunnel_answers pull_sweep_stale pull_untag_leftovers)
+pull_sweep_stale $port || true
+pull_untag_leftovers || true
+R="127.0.0.1:$port"
 for ref in poorija-crypto:$version poorija-chat-signal:$version poorija-cert-renewer:$version $coturn alpine:$ALPINE_TAG; do
     docker pull -q "\$R/\$ref" >/dev/null
     docker tag "\$R/\$ref" "\$ref"
@@ -1109,7 +1126,12 @@ for ref in poorija-crypto:$version poorija-chat-signal:$version poorija-cert-ren
 done
 docker tag "alpine:$ALPINE_TAG" alpine:latest
 PULL
-    return "${PIPESTATUS[0]}"
+        status="${PIPESTATUS[0]}"
+        grep -q 'remote port forwarding failed' "$out" || break
+        [ "$try" -lt 3 ] && warn "port $port is taken on the server; trying another"
+    done
+    rm -f "$out"
+    return "$status"
 }
 if [ "$ROLE" = "relay" ]; then
     # The relay's own compose file, from its own directory: its build context

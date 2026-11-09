@@ -138,7 +138,17 @@ function discoverHomeRelay(peerRecord, { force = false } = {}) {
     });
     const results = await Promise.all(asked);
     const hit = results.find(({ reply }) => reply?.type === 'route' && reply.home === true && reply.origin);
-    if (!hit) return null;
+    if (!hit) {
+      /* Not living anywhere that answered, but staying somewhere as a guest:
+         a route for now, in memory only (62-guest-mode.js). */
+      for (const { relay, reply } of results) {
+        if (reply?.type === 'route' && reply.guest === true && await guestNoticeHolds(peerRecord, reply.notice, relay.id)) {
+          noteGuestRoute(fingerprint, { id: relay.id, key: relay.key, origin: reply.origin });
+          break;
+        }
+      }
+      return null;
+    }
     const home = { origin: hit.reply.origin, id: hit.relay.id, key: hit.relay.key, source: 'presence', updatedAt: new Date().toISOString() };
     applyDiscoveredRoute(fingerprint, home, { override: force });
     return home;
@@ -149,6 +159,91 @@ function discoverHomeRelay(peerRecord, { force = false } = {}) {
   routeDiscoveries.set(fingerprint, { promise, at: Date.now(), found: null });
   promise.then((found) => routeDiscoveries.set(fingerprint, { promise: null, at: Date.now(), found }));
   return promise;
+}
+
+/* ---- someone staying on a guest relay (62-guest-mode.js) ------------------ */
+
+/* A relay that answers "a guest here" names where somebody is for now, not
+   where they live: kept in memory for half an hour, renewed by asking again,
+   never written to their stored address — and believed only with the
+   person's own signed notice that names that very relay. Without it, any
+   relay this one is linked with could pull a contact's messages to itself. */
+async function guestNoticeHolds(peerRecord, notice, relayId) {
+  try {
+    const s = notice?.statement;
+    if (!s || s.v !== 1 || s.type !== 'guest-route' || !peerRecord?.fingerprint || s.fp !== peerRecord.fingerprint || s.guest !== relayId) return false;
+    if (!(Number(s.until) > Date.now()) || Number(s.until) - Date.now() > 25 * 60 * 60 * 1000) return false;
+    const key = String(peerRecord.publicKeyData || '');
+    if (!key || typeof notice.sig !== 'string' || !notice.sig) return false;
+    const digest = await crypto.subtle.digest('SHA-256', app().base64ToArrayBuffer(key));
+    const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (hex !== peerRecord.fingerprint) return false;
+    return await verifyIdentitySignature(key, app().base64ToArrayBuffer(notice.sig), new TextEncoder().encode(directoryCanonicalJson(s)));
+  } catch (_error) {
+    return false;
+  }
+}
+function noteGuestRoute(fingerprint, route) {
+  if (!fingerprint || !route?.id || !route.key) return;
+  if (!chatState.guestRoutes) chatState.guestRoutes = new Map();
+  const ttl = typeof guestTiming === 'function' ? guestTiming('routeMs') : 30 * 60 * 1000;
+  chatState.guestRoutes.set(fingerprint, { id: route.id, key: route.key, origin: String(route.origin || ''), until: Date.now() + ttl });
+  while (chatState.guestRoutes.size > 500) chatState.guestRoutes.delete(chatState.guestRoutes.keys().next().value);
+}
+function liveGuestRoute(fingerprint) {
+  const route = fingerprint ? chatState.guestRoutes?.get?.(fingerprint) : null;
+  if (!route) return null;
+  if (route.until <= Date.now()) {
+    chatState.guestRoutes.delete(fingerprint);
+    return null;
+  }
+  return route;
+}
+/* Where is this person right now? Asked of this relay (two guests of one
+   relay) and of the relays it is linked with, at most every ten seconds for
+   one person: an answer of "not here" may be a guest stay about to begin. */
+const guestRouteAskedAt = new Map();
+async function askForGuestRoute(peerRecord) {
+  const fingerprint = String(peerRecord?.fingerprint || '');
+  if (!fingerprint || peerRecord.type) return null;
+  if (chatState?.profile?.crossRelayComm === false) return null;
+  if (Date.now() - (guestRouteAskedAt.get(fingerprint) || 0) < 10000) return liveGuestRoute(fingerprint);
+  guestRouteAskedAt.set(fingerprint, Date.now());
+  const own = (async () => {
+    if (!chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return null;
+    const tag = transitQueryTag('route');
+    const answer = awaitTransitAnswer(tag, 10000);
+    chatState.ws.send(JSON.stringify({ type: 'route-query', toFingerprint: fingerprint, tag }));
+    const reply = await answer;
+    if (reply?.type !== 'route' || reply.guest !== true) return null;
+    const pin = relayPinFor(chatServerOrigin());
+    if (!pin?.id || !pin.publicKey || !await guestNoticeHolds(peerRecord, reply.notice, pin.id)) return null;
+    noteGuestRoute(fingerprint, { id: pin.id, key: pin.publicKey, origin: chatServerOrigin() });
+    return liveGuestRoute(fingerprint);
+  })().catch(() => null);
+  /* The relays this one is linked with, asked for a guest answer only: a
+     "home" answer here never moves a stored route — that is what the card
+     and the session decided, and an unreachable relay is no reason to undo
+     it. */
+  const far = (async () => {
+    const relays = await linkedRelays();
+    if (!relays.length || !chatState.ws || chatState.ws.readyState !== WebSocket.OPEN) return null;
+    const answers = await Promise.all(relays.map((relay) => {
+      const tag = transitQueryTag('route');
+      const answer = awaitTransitAnswer(tag, 15000);
+      sendViaTransit({ type: 'route-query', toFingerprint: fingerprint, tag }, { id: relay.id, key: relay.key }, peerRecord);
+      return answer.then((reply) => ({ relay, reply }));
+    }));
+    for (const { relay, reply } of answers) {
+      if (reply?.type === 'route' && reply.guest === true && await guestNoticeHolds(peerRecord, reply.notice, relay.id)) {
+        noteGuestRoute(fingerprint, { id: relay.id, key: relay.key, origin: reply.origin });
+        return liveGuestRoute(fingerprint);
+      }
+    }
+    return null;
+  })().catch(() => null);
+  const [local, remote] = await Promise.all([own, far]);
+  return local || remote;
 }
 
 /* Written through the trust ladder, so a route a card or a session already
@@ -406,6 +501,20 @@ function transitSendRefused(tag, reason) {
     markTransitFrameFailed(item, peerRecord, reason);
     return true;
   }
+  /* Their relay cannot be reached from here: they may be staying on another
+     relay of their family as a guest. Asked, and if so the next attempt goes
+     there (transitRouteFor prefers a live guest route). */
+  /* typeof: the transit suite lifts this function out of the page and runs it
+     on its own. */
+  const guestRoutes = typeof liveGuestRoute === 'function' && typeof askForGuestRoute === 'function';
+  if (guestRoutes && (reason === 'transit-unavailable' || reason === 'transit-no-relay' || reason === 'transit-failed') && peerRecord && !liveGuestRoute(peerRecord.fingerprint)) {
+    askForGuestRoute(peerRecord).then(() => {
+      if (liveGuestRoute(peerRecord.fingerprint) && transitOutbox.get(tag) === item) {
+        item.nextAt = Date.now() + 250;
+        ensureTransitOutboxTimer();
+      }
+    }).catch(() => {});
+  }
   const step = TRANSIT_RETRY_STEPS_MS[Math.min(item.attempts - 1, TRANSIT_RETRY_STEPS_MS.length - 1)];
   item.nextAt = Date.now() + step;
   noteTransitLinkTroubleOnce(peerRecord);
@@ -472,7 +581,14 @@ function pumpTransitOutbox() {
     if (!item.nextAt || item.nextAt > now) continue;
     item.nextAt = 0;
     item.sentAt = now;
-    const peerRecord = (chatState.peers || []).find((peer) => peer.peerId === item.peerId) || null;
+    const peerRecord = (chatState.peers || []).find((peer) => peer.peerId === item.peerId)
+      || peerRecordsForFingerprint(item.fingerprint)[0] || null;
+    /* A guest on this very relay: delivered here, not carried. */
+    const guestRoute = typeof liveGuestRoute === 'function' ? liveGuestRoute(item.fingerprint) : null;
+    if (guestRoute && guestRoute.id === relayPinFor(chatServerOrigin())?.id && item.frame?.type === 'relay') {
+      chatState.ws.send(JSON.stringify(item.frame));
+      continue;
+    }
     const home = (peerRecord && transitRouteFor(peerRecord)) || item.home;
     sendViaTransit(item.frame, home, peerRecord, { retry: true });
   }

@@ -528,6 +528,25 @@ reach (one in Iran, seen from outside) still hears of it. The list is public at
 **Keep the operator key safe.** Whoever holds it can add a relay to your
 family; whoever loses it has to sign a new family with a new key.
 
+**The apps read the list too.** After connecting, the app fetches
+`/relay-directory`, checks it with the relays' own rules, and anchors to the
+operator key: the first valid list from the configured address (over HTTPS or
+a local network, from a relay whose identity it has pinned), or the key a
+scanned QR code names. Connection and TURN shows the family.
+
+**Replacing the operator key** from the central panel signs a handover with
+the old key, `{ v: 1, from: { id, key }, to: { id, key }, at }`; each relay
+keeps the last five at `/operator-handover` (the dashboard's
+`POST /Monitor_Server/operator-handover` takes one only if it leads to the
+relay's own key). An app that trusts the old key follows it without asking;
+without one, it asks the person.
+
+**The connect QR.** The panel shows a QR beside every server and relay:
+`P0R1|<address>/#op=<operator id>&relay=<relay id>`. Scanned in the app
+("Read address from QR"), it sets the address and, once the app is connected
+there, the operator anchor and the relay's expected id. Older apps read the
+address out of it and ignore the rest.
+
 ### Linking with other operators (from 2.98.77)
 
 A family can link with families that other operators run. The two meet only
@@ -631,6 +650,114 @@ there is one. It goes one step only, and stays sealed to the relay it is for:
 the member in between carries it and cannot open it.
 
 ---
+
+### Guest mode (after 2.98.90)
+
+When a person's home relay cannot be reached — its configured address, every
+backup address, and every front door, for two minutes — the app stays for a
+while on another relay of the same signed family that it can reach from where
+it is. It keeps its identity and stays a **guest**: the configured address does
+not change, the card it hands out still names home, and the guest relay never
+claims it as a resident. Home is tried again every minute, and the app goes
+back after two proofs in a row. Nothing is lost without guest mode either —
+queued messages are retried for a day — but nothing arrives until home is back.
+
+**The operator's switch.** Each relay has a **Takes guests** checkbox in the
+central panel's family list (Clusters → Addresses). It is signed into the
+directory as `guests: true` and is off for every relay until set. Older relays
+and apps ignore it.
+
+**How a guest relay is chosen.** The app measures the family's relays that
+take guests — at most eight, in parallel, over https only — from the person's
+own device, and proves each one holds the key the signed list names. A cluster
+mate of home comes first, then a relay in home's region, then the fastest. A
+relay filtered for the person does not answer, so it never ranks.
+
+**Who is turned away**, with the socket closed so nobody becomes a resident by
+accident: a relay that does not take guests (`off`), a home outside the family
+(`not-family`), no room (`full`), and a device the account revoked
+(`revoked`). The family's relays keep each account's device roster, sealed
+under a key made from the account's fingerprint: a relay opens a copy only when
+that account visits, and a device any copy revokes stays out.
+
+**Limits.** Guest sockets stay under 30% of the relay's sockets; the book of
+guests holds at most four times that, idle guests making room first; one
+account keeps at most eight guest devices; one address adds at most twenty new
+guest identities in ten minutes. A guest record lasts a day after the last
+connection; mail held for a guest is kept three days. When a stay ends, what
+waited goes home, and anything still arriving follows for seven days.
+
+**Messages.** A contact whose message cannot reach the person's home asks the
+relays it is linked with where the person is. A guest relay answers with the
+person's own signed route statement naming it; only then is the route used,
+kept in memory for half an hour, never written to the contact's stored
+address. Two devices of one account on two guest relays both get their mail:
+the relays find each other by a blinded index and copy it once. The guest
+relay wakes a guest with push, and home stays quiet for that device meanwhile.
+
+**A home filtered for one person.** A home can be up for everyone else while
+one person cannot reach it. On that person's signed notice, handed on by the
+guest relay, home copies their mail there. After three days of that, the app
+says so and offers to move home to the guest relay, with the reasons, and the
+person decides ("Remind me later" asks again in three days, "No" not for
+thirty). A move is a statement signed with the person's identity key; neither
+relay takes one signed before the newest it took. The old home hands over its
+mailbox, forwards for thirty days, and tells the account's other devices,
+which follow.
+
+**What a guest relay sees** is what a home relay sees: the IP address and how
+messages are addressed, never their content. One risk remains: a revoked device
+can become a guest on a relay that holds no roster copy for the account (one
+that was not linked when the roster changed).
+
+**Telegram.** The first guest from a home after six quiet hours sends one
+alert: "Hosting guests".
+
+**The dashboard.** `POST /Monitor_Server/guests` (with the dashboard password)
+gives counts only, never fingerprints: guests here, guest sockets, this
+relay's people who are guests elsewhere, moves, and what is held to stop an
+item being copied twice, which goes when each stay ends.
+
+**The person's switch** is in Connection and TURN, "Guest relay of the same
+family", on by default; it does nothing until a relay of the family takes
+guests.
+
+| Setting | Default | What it is |
+|---|---|---|
+| `CHAT_GUEST_SHARE` | `0.3` | the share of `CHAT_WS_MAX_TOTAL` guests may use |
+| `CHAT_GUEST_TTL_MS` | one day | a guest record after the last connection |
+| `CHAT_GUEST_RETENTION_MS` | three days | mail held for a guest |
+| `CHAT_GUEST_FORWARD_MS` | seven days | forwarding home after a stay |
+| `CHAT_MOVE_FORWARD_MS` | thirty days | forwarding after a move |
+| `CHAT_GUEST_NEW_PER_IP_10M` | `20` | new guest identities per address in ten minutes |
+
+### Best relay (after 2.98.90)
+
+The app measures the relays of its family from the person's own device and
+keeps their home on the best one that is not full.
+
+- **What is measured:** five small requests to each relay's `/chat-health`
+  (how fast it answers, how much that varies, how many answer, and the
+  `capacity.saturation` the relay reports), and at most once a day a timed
+  download of about 256 KB from `/relay-speed` (6 a minute per address). Only
+  relays that prove the key the signed list names are measured. Results stay on
+  the device; nothing is measured offline or during a guest stay.
+- **The score:** steadiness counts half, latency 0.3, speed 0.2. A relay at 80%
+  of its sockets or more is never chosen; 60–80% counts for less.
+- **When it moves:** a new account (no contacts, nothing said yet) takes the
+  best home at once. An existing one moves only when another relay has been at
+  least 30% better on three separate days, or home has been over 85% full three
+  times while another is under 60% — and never within 30 days of the last move.
+- **How it moves:** straight to the better relay, with the signed move
+  statement in the hello (the relay need not take guests). The old home hands
+  over the mailbox, forwards for 30 days, and tells the other devices, exactly
+  as for guest mode's move. A refused move changes nothing.
+- **The person's choice**, a "Best relay" card in Connection and TURN:
+  Automatic (the default — the app moves by itself and says so afterwards),
+  Suggest only (it offers the move with each relay's numbers), or Off (after a
+  warning that quality and stability may suffer). "Measure now" shows every
+  relay's numbers, and "Move here" moves by hand. With one relay in the family
+  the card is hidden and nothing runs.
 
 ## 6. What each machine sees
 
@@ -1105,6 +1232,22 @@ Gateway شدن سرورها برای اتصال به رله‌های اپرات�
 **کلید اپراتور را امن نگه دارید.** هر کس آن را داشته باشد می‌تواند رله‌ای به
 خانوادهٔ شما اضافه کند؛ هر کس آن را گم کند باید با کلید تازه خانوادهٔ تازه امضا کند.
 
+**برنامه‌ها هم فهرست را می‌خوانند.** برنامه بعد از اتصال `/relay-directory` را
+می‌گیرد، با همان قواعد رله‌ها چک می‌کند و به کلید اپراتور لنگر می‌اندازد: نخستین
+فهرست معتبر از نشانی تنظیم‌شده (روی HTTPS یا شبکهٔ محلی، از رله‌ای که هویتش را ثبت
+کرده)، یا کلیدی که QR اسکن‌شده نام می‌برد. «اتصال و TURN» خانواده را نشان می‌دهد.
+
+**عوض کردن کلید اپراتور** از پنل مرکزی با کلید قبلی یک «تحویل» امضا می‌کند
+(`{ v: 1, from: { id, key }, to: { id, key }, at }`)؛ هر رله پنج تای آخر را در
+`/operator-handover` نگه می‌دارد (و `POST /Monitor_Server/operator-handover` داشبورد
+فقط تحویلی را می‌پذیرد که به کلید خود رله برسد). برنامه‌ای که به کلید قبلی اعتماد
+دارد بی‌پرسش دنبالش می‌رود؛ بدون آن از کاربر می‌پرسد.
+
+**QR اتصال.** پنل کنار هر سرور و هر رله یک QR نشان می‌دهد:
+`P0R1|<نشانی>/#op=<شناسهٔ اپراتور>&relay=<شناسهٔ رله>`. با «خواندن نشانی از QR» در
+برنامه، نشانی تنظیم می‌شود و وقتی برنامه به همان نشانی وصل شد، لنگر اپراتور و
+شناسهٔ مورد انتظار رله هم. برنامه‌های قدیمی فقط نشانی را از آن می‌خوانند.
+
 ### اتصال به اپراتورهای دیگر (از نسخهٔ 2.98.77)
 
 یک خانواده می‌تواند با خانواده‌هایی که اپراتورهای دیگر اداره می‌کنند لینک
@@ -1198,6 +1341,106 @@ node tools/relay-directory.mjs sign && node tools/relay-directory.mjs publish
 رله‌ای که خودش به عضوی لینک ندارد، آنچه برای آن عضو دارد را به عضوی می‌دهد که لینک
 دارد، و اگر بشود از همان خوشه. فقط یک گام می‌رود و تا رلهٔ مقصد مهروموم می‌ماند:
 عضوِ وسط آن را حمل می‌کند و نمی‌تواند بازش کند.
+
+### حالت مهمان (پس از 2.98.90)
+
+وقتی رلهٔ خانهٔ کسی در دسترس نیست — نشانی تنظیم‌شده، همهٔ آدرس‌های پشتیبان، و
+همهٔ درهای ورودی، به مدت دو دقیقه — برنامه مدتی روی رلهٔ دیگری از همان خانوادهٔ
+امضاشده می‌ماند که از جای خودش به آن می‌رسد. هویتش همان می‌ماند و **مهمان** است:
+نشانی تنظیم‌شده عوض نمی‌شود، کارتی که می‌دهد هنوز خانه را نام می‌برد، و رلهٔ مهمان
+هرگز او را ساکن خود اعلام نمی‌کند. خانه هر دقیقه دوباره آزموده می‌شود و برنامه بعد
+از دو اثبات پشت سر هم برمی‌گردد. بدون حالت مهمان هم پیامی گم نمی‌شود — پیام‌های در
+صف تا یک روز دوباره فرستاده می‌شوند — ولی تا برگشتن خانه چیزی نمی‌رسد.
+
+**کلید اپراتور.** هر رله در فهرست خانوادهٔ پنل مرکزی (خوشه‌ها ← نشانی‌ها) یک تیک
+**میزبان مهمان** دارد. این تیک به‌صورت `guests: true` در فهرست امضا می‌شود و تا
+روشن نشود برای همهٔ رله‌ها خاموش است. رله‌ها و برنامه‌های قدیمی آن را نادیده می‌گیرند.
+
+**رلهٔ مهمان چطور انتخاب می‌شود.** برنامه رله‌های میزبان مهمان خانواده را — حداکثر
+هشت تا، هم‌زمان، فقط با https — از دستگاه خود کاربر می‌سنجد و اثبات می‌کند که هرکدام
+کلیدی را دارد که فهرست امضاشده نام می‌برد. اول هم‌خوشهٔ خانه، بعد رله‌ای در منطقهٔ
+خانه، بعد سریع‌ترین. رلهٔ فیلترشده برای کاربر جواب نمی‌دهد و هرگز انتخاب نمی‌شود.
+
+**چه کسی رد می‌شود** (و سوکتش بسته می‌شود تا کسی ناخواسته ساکن نشود): رله‌ای که
+مهمان نمی‌پذیرد (`off`)، خانه‌ای بیرون از خانواده (`not-family`)، جای خالی نبودن
+(`full`)، و دستگاهی که حساب لغوش کرده (`revoked`). رله‌های خانواده فهرست دستگاه‌های
+هر حساب را مهروموم‌شده با کلیدی از اثر انگشت حساب نگه می‌دارند: رله فقط وقتی کپی را
+باز می‌کند که همان حساب سراغش بیاید، و دستگاهی که هر کپی‌ای لغوش کرده بیرون می‌ماند.
+
+**سقف‌ها.** سوکت‌های مهمان زیر ۳۰٪ سوکت‌های رله می‌مانند؛ دفتر مهمان‌ها حداکثر
+چهار برابر آن است و اول مهمان‌های بی‌کار جا باز می‌کنند؛ هر حساب حداکثر هشت دستگاه
+مهمان دارد؛ هر نشانی در ده دقیقه حداکثر بیست هویت مهمان تازه می‌آورد. پروندهٔ مهمان
+یک روز بعد از آخرین اتصال می‌ماند و پیام‌های نگه‌داشته برای مهمان سه روز. وقتی
+مهمانی تمام شد، آنچه مانده به خانه می‌رود و آنچه هنوز می‌رسد هفت روز دنبالش می‌رود.
+
+**پیام‌ها.** مخاطبی که پیامش به خانهٔ کسی نمی‌رسد از رله‌های متصل به رلهٔ خودش
+می‌پرسد او کجاست. رلهٔ مهمان با بیانیهٔ مسیرِ امضاشدهٔ خود آن شخص جواب می‌دهد که نام
+همین رله در آن است؛ فقط در این صورت مسیر به کار می‌رود، نیم ساعت در حافظه می‌ماند و
+هرگز در نشانی ذخیره‌شدهٔ مخاطب نوشته نمی‌شود. دو دستگاه یک حساب روی دو رلهٔ مهمان هر
+دو پیام می‌گیرند: رله‌ها با یک شاخص کور یکدیگر را پیدا می‌کنند و پیام را یک بار
+کپی می‌کنند. رلهٔ مهمان با push مهمان را بیدار می‌کند و خانه در این مدت برای آن
+دستگاه ساکت می‌ماند.
+
+**خانه‌ای که فقط برای یک نفر فیلتر است.** خانه ممکن است برای همه کار کند و فقط یک
+نفر به آن نرسد. با اعلامیهٔ امضاشدهٔ همان شخص، که رلهٔ مهمان به خانه می‌دهد، خانه
+پیام‌هایش را به رلهٔ مهمان کپی می‌کند. بعد از سه روز، برنامه این را می‌گوید و با
+دلیل‌ها پیشنهاد می‌دهد خانه به رلهٔ مهمان منتقل شود، و انتخاب با خود شخص است («بعداً
+یادآوری کن» سه روز بعد دوباره می‌پرسد و «نه» تا سی روز نمی‌پرسد). انتقال بیانیه‌ای است
+که با کلید هویت شخص امضا شده؛ هیچ رله‌ای بیانیه‌ای را که پیش از آخرین بیانیهٔ
+پذیرفته‌اش امضا شده نمی‌پذیرد. خانهٔ قبلی صندوق را تحویل می‌دهد، سی روز پیام‌ها را
+می‌فرستد و به دستگاه‌های دیگر حساب خبر می‌دهد، که دنبالش می‌روند.
+
+**رلهٔ مهمان چه می‌بیند:** همان چیزی که رلهٔ خانه می‌بیند؛ نشانی IP و آدرس‌دهی
+پیام‌ها، هرگز محتوا. یک خطر می‌ماند: دستگاهِ لغوشده می‌تواند روی رله‌ای مهمان شود
+که هیچ کپی‌ای از فهرست دستگاه‌های آن حساب ندارد (رله‌ای که هنگام تغییر فهرست به بقیه
+وصل نبوده).
+
+**تلگرام.** نخستین مهمان از یک خانه پس از شش ساعت آرامی یک هشدار می‌فرستد:
+«میزبانی مهمان شروع شد».
+
+**داشبورد.** `POST /Monitor_Server/guests` (با رمز داشبورد) فقط شمارش‌ها را
+می‌دهد، هرگز اثر انگشت: مهمان‌های اینجا، سوکت‌های مهمان، کسانی از این رله که جای
+دیگری مهمان‌اند، انتقال‌ها، و آنچه برای جلوگیری از کپی تکراری نگه داشته می‌شود و با
+پایان هر مهمانی پاک می‌شود.
+
+**کلید کاربر** در «اتصال و TURN» است، «رلهٔ مهمان از همین خانواده»، که پیش‌فرض
+روشن است و تا رله‌ای از خانواده میزبان مهمان نشود کاری نمی‌کند.
+
+| تنظیم | پیش‌فرض | چیست |
+|---|---|---|
+| `CHAT_GUEST_SHARE` | `0.3` | سهمی از `CHAT_WS_MAX_TOTAL` که مهمان‌ها می‌گیرند |
+| `CHAT_GUEST_TTL_MS` | یک روز | پروندهٔ مهمان پس از آخرین اتصال |
+| `CHAT_GUEST_RETENTION_MS` | سه روز | پیام‌های نگه‌داشته برای مهمان |
+| `CHAT_GUEST_FORWARD_MS` | هفت روز | فرستادن به خانه پس از مهمانی |
+| `CHAT_MOVE_FORWARD_MS` | سی روز | فرستادن پس از انتقال |
+| `CHAT_GUEST_NEW_PER_IP_10M` | `20` | هویت مهمان تازه از هر نشانی در ده دقیقه |
+
+### بهترین سرور (پس از 2.98.90)
+
+برنامه رله‌های خانواده را از دستگاه خود کاربر می‌سنجد و خانه‌اش را روی بهترین
+رله‌ای نگه می‌دارد که پر نیست.
+
+- **چه چیزی سنجیده می‌شود:** پنج درخواست کوچک به `/chat-health` هر رله (چقدر سریع
+  جواب می‌دهد، چقدر نوسان دارد، چند تا جواب می‌گیرد، و `capacity.saturation` که خود
+  رله اعلام می‌کند)، و حداکثر روزی یک بار دانلود حدود ۲۵۶ کیلوبایت از `/relay-speed`
+  (هر نشانی دقیقه‌ای ۶ بار). فقط رله‌هایی سنجیده می‌شوند که کلید نام‌برده در فهرست
+  امضاشده را اثبات کنند. نتیجه روی دستگاه می‌ماند؛ بدون اینترنت یا هنگام مهمانی
+  چیزی سنجیده نمی‌شود.
+- **امتیاز:** پایداری نصف، پاسخ‌گویی ۰٫۳، سرعت ۰٫۲. رله‌ای که ۸۰٪ سوکت‌هایش پر است
+  هرگز انتخاب نمی‌شود و بین ۶۰ تا ۸۰٪ امتیاز کمتری می‌گیرد.
+- **کی منتقل می‌شود:** حساب تازه (بی‌مخاطب و بی‌پیام) همان اول بهترین خانه را
+  می‌گیرد. حساب فعلی فقط وقتی منتقل می‌شود که رلهٔ دیگری سه روز جدا دست‌کم ۳۰٪ بهتر
+  بوده، یا خانه سه بار بالای ۸۵٪ پر بوده و رلهٔ دیگری زیر ۶۰٪ است — و هرگز زودتر از
+  ۳۰ روز پس از انتقال قبلی.
+- **چطور منتقل می‌شود:** مستقیم به رلهٔ بهتر، با بیانیهٔ امضاشدهٔ انتقال در hello
+  (لازم نیست آن رله میزبان مهمان باشد). خانهٔ قبلی صندوق را تحویل می‌دهد، ۳۰ روز
+  پیام‌ها را می‌فرستد و به دستگاه‌های دیگر خبر می‌دهد، درست مثل انتقال حالت مهمان.
+  انتقالی که رد شود چیزی را عوض نمی‌کند.
+- **انتخاب کاربر**، کارت «بهترین سرور» در «اتصال و TURN»: خودکار (پیش‌فرض — برنامه
+  خودش منتقل می‌کند و بعد خبر می‌دهد)، فقط پیشنهاد (با اعداد هر رله)، یا خاموش (پس
+  از هشدار که کیفیت و پایداری ممکن است آسیب ببیند). «الان بسنج» اعداد همهٔ رله‌ها را
+  نشان می‌دهد و «انتقال به اینجا» دستی منتقل می‌کند. با یک رله در خانواده کارت پنهان
+  است و چیزی اجرا نمی‌شود.
 
 ### ۶. هر ماشین چه می‌بیند
 

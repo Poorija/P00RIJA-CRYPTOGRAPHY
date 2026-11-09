@@ -20,6 +20,10 @@
  * other finds it by itself, and they link; a newer directory drops one, an
  * old one replayed changes nothing.
  *
+ * "handover" checks an operator-key handover: signed by the old key, it lets
+ * an app that trusts the old key follow a rotation to the new one; a relay
+ * keeps the last few and serves them.
+ *
  *   node tests/e2e/relaydirectory.mjs            # every section
  *   node tests/e2e/relaydirectory.mjs rules      # one of them
  */
@@ -309,6 +313,52 @@ try {
       const foreign = dir.signDirectory({ ...signed(5, [relay(A), relay(B)]).body, operator: { id: dir.operatorIdFor(spki(intruder.publicKey)), key: spki(intruder.publicKey), name: 'x' } }, intruder.privateKey);
       const refused = await publish(A, foreign);
       check('and refuses a directory from another operator, saying why', refused.ok === false && refused.reason === 'wrong-operator', JSON.stringify(refused));
+    } finally {
+      await stacks.stop();
+    }
+  }
+  if (wants('handover')) {
+    section('handover: the old operator key names the new one');
+    const dir = require('../../scripts/lib/relay-directory.js');
+    const keyA = newKey(); const keyB = newKey(); const keyC = newKey();
+    const party = (key) => ({ id: dir.operatorIdFor(spki(key.publicKey)), key: spki(key.publicKey) });
+    const A = party(keyA); const B = party(keyB); const C = party(keyC);
+    const at = '2026-11-08T12:00:00.000Z';
+    const ab = dir.signHandover({ from: A, to: B, at }, keyA.privateKey);
+    const bc = dir.signHandover({ from: B, to: C, at }, keyB.privateKey);
+    const ba = dir.signHandover({ from: B, to: A, at }, keyB.privateKey);
+    check('a handover signed by the old key holds', dir.verifyHandover(ab).ok === true && ab.v === 1 && ab.from.id === A.id && ab.to.id === B.id, JSON.stringify(dir.verifyHandover(ab)));
+    check('naming another new key it does not', dir.verifyHandover({ ...ab, to: C }).reason === 'bad-signature');
+    check('nor with an id that is not its key’s hash', dir.verifyHandover({ ...ab, from: { ...A, id: C.id } }).reason === 'key-not-id');
+    check('nor a thing that is not a handover', dir.verifyHandover({ v: 1 }).reason === 'malformed' && dir.verifyHandover(null).reason === 'malformed');
+    check('a chain is followed to its end', dir.followHandovers([bc, ab], A.id)?.id === C.id && dir.followHandovers([bc, ab], A.id)?.key === C.key);
+    check('a loop ends', dir.followHandovers([ab, ba], A.id)?.id !== undefined);
+    check('and a broken link stops it', dir.followHandovers([ab, { ...bc, sig: ab.sig }], A.id)?.id === B.id && dir.followHandovers([bc], A.id) === null);
+
+    const stacks = await startTwoStacks({ waitForLink: false, envA: { CHAT_OPERATOR_KEY: B.key }, envB: {} });
+    try {
+      const base = `http://127.0.0.1:${stacks.a.signal}`;
+      const post = (body) => fetch(`${base}/Monitor_Server/operator-handover`, { method: 'POST', headers: { Authorization: AUTH, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }));
+      const listed = async () => (await fetch(`${base}/operator-handover`).then((r) => r.json())).handovers || [];
+      check('a relay serves no handover until it is given one', (await listed()).length === 0);
+      const kept = await post(ab);
+      check('it keeps one that ends at its own operator key', kept.status === 200 && kept.ok === true, JSON.stringify(kept));
+      check('and serves it to anyone who asks', (await listed()).some((h) => h.sig === ab.sig));
+      const elsewhere = await post(dir.signHandover({ from: A, to: C, at }, keyA.privateKey));
+      check('not one that leads to another operator', elsewhere.status === 400 && elsewhere.reason === 'not-this-operator', JSON.stringify(elsewhere));
+      const tampered = await post({ ...ab, at: '2026-11-09T00:00:00.000Z' });
+      check('nor one that was changed', tampered.status === 400 && tampered.reason === 'bad-signature', JSON.stringify(tampered));
+      const again = await post(ab);
+      check('the same one twice is kept once', again.ok === true && (await listed()).filter((h) => h.sig === ab.sig).length === 1);
+      for (let i = 0; i < 5; i += 1) {
+        const older = newKey();
+        await post(dir.signHandover({ from: party(older), to: B, at: `2026-11-0${i + 1}T00:00:00.000Z` }, older.privateKey));
+      }
+      const last = await listed();
+      check('it keeps the last five', last.length === 5 && !last.some((h) => h.sig === ab.sig), String(last.length));
+      const noAuth = await fetch(`${base}/Monitor_Server/operator-handover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ab) });
+      check('and taking one wants the dashboard password', noAuth.status === 401, String(noAuth.status));
     } finally {
       await stacks.stop();
     }

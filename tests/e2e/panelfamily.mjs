@@ -73,6 +73,13 @@ try {
   const stopped = await family.rotateOperator(fake('b'));
   check('a replacement stops at the first server that fails, and puts that one back',
     JSON.stringify(stopped) === JSON.stringify({ done: ['a'], failed: { name: 'b', reason: 'no answer' } }) && order.join(',') === 'apply a,deliver a,apply b,revert b', `${JSON.stringify(stopped)} ${order.join(',')}`);
+  /* The old key's word for the new one, for the apps (relay-directory.js). */
+  const oldPair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const newPair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const keyFile = (pair) => { const spkiB64 = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'); return { id: dirlib.operatorIdFor(spkiB64), publicKey: spkiB64, privateKey: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }) }; };
+  const oldKey = keyFile(oldPair); const nextKey = keyFile(newPair);
+  const handover = family.handoverFor(oldKey, nextKey, '2026-11-08T12:00:00.000Z');
+  check('a replacement signs a handover with the old key, naming the new one', dirlib.verifyHandover(handover).ok && handover.from.id === oldKey.id && handover.to.id === nextKey.id && handover.to.key === nextKey.publicKey, JSON.stringify(handover).slice(0, 160));
   order.length = 0;
   const finished = await family.rotateOperator(fake(''));
   check('and when every server takes it, each gets the new list right after its new key', finished.failed === null && order.join(',') === 'apply a,deliver a,apply b,deliver b,apply c,deliver c', order.join(','));
@@ -101,6 +108,10 @@ try {
   const get = (route) => panel.request(route, { cookie });
   const post = (route, body) => panel.request(route, { method: 'POST', body, cookie });
 
+  const code = await get('/api/servers/qr?name=r1');
+  check('the panel draws a connect QR for a server: its address, the operator, and its verified relay id',
+    code.status === 200 && code.json?.verified === true && code.json?.code === `P0R1|${r1.origin}/#op=${opId}&relay=${r1.id}` && String(code.json?.svg || '').startsWith('<svg'), `${code.status} ${JSON.stringify(code.json || {}).slice(0, 200)}`);
+  check('and none for a server it does not have', (await get('/api/servers/qr?name=zz')).status === 404);
   const shown = await get('/api/family');
   check('the panel shows the family list: the key here, its relays, no admin yet',
     shown.json?.canEdit === true && shown.json?.operator?.present === true && shown.json?.operator?.id === opId && shown.json?.relays?.length === 2 && shown.json?.admins?.length === 0, JSON.stringify(shown.json || {}).slice(0, 200));
@@ -129,6 +140,15 @@ try {
   check('the cluster view shows it, with who can work alone', view.json?.clusters?.find((cluster) => cluster.name === 'Iran')?.members?.length === 2 && view.json.clusters[0].independent === false, JSON.stringify(view.json?.clusters));
   await signed({ change: { op: 'delete', name: 'Iran' } });
   check('deleted, its members are in no cluster, here or in deploy.conf', (await onRelay(r1.origin))?.body?.relays?.every((relay) => !relay.cluster) && !/^R[12]_CLUSTER=/m.test(deployConf()));
+
+  /* Guest mode's switch: per relay, signed with the rest, off unless set. */
+  const guestsOn = await signed({ edits: [{ op: 'guests', name: 'r1', guests: true }] });
+  const listedOn = (await onRelay(r2.origin))?.body?.relays || [];
+  check('a relay is marked as taking guests, and only that one', guestsOn.status === 200 && listedOn.find((relay) => relay.name === 'r1')?.guests === true
+    && !('guests' in (listedOn.find((relay) => relay.name === 'r2') || {})), `${guestsOn.status} ${JSON.stringify(listedOn).slice(0, 200)}`);
+  check('the panel shows it', (await get('/api/family')).json?.relays?.find((relay) => relay.name === 'r1')?.guests === true);
+  await signed({ edits: [{ op: 'guests', name: 'r1', guests: false }] });
+  check('turned off, the field leaves the list', !('guests' in ((await onRelay(r1.origin))?.body?.relays?.find((relay) => relay.name === 'r1') || { guests: 1 })));
 
   const laptop = await browserKey();
   await signed({ edits: [{ op: 'admin-add', name: 'laptop', key: laptop.spki }] });

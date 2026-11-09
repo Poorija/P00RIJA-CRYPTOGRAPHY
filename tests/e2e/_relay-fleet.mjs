@@ -135,6 +135,9 @@ export async function createFleet(names, { env = {} } = {}) {
         CHAT_POLICY_STORE_PATH: path.join(relay.dir, 'policy.json'),
         CHAT_SELF_DESTRUCT_STORE_PATH: path.join(relay.dir, 'self-destruct.json'),
         CHAT_EXPIRY_LOG_PATH: path.join(relay.dir, 'expiry.json'),
+        /* Each relay its own: who proved themselves where is what route
+           answers are made of, and a shared file mixed the relays' residents. */
+        CHAT_KNOWN_IDENTITIES_PATH: path.join(relay.dir, 'known-identities.json'),
         CHAT_TRANSIT_PEERS: '',
         /* Every relay here is on loopback, which a partner's directory may
            otherwise never point at. */
@@ -181,7 +184,8 @@ export async function createFleet(names, { env = {} } = {}) {
   fleet.linked = async (name) => new Set(((await fleet.transit(name)).peers || []).filter((peer) => peer.linked).map((peer) => peer.id));
 
   /* A client of one relay that has proved its key, as the app does. */
-  fleet.client = (name, label, identity = relayTestIdentity()) => {
+  /* `hello` adds fields to the hello (guest mode's guestOf, say). */
+  fleet.client = (name, label, identity = relayTestIdentity(), hello = {}) => {
     const socket = new WebSocket(`ws://127.0.0.1:${relays[name].presence}/chat-signal`);
     const inbox = [];
     const waiters = [];
@@ -198,15 +202,17 @@ export async function createFleet(names, { env = {} } = {}) {
       socket.on('open', () => {
         socket.send(JSON.stringify({
           type: 'hello', clientId: label, username: label, peerId: label, deviceId: label,
-          publicKeyData: identity.publicKeyData, fingerprint: identity.fingerprint,
+          publicKeyData: identity.publicKeyData, fingerprint: identity.fingerprint, ...hello,
         }));
         resolve();
       });
       socket.on('error', reject);
     });
+    const closed = new Promise((resolve) => socket.on('close', (code) => resolve(code)));
     return {
       identity,
       ready,
+      closed,
       inbox,
       send: (payload) => socket.send(JSON.stringify(payload)),
       waitFor(match, ms = 10000) {

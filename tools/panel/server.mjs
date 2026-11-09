@@ -47,15 +47,15 @@ import { fileURLToPath } from 'node:url';
 import { configDir, loadState, editRelay, applyEdit, serverEntry, initKey, signDraft, saveDraft, saveSigned, parseDeployConf } from '../relay-directory.mjs';
 import { buildGraph } from './web/graphdata.js';
 import {
-  loadServers, serverRequest, connect, disconnect, reconnect, makeAudit, createFamily, describe, setLock,
+  loadServers, serverRequest, connect, disconnect, reconnect, makeAudit, createFamily, describe, setLock, identify,
   sshArgs, onServerAsync, resolveKeyPath, sshFailure, SSH_FAILURES,
   sendJson, readBody, cookieOf, readJsonFile,
 } from './core.mjs';
 import { checkPassword, checkCode, otpauthUri } from './login.mjs';
 import { stepUp, changePassword, beginTotp, confirmTotp, history } from './account.mjs';
-import { qrSvg } from './qr.mjs';
+import { qrSvg, relayConnectCode } from './qr.mjs';
 import { readServers, setServer, removeServer, setField, writeConf, validName, SERVER_KEYS } from './deployconf.mjs';
-import { clusterView, planClusterChange, rotateOperator } from './family.mjs';
+import { clusterView, planClusterChange, rotateOperator, handoverFor } from './family.mjs';
 import { startTask, jobView } from './jobs.mjs';
 import { createUpdates } from './updates.mjs';
 import { createBuilds } from './builds.mjs';
@@ -795,7 +795,7 @@ function directoryView() {
     ok: true, canEdit, reason, operatorId: state.key?.id || '', serial: state.signed?.body?.serial || 0,
     relays: (state.draft?.relays || []).map((relay) => ({
       name: String(relay.name || ''), id: String(relay.id || ''), region: String(relay.region || ''), gateway: Number(relay.gateway) || 0,
-      cluster: String(relay.cluster || ''), inside: Array.isArray(relay.inside) ? relay.inside.map(String) : [],
+      cluster: String(relay.cluster || ''), inside: Array.isArray(relay.inside) ? relay.inside.map(String) : [], guests: relay.guests === true,
     })),
   };
 }
@@ -856,10 +856,11 @@ async function editDirectory(res, body, who) {
   try {
     for (const edit of edits) {
       const name = String(edit?.name || '');
-      if (edit?.op === 'cluster' || edit?.op === 'inside' || edit?.op === 'gateway') {
-        const changes = edit.op === 'cluster' ? { cluster: String(edit.cluster ?? '') } : edit.op === 'inside' ? { inside: edit.inside } : { gateway: edit.gateway };
+      if (edit?.op === 'cluster' || edit?.op === 'inside' || edit?.op === 'gateway' || edit?.op === 'guests') {
+        const changes = edit.op === 'cluster' ? { cluster: String(edit.cluster ?? '') } : edit.op === 'inside' ? { inside: edit.inside }
+          : edit.op === 'guests' ? { guests: edit.guests === true } : { gateway: edit.gateway };
         draft = editRelay(draft, name, changes);
-        if (edit.op !== 'gateway') touched.add(name);
+        if (edit.op === 'cluster' || edit.op === 'inside') touched.add(name);
       } else if (edit?.op === 'remove') {
         const relay = (draft.relays || []).find((entry) => entry.name === name);
         if (!relay) throw new Error(`no relay called ${name}`);
@@ -906,7 +907,7 @@ async function familyView() {
     signedAt: state.signed?.body?.issuedAt || '',
     relays: (draft.relays || []).map((relay) => ({
       name: String(relay.name || ''), id: String(relay.id || ''), origins: (relay.origins || []).map(String), region: String(relay.region || ''),
-      gateway: Number(relay.gateway) || 0, cluster: String(relay.cluster || ''), inside: (relay.inside || []).map(String),
+      gateway: Number(relay.gateway) || 0, cluster: String(relay.cluster || ''), inside: (relay.inside || []).map(String), guests: relay.guests === true,
     })),
     admins: (draft.admins || []).map((admin) => ({ name: String(admin.name || ''), id: String(admin.id || '') })),
     clusters: clusterView(draft),
@@ -1024,6 +1025,8 @@ async function replaceOperatorKey(log) {
   }
   log(`new operator key ${next.id.slice(0, 16)}…`);
   const doc = signDraft({ ...state, key: next });
+  /* Signed once by the old key, handed to every server with the new list. */
+  const handover = handoverFor(state.key, next);
   const stamp = stampNow();
   const restart = `p="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' Poorija-Cryptography_ChatSignal)"
 f="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' Poorija-Cryptography_ChatSignal)"
@@ -1053,6 +1056,12 @@ if grep -q '^CHAT_OPERATOR_KEY=' .env; then sed -i "s|^CHAT_OPERATOR_KEY=.*|CHAT
     },
     deliver: async (server) => {
       const answer = await serverRequest(server, '/Monitor_Server/directory', { method: 'POST', body: doc });
+      if (answer.json?.ok === true) {
+        /* For the apps: without it, each one asks its user about the new key.
+           A relay too old to keep it is said, not a reason to stop. */
+        const told = await serverRequest(server, '/Monitor_Server/operator-handover', { method: 'POST', body: handover }).catch(() => ({ status: 0 }));
+        if (told.json?.ok !== true) log(`  ${server.name}: the handover was not kept (${told.json?.reason || told.status}); its apps will ask about the new key`);
+      }
       return { ok: answer.json?.ok === true, reason: answer.json?.reason || (answer.status ? '' : 'unreachable') };
     },
   });
@@ -1132,6 +1141,17 @@ async function api(req, res, url, who) {
     }
     if (url.pathname === '/api/servers/mirrors') {
       return sendJson(res, 200, { ok: true, mirrors: [...REGISTRY_MIRRORS, ...savedMirrors().filter((mirror) => !REGISTRY_MIRRORS.includes(mirror))] });
+    }
+    if (url.pathname === '/api/servers/qr') {
+      /* What a person scans in the app to use this server: the address, the
+         operator key's fingerprint and the relay's verified id. */
+      const name = String(url.searchParams.get('name') || '');
+      const server = validName(name) ? servers.find((candidate) => candidate.name === name) : null;
+      if (!server) return sendJson(res, 404, { ok: false });
+      if (!server.relayId) await identify(server).catch(() => '');
+      const operatorId = (await family.operatorState().catch(() => ({})))?.id || loadState(configPath).key?.id || '';
+      const code = relayConnectCode({ origin: server.publicUrl || server.direct || '', operatorId, relayId: server.relayId || '' });
+      return sendJson(res, 200, { ok: true, code, svg: qrSvg(code), verified: Boolean(server.relayId), operator: Boolean(operatorId) });
     }
     if (url.pathname === '/api/servers/deploy-command') {
       const name = String(url.searchParams.get('name') || '');

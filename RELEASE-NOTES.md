@@ -1,10 +1,154 @@
-# P00RIJA Cryptography 2.98.90
+# P00RIJA Cryptography 2.98.92
 
-Version 2.98.90 · build chat-v183
+Version 2.98.92 · build chat-v185
 
 متن هر بخش اول فارسی است و بعد انگلیسی. تغییرات نسخه‌های قبلی پایین‌تر آمده‌اند.
 
 Each section is Persian first, English after. Earlier changes follow below.
+
+---
+
+## بهترین سرور و حالت مهمان در نسخهٔ وب · Best relay and guest mode in the web app
+
+- **«الان بسنج» فقط سرور خانه را می‌سنجید:** سیاست امنیتی صفحه (CSP) در نسخهٔ وب و PWA
+  فقط اتصال به سرور خود صفحه را اجازه می‌داد، پس مرورگر هر درخواستی به رله‌های دیگر
+  خانواده را پیش از ارسال می‌بست؛ حالت مهمان هم به همین دلیل نمی‌توانست به رلهٔ دیگری
+  برود. حالا نشانی رله‌های خانوادهٔ امضاشده (فقط https و wss) در سیاست صفحه هست؛ هنگام
+  شروع از خود رله خوانده می‌شود و هر چند دقیقه به‌روز می‌شود. نسخهٔ دسکتاپ و موبایل این
+  محدودیت را نداشتند.
+- **مسیرهای رله پشت nginx:** `/relay-directory`، `/operator-handover` و `/relay-speed` به
+  رله می‌رسند و دیگر به صفحهٔ برنامه برنمی‌گردند.
+
+- **"Measure now" measured only home:** the page's security policy (CSP) in the
+  web app and PWA allowed connections to the page's own server only, so the
+  browser blocked every request to the family's other relays before it left;
+  guest mode could not reach another relay for the same reason. The signed
+  family's relays (https and wss only) are now in the page's policy, read from
+  the relay itself at start and refreshed every few minutes. The desktop and
+  mobile apps never had this limit.
+- **Relay paths behind nginx:** `/relay-directory`, `/operator-handover`, and
+  `/relay-speed` reach the relay instead of falling back to the app page.
+
+## ارسال به سرورها · Deploying
+
+- اگر اتصال به سروری وسط دریافت ایمیج‌ها قطع شود، `deploy.sh --prebuilt` بار بعد دیگر با
+  «remote port forwarding failed» متوقف نمی‌شود: هر دریافت درگاه تصادفی خودش را روی سرور
+  می‌گیرد و اول دریافت‌های ماندهٔ قبلیِ همان حساب را می‌بندد.
+
+- When the link to a server drops in the middle of pulling the images,
+  `deploy.sh --prebuilt` no longer stops at "remote port forwarding failed" the
+  next time: each pull takes a random port of its own on the server, and first
+  ends that account's stale pulls.
+
+---
+
+# P00RIJA Cryptography 2.98.91
+
+Version 2.98.91 · build chat-v184
+
+---
+
+## بهترین سرور · Best relay
+
+- **سنجش از دستگاه خود کاربر:** برنامه رله‌های خانواده را می‌سنجد (سرعت پاسخ،
+  پایداری، سرعت دانلود حداکثر روزی یک بار، و میزان پر بودن هر رله) و خانهٔ کاربر را
+  روی بهترین رله‌ای نگه می‌دارد که پر نیست. نتیجه فقط روی دستگاه می‌ماند.
+- **کاربر تازه** همان اول روی بهترین رله می‌نشیند. **کاربر فعلی** فقط وقتی منتقل
+  می‌شود که رلهٔ دیگری سه روز جدا به‌طور محسوس بهتر بوده یا خانه خیلی پر شده، و بین
+  دو انتقال دست‌کم ۳۰ روز است. صندوق پیام‌ها تحویل داده می‌شود و مخاطبان نشانی تازه را
+  خودشان یاد می‌گیرند.
+- **کارت «بهترین سرور»** در «اتصال و TURN»: خودکار (پیش‌فرض، بی‌پرسش)، فقط پیشنهاد
+  (با دلیل‌ها)، یا خاموش (با هشدار)؛ «الان بسنج» و «انتقال به اینجا». با یک سرور
+  پنهان است.
+
+- **Measured from the person's own device:** the app measures its family's
+  relays (how fast they answer, how steadily, download speed at most once a
+  day, and how full each one is) and keeps the person's home on the best one
+  that is not full. The results stay on the device.
+- **A new account** takes the best relay at once. **An existing one** moves only
+  when another relay has been clearly better on three separate days, or home is
+  very full, and moves are at least 30 days apart. The mailbox is handed over,
+  and contacts learn the new address by themselves.
+- **A "Best relay" card** in Connection and TURN: Automatic (the default, no
+  question asked), Suggest only (with the reasons), or Off (after a warning);
+  "Measure now" and "Move here". Hidden with a single server.
+
+## حالت مهمان · Guest mode
+
+- **وقتی خانه در دسترس نیست:** اگر رلهٔ خانه و همهٔ نشانی‌های پشتیبانش دو دقیقه جواب
+  ندهند، برنامه موقتاً روی رلهٔ دیگری از همان خانواده می‌ماند که از اینترنت کاربر
+  جواب می‌دهد، و خودش به خانه برمی‌گردد. هویت، کارت و نشانی هیچ مخاطبی عوض نمی‌شود.
+- **روشن کردن:** هر رله با تیک «میزبان مهمان» در فهرست خانوادهٔ پنل مهمان می‌پذیرد؛
+  پیش‌فرض برای همه خاموش است. کاربر هم در «اتصال و TURN» می‌تواند خاموشش کند.
+- **امنیت:** فهرست دستگاه‌های هر حساب به‌صورت مهروموم‌شده نزد رله‌های خانواده است و
+  دستگاهِ لغوشده مهمان نمی‌شود؛ مسیر مهمان فقط با بیانیهٔ امضاشدهٔ خود مخاطب پذیرفته
+  می‌شود؛ رله‌ها پیام‌ها را حداکثر دو بار بین خود جابه‌جا می‌کنند.
+- **خانه‌ای که فقط برای یک نفر فیلتر است:** خانه پیام‌هایش را به رلهٔ مهمان می‌دهد و
+  پس از سه روز برنامه با دلیل‌ها پیشنهاد انتقال دائمی می‌دهد. دستگاه‌های دیگر حساب
+  دنبالش می‌روند.
+- **اعلان، چند دستگاه، گروه و تماس** در حالت مهمان کار می‌کنند؛ داشبورد رله شمارش‌های
+  حالت مهمان را نشان می‌دهد و تلگرام شروع میزبانی را خبر می‌دهد.
+
+- **When home cannot be reached:** if the home relay and all its backup
+  addresses do not answer for two minutes, the app stays for a while on
+  another relay of the same family that answers from the person's internet,
+  and goes home by itself. Identity, card, and every contact's stored address
+  stay as they were.
+- **Turning it on:** a relay takes guests once its "Takes guests" box is ticked
+  in the panel's family list; it is off for every relay by default. People can
+  turn it off for themselves in Connection and TURN.
+- **Security:** the family's relays keep each account's device roster sealed,
+  so a revoked device cannot become a guest; a guest route is believed only on
+  the contact's own signed statement; relays pass mail between them at most
+  twice.
+- **A home filtered for one person:** home hands their mail to the guest relay,
+  and after three days the app offers a permanent move, with the reasons. The
+  account's other devices follow.
+- **Notifications, several devices, groups, and calls** work during a stay; the
+  relay dashboard shows guest mode's counts, and Telegram says when a relay
+  starts hosting guests.
+
+## خانوادهٔ رله‌ها در برنامه · The relay family in the app
+
+- برنامه فهرست امضاشدهٔ رله‌های اپراتور را با همان قواعد رله‌ها بررسی و نگه می‌دارد:
+  لنگر از نخستین اتصال به نشانی تنظیم‌شده یا از کد QR، و پیروی از تحویل امضاشدهٔ کلید
+  تازهٔ اپراتور. «اتصال و TURN» خانواده را نشان می‌دهد.
+- کد QR سرور شناسهٔ اپراتور و رله را هم دارد و برنامه‌های قدیمی همچنان نشانی را از آن
+  می‌خوانند.
+
+- The app checks and keeps the operator's signed relay list with the relays'
+  own rules: anchored at the first connection to the configured address or by
+  a QR code, and following the old key's signed handover to a new one.
+  Connection and TURN shows the family.
+- The server QR code also carries the operator's and the relay's ids; older
+  apps still read the address out of it.
+
+## به‌روزرسانی سرورها · Server updates
+
+- به‌روزرسانی رله‌ای را که بالا می‌آورد زیر نظر دارد و اگر سالم نبود، نسخهٔ قبلی را
+  خودکار برمی‌گرداند؛ و اول روی یک رله (قناری) اعمال می‌شود و بقیه پس از سالم ماندن آن.
+
+- An update watches the relay it brought up and puts the previous version back
+  when it is not healthy; and it goes to one relay first (a canary), to the rest
+  once that one has stayed healthy.
+
+## اتصال و نصب · Connection and installing
+
+- رله‌ای که قبلاً کار می‌کرد و موقتاً جواب نمی‌دهد، تا برگردد دوباره شماره‌گیری می‌شود
+  و دیگر «نشانی نامعتبر» خوانده نمی‌شود.
+- `deploy.sh` سروری را که هنوز تنظیمات ندارد نصب می‌کند و گواهی موجود روی سرور را پیدا
+  و استفاده می‌کند؛ مسیر کلید با `~` درست خوانده می‌شود.
+
+- A relay that worked before and stops answering for a while is dialled again
+  until it is back, and is no longer called an invalid address.
+- `deploy.sh` installs a server that has no settings yet and finds and reuses a
+  certificate already on it; a key path written with `~` is read correctly.
+
+---
+
+# P00RIJA Cryptography 2.98.90
+
+Version 2.98.90 · build chat-v183
 
 ---
 

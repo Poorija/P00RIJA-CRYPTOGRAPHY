@@ -396,10 +396,12 @@
 
     /* The relay-pairing job reads a plain URL, not a chunked bridge frame. */
     if (state.scanPurpose === 'relay') {
-      const origin = readRelayCode(raw);
-      if (!origin) return;
+      const parts = readRelayCodeParts(raw);
+      if (!parts.origin) return;
       stopScanner();
-      applyRelayOrigin(origin);
+      applyRelayOrigin(parts.origin);
+      /* The operator and relay the code names, for the chat to trust. */
+      if (parts.op || parts.relay) global.PoorijaRelayDirectory?.adoptCode(parts);
       return;
     }
 
@@ -809,10 +811,22 @@
 
   const RELAY_PREFIX = 'P0R1|';
 
-  function buildRelayCode(origin) {
+  const RELAY_CODE_ID = /^[a-f0-9]{64}$/;
+
+  /* The address, and — when the app knows them — the operator key's
+     fingerprint and the relay's id after a #: a scanned server is then
+     checked from its first connection (js/chat/61-relay-directory.js). An
+     older app reads the address out of it and ignores the rest. */
+  function buildRelayCode(origin, { op = '', relay = '' } = {}) {
     const value = String(origin || '').trim();
     if (!/^https?:\/\//i.test(value)) return '';
-    return `${RELAY_PREFIX}${value}`;
+    const ids = [];
+    if (RELAY_CODE_ID.test(String(op))) ids.push(`op=${op}`);
+    if (RELAY_CODE_ID.test(String(relay))) ids.push(`relay=${relay}`);
+    if (!ids.length) return `${RELAY_PREFIX}${value.replace(/\/+$/, '')}`;
+    let base = value;
+    try { base = new URL(value).origin; } catch (error) { return ''; }
+    return `${RELAY_PREFIX}${base}/#${ids.join('&')}`;
   }
 
   /* Accepts the prefixed form and a bare URL both, because someone will point
@@ -825,9 +839,22 @@
     try { return new URL(candidate).origin; } catch (error) { return ''; }
   }
 
+  /* The whole code: address, operator and relay, each only when well formed. */
+  function readRelayCodeParts(raw) {
+    const origin = readRelayCode(raw);
+    const text = String(raw || '').trim();
+    const hash = text.includes('#') ? text.slice(text.indexOf('#') + 1) : '';
+    const params = new URLSearchParams(hash);
+    const id = (name) => (RELAY_CODE_ID.test(String(params.get(name) || '')) ? params.get(name) : '');
+    return { origin, op: origin ? id('op') : '', relay: origin ? id('relay') : '' };
+  }
+
   function showRelayCode() {
     const field = el('chatServerUrl');
-    const code = buildRelayCode(field?.value || '');
+    const typed = String(field?.value || '').trim();
+    let ids = {};
+    try { ids = global.PoorijaRelayDirectory?.codeParts(new URL(typed).origin) || {}; } catch (error) { ids = {}; }
+    const code = buildRelayCode(typed, ids);
     if (!code) {
       notify('اول نشانی سرور را در همین صفحه وارد کنید.',
         'Put the server address in the box on this page first.', 'warning');
@@ -1071,7 +1098,7 @@
     sendText, sendFile, resetLink, canSend,
     makeKeys, deriveSessionKey, safetyPhrase,
     chunkHeader, readChunkHeader,
-    buildRelayCode, readRelayCode, applyRelayOrigin,
+    buildRelayCode, readRelayCode, readRelayCodeParts, applyRelayOrigin,
     switchCamera, toggleTorch, presentCurrentFrame,
     useTypedCode, pasteTypedCode, copyMyCode, saveMyCode, adoptIntoMesh,
     seal, unseal,

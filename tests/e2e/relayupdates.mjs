@@ -18,8 +18,13 @@
  *   operator's chosen time when one was set — the chain;
  * - it applies at the operator's time, at once, or — watching — when the
  *   fewest people are on, telling those who are a couple of minutes first;
- * - after the restart it knows how it went, and never retries a failure
- *   by itself.
+ * - after the restart it knows how it went — waiting for the apply step's
+ *   own word, which comes after its watch — and never retries a failure
+ *   by itself; a version put back is never taken again from a peer;
+ * - with a canary named in the operator's signed time, every other relay
+ *   waits until the canary has run the version healthily for the hold time
+ *   (learned from the canary's offer, or relayed by any member), and holds
+ *   when the canary put it back.
  *
  *   node tests/e2e/relayupdates.mjs
  */
@@ -67,6 +72,7 @@ try {
   let clock = Date.parse('2026-11-10T10:00:00Z');
   const notices = { a: [], b: [] };
   const applied = { a: [], b: [] };
+  const events = { a: [], b: [] };
   let online = { a: 5, b: 5 };
   let current = { a: '2.98.88', b: '2.98.88' };
   const instances = {};
@@ -98,6 +104,7 @@ try {
       peers: () => peersOf[name], isMember: (id) => members.has(id), fetchJson, fetchFile,
       onlineCount: () => online[name], notifyClients: (notice) => notices[name].push(notice),
       launchApply: async (job) => { applied[name].push(job); return { ok: true }; }, now: () => clock,
+      onEvent: (event) => events[name].push(event),
     });
     return instances[name];
   };
@@ -173,9 +180,13 @@ try {
   await a.tick();
   check('then the package is applied, the one that was checked', applied.a.length === 1 && applied.a[0].file === kept && applied.a[0].version === '2.98.89' && a.status().phase === 'applying', JSON.stringify(applied.a));
 
-  /* After the restart: the new version runs. */
+  /* After the restart: the new version runs, while the apply step is still
+     watching it. Its word (result.json) is what says how it went. */
   current.a = '2.98.89';
   const a2 = make('a');
+  await a2.tick();
+  check('the new version running is not yet the update done: the apply step is still watching', a2.status().phase === 'applying' && !events.a.some((event) => event.kind === 'done'), JSON.stringify(a2.status()).slice(0, 200));
+  fs.writeFileSync(path.join(work, 'a', 'result.json'), JSON.stringify({ code: 0, at: new Date(clock).toISOString(), version: '2.98.89' }));
   await a2.tick();
   check('after the restart it knows the update took', a2.status().phase === 'idle' && !a2.status().staged && a2.status().lastResult?.ok === true && a2.status().lastResult?.version === '2.98.89', JSON.stringify(a2.status()).slice(0, 240));
   check('and still hands the package on to the family', a2.offer().available?.version === '2.98.89' && Boolean(a2.packageFile('2.98.89')));
@@ -221,6 +232,193 @@ try {
   await a2.stage(later);
   await a2.cancel();
   check('a cancelled update is not applied', !a2.status().staged && a2.status().phase === 'idle');
+
+
+  /* Put back: the apply step's watch found the new version unhealthy and
+     brought the old one up again (exit 3). A peer still offers 2.98.89. */
+  const peerOffer = { id: A.id, publicKey: A.publicKey, version: '2.98.89', available: { version: '2.98.89', size: 1, sha256: '0'.repeat(64) }, policy: null };
+  const fresh89 = () => makePackage('2.98.89');
+  const rb = createRelayUpdates({
+    dir: path.join(work, 'rb'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.88', self: C,
+    peers: () => [{ id: A.id, origins: [origins.a] }], isMember: () => true,
+    fetchJson: async () => ({ ok: true, status: 200, json: peerOffer }),
+    fetchFile: async (url, { to }) => { fs.copyFileSync(fresh89(), to); return { ok: true, status: 200 }; },
+    onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock,
+  });
+  await rb.stage(fresh89(), { policy: { mode: 'now' } });
+  await rb.tick();
+  check('(a relay applying 2.98.89)', rb.status().phase === 'applying', rb.status().phase);
+  fs.writeFileSync(path.join(work, 'rb', 'result.json'), JSON.stringify({ code: 3, at: new Date(clock).toISOString(), version: '2.98.89' }));
+  const rbEvents = [];
+  const rb2 = createRelayUpdates({
+    dir: path.join(work, 'rb'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.88', self: C,
+    peers: () => [{ id: A.id, origins: [origins.a] }], isMember: () => true,
+    fetchJson: async () => ({ ok: true, status: 200, json: peerOffer }),
+    fetchFile: async (url, { to }) => { fs.copyFileSync(fresh89(), to); return { ok: true, status: 200 }; },
+    onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock,
+    onEvent: (event) => rbEvents.push(event),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  check('an update put back by the apply step is said so: reverted, the old version kept', rb2.status().phase === 'reverted' && rb2.status().lastResult?.reverted === true && rb2.status().lastResult?.version === '2.98.89', JSON.stringify(rb2.status()).slice(0, 260));
+  check('and told to the operator as a revert', rbEvents.some((event) => event.kind === 'reverted' && event.version === '2.98.89'), JSON.stringify(rbEvents));
+  check('the relay that put it back no longer hands it on, and says it put it back', !rb2.offer().available && rb2.offer().reverted === '2.98.89', JSON.stringify(rb2.offer()).slice(0, 200));
+  await rb2.cancel();
+  await rb2.checkPeers();
+  check('a version put back here is never taken again from a peer (no loop)', !rb2.status().staged, JSON.stringify(rb2.status()).slice(0, 200));
+  const again = await rb2.stage(fresh89(), { policy: { mode: 'watch' } });
+  check('the panel may still hand it over on purpose', again.ok && rb2.status().staged?.version === '2.98.89', JSON.stringify(again));
+
+  /* Put back failed too (exit 4): critical, said as such. */
+  const rf = createRelayUpdates({
+    dir: path.join(work, 'rf'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.88', self: C, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock,
+  });
+  await rf.stage(fresh89(), { policy: { mode: 'now' } });
+  await rf.tick();
+  fs.writeFileSync(path.join(work, 'rf', 'result.json'), JSON.stringify({ code: 4, at: new Date(clock).toISOString(), version: '2.98.89' }));
+  const rfEvents = [];
+  const rf2 = createRelayUpdates({
+    dir: path.join(work, 'rf'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.88', self: C, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock,
+    onEvent: (event) => rfEvents.push(event),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  check('a failed way back is a failure that says so (revert-failed)', rf2.status().phase === 'failed' && rfEvents.some((event) => event.kind === 'failed' && event.reason === 'revert-failed'), JSON.stringify(rfEvents));
+
+  /* An apply step that never wrote its word: after the time it may take, the
+     version that runs decides. */
+  const rt = createRelayUpdates({
+    dir: path.join(work, 'rt'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.88', self: C, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock,
+  });
+  await rt.stage(fresh89(), { policy: { mode: 'now' } });
+  await rt.tick();
+  const rt2 = createRelayUpdates({
+    dir: path.join(work, 'rt'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.89', self: C, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {}, launchApply: async () => ({ ok: true }), now: () => clock + 41 * 60000,
+  });
+  check('no word from the apply step for 40 minutes, the new version running: done', rt2.status().phase === 'idle' && rt2.status().lastResult?.ok === true, JSON.stringify(rt2.status()).slice(0, 200));
+
+
+  /* ---- the canary ------------------------------------------------------- */
+  const { canonicalJson } = require(path.join(ROOT, 'scripts/lib/relay-directory.js'));
+  const { policySigned, cleanPolicy } = require(path.join(ROOT, 'scripts/lib/relay-updates.js'));
+  const v1 = { version: '2.98.91', mode: 'schedule', at: '2026-11-20T10:00:00.000Z' };
+  const v1sig = signPolicy(v1, OPERATOR_PEM);
+  check('a time with no canary is signed exactly as before (older relays keep taking it)',
+    crypto.verify('sha256', Buffer.from(canonicalJson({ v: 1, version: v1.version, mode: v1.mode, at: v1.at }), 'utf8'), operator.publicKey, Buffer.from(v1sig, 'base64')));
+  const K = relayKeys();
+  const withCanary = { mode: 'now', at: null, canary: K.id, holdMin: 30 };
+  const canarySig = signPolicy({ ...withCanary, version: '2.98.91' }, OPERATOR_PEM);
+  const signedCanary = cleanPolicy({ ...withCanary, sig: canarySig });
+  check('a canary and its hold are kept and signed with the time', signedCanary.canary === K.id && signedCanary.holdMin === 30 && policySigned(signedCanary, '2.98.91', OPERATOR), JSON.stringify(signedCanary));
+  check('another canary under the same signature does not hold', !policySigned({ ...signedCanary, canary: C.id }, '2.98.91', OPERATOR));
+  check('nor another hold', !policySigned({ ...signedCanary, holdMin: 5 }, '2.98.91', OPERATOR));
+  check('a hold out of range is brought into it', cleanPolicy({ mode: 'now', canary: K.id, holdMin: 99999 }).holdMin === 1440 && cleanPolicy({ mode: 'now', canary: K.id }).holdMin === 30
+    && cleanPolicy({ mode: 'now', canary: 'nonsense', holdMin: 10 }).canary === undefined);
+
+  const canaryOffers = {};
+  const follower = (name, { reach = Object.keys(canaryOffers), current: running = '2.98.90' } = {}) => {
+    const evts = [];
+    const appliedHere = [];
+    const relayHere = createRelayUpdates({
+      dir: path.join(work, name), operatorKey: () => OPERATOR, currentVersion: () => running, self: relayKeys(),
+      peers: () => reach.map((id) => ({ id, origins: [`https://${id.slice(0, 8)}.example`] })), isMember: () => true,
+      fetchJson: async (url) => {
+        const id = reach.find((candidate) => url.startsWith(`https://${candidate.slice(0, 8)}.example`));
+        return id && canaryOffers[id] ? { ok: true, status: 200, json: canaryOffers[id] } : { ok: false, status: 0 };
+      },
+      fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {},
+      launchApply: async (job) => { appliedHere.push(job); return { ok: true }; }, now: () => clock, onEvent: (event) => evts.push(event),
+    });
+    return { relay: relayHere, events: evts, applied: appliedHere };
+  };
+  const canaryPolicy = { ...withCanary, sig: canarySig };
+  const f = follower('f1', { reach: [K.id] });
+  await f.relay.stage(makePackage('2.98.91'), { policy: canaryPolicy });
+  await f.relay.tick();
+  check('with a canary named, the others wait: nothing heard from it yet', !f.applied.length && f.relay.status().phase === 'waiting', f.relay.status().phase);
+  canaryOffers[K.id] = { id: K.id, publicKey: K.publicKey, version: '2.98.90', available: null, canary: { id: K.id, version: '2.98.90', healthyAt: null, seenAt: new Date(clock).toISOString() } };
+  await f.relay.checkPeers();
+  await f.relay.tick();
+  check('the canary still on the old version: still waiting', !f.applied.length && f.relay.status().phase === 'waiting');
+  const healthyAt = new Date(clock).toISOString();
+  canaryOffers[K.id] = { ...canaryOffers[K.id], version: '2.98.91', canary: { id: K.id, version: '2.98.91', healthyAt, seenAt: healthyAt } };
+  clock += 10 * 60000;
+  canaryOffers[K.id].canary.seenAt = new Date(clock).toISOString();
+  await f.relay.checkPeers();
+  await f.relay.tick();
+  check('the canary healthy on it for less than the hold: still waiting', !f.applied.length, f.relay.status().phase);
+  clock += 21 * 60000;
+  canaryOffers[K.id].canary.seenAt = new Date(clock).toISOString();
+  await f.relay.checkPeers();
+  await f.relay.tick();
+  check('healthy for the hold: the others go, at their own time (here: now)', f.applied.length === 1 && f.applied[0].version === '2.98.91' && f.relay.status().phase === 'applying', f.relay.status().phase);
+
+  const M = relayKeys();
+  canaryOffers[M.id] = { id: M.id, publicKey: M.publicKey, version: '2.98.91', available: null, canary: { ...canaryOffers[K.id].canary } };
+  const g = follower('f2', { reach: [M.id] });
+  await g.relay.stage(makePackage('2.98.91'), { policy: canaryPolicy });
+  await g.relay.checkPeers();
+  await g.relay.tick();
+  check('a relay that cannot reach the canary learns it from any member that can', g.applied.length === 1, g.relay.status().phase);
+  const h = follower('f3', { reach: [M.id] });
+  canaryOffers[M.id].canary = { ...canaryOffers[M.id].canary, seenAt: new Date(clock - 45 * 60000).toISOString() };
+  await h.relay.stage(makePackage('2.98.91'), { policy: canaryPolicy });
+  await h.relay.checkPeers();
+  await h.relay.tick();
+  check('but not from word that is too old', !h.applied.length && h.relay.status().phase === 'waiting', h.relay.status().phase);
+
+  canaryOffers[K.id] = { id: K.id, publicKey: K.publicKey, version: '2.98.90', available: null, reverted: '2.98.91', canary: { id: K.id, version: '2.98.90', healthyAt: null, reverted: '2.98.91', seenAt: new Date(clock).toISOString() } };
+  const q = follower('f4', { reach: [K.id] });
+  await q.relay.stage(makePackage('2.98.91'), { policy: canaryPolicy });
+  await q.relay.checkPeers();
+  await q.relay.tick();
+  await q.relay.tick();
+  check('the canary put it back: the others hold, and it is told once', !q.applied.length && q.relay.status().phase === 'held' && q.events.filter((event) => event.kind === 'held').length === 1, `${q.relay.status().phase} ${JSON.stringify(q.events)}`);
+  await q.relay.setPolicy({ mode: 'now' });
+  await q.relay.tick();
+  check('until the operator says otherwise', q.applied.length === 1, q.relay.status().phase);
+  check('a relay passes on what it knows of the canary', JSON.stringify(q.relay.offer().canary || {}).includes(K.id), JSON.stringify(q.relay.offer()).slice(0, 200));
+
+  const self = createRelayUpdates({
+    dir: path.join(work, 'k'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.90', self: K, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {},
+    launchApply: async () => ({ ok: true }), now: () => clock,
+  });
+  await self.stage(makePackage('2.98.91'), { policy: canaryPolicy });
+  await self.tick();
+  check('the canary itself goes at its time', self.status().phase === 'applying', self.status().phase);
+  fs.writeFileSync(path.join(work, 'k', 'result.json'), JSON.stringify({ code: 0, at: new Date(clock).toISOString(), version: '2.98.91' }));
+  const selfAfter = createRelayUpdates({
+    dir: path.join(work, 'k'), operatorKey: () => OPERATOR, currentVersion: () => '2.98.91', self: K, peers: () => [], isMember: () => false,
+    fetchJson: async () => ({ ok: false }), fetchFile: async () => ({ ok: false }), onlineCount: () => 0, notifyClients: () => {},
+    launchApply: async () => ({ ok: true }), now: () => clock,
+  });
+  const told = selfAfter.offer().canary;
+  check('and then says it runs the version healthily, and since when', told?.id === K.id && told.version === '2.98.91' && Boolean(told.healthyAt), JSON.stringify(told));
+
+  /* The operator's time travels with the package even from a relay that has
+     already applied it — the canary itself, most of all — or a relay that
+     takes it from there would not wait for the canary. */
+  const fromCanary = selfAfter.offer();
+  check('a relay that has applied a version still hands on the operator’s signed time for it', fromCanary.available?.version === '2.98.91' && fromCanary.policy?.canary === K.id && policySigned(fromCanary.policy, '2.98.91', OPERATOR), JSON.stringify(fromCanary.policy));
+  /* Two relays started at once on one folder (as test harnesses do) each
+     write the state file: neither may die on the other's rename. */
+  {
+    const { spawn } = await import('node:child_process');
+    const shared = path.join(work, 'shared-updates');
+    const script = `const { createRelayUpdates } = require(${JSON.stringify(path.join(ROOT, 'scripts/lib/relay-updates.js'))});
+      const relay = createRelayUpdates({ dir: ${JSON.stringify(shared)}, operatorKey: () => '', currentVersion: () => '2.98.88', self: { id: 'x' }, launchApply: async () => ({ ok: true }) });
+      (async () => { for (let i = 0; i < 200; i += 1) await relay.setPolicy({ mode: i % 2 ? 'watch' : 'now' }); })().catch((error) => { console.error(error.message); process.exit(1); });`;
+    const codes = await Promise.all(Array.from({ length: 6 }, () => new Promise((resolve) => {
+      const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let err = '';
+      child.stderr.on('data', (chunk) => { err += chunk; });
+      child.on('exit', (code) => resolve({ code, err: err.slice(0, 120) }));
+    })));
+    check('relays sharing a folder never die on each other’s state file', codes.every((entry) => entry.code === 0), JSON.stringify(codes.filter((entry) => entry.code !== 0)));
+  }
 
   /* A peer offering something unsigned is not followed. */
   const c = createRelayUpdates({

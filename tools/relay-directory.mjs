@@ -138,6 +138,8 @@ export function applyEdit(draft, edit) {
       /* Only when set, so a family without clusters signs what it always did. */
       ...(relay.cluster ? { cluster: String(relay.cluster).slice(0, 40) } : {}),
       ...((relay.inside || []).length ? { inside: relay.inside.map(String).filter(Boolean).slice(0, 4) } : {}),
+      /* Guest mode (docs/RELAY-NETWORK.md): written only when on. */
+      ...(relay.guests === true ? { guests: true } : {}),
     };
     const at = next.relays.findIndex((existing) => existing.id === entry.id || (entry.name && existing.name === entry.name));
     if (at >= 0) next.relays[at] = entry; else next.relays.push(entry);
@@ -267,8 +269,8 @@ export function serverEntry(conf, name, existing, flags = {}) {
   };
 }
 
-/* One relay of the draft with its cluster, inside addresses or gateway place
-   changed; an empty cluster or list takes it out. What the panel and the
+/* One relay of the draft with its cluster, inside addresses, gateway place or
+   guest switch changed; an empty cluster or list takes it out. What the panel and the
    cluster command both do. */
 export function editRelay(draft, name, changes = {}) {
   const entry = (draft?.relays || []).find((relay) => relay.name === name || relay.id === name);
@@ -286,6 +288,7 @@ export function editRelay(draft, name, changes = {}) {
     next.inside = inside.map((origin) => new URL(origin).origin);
   }
   if (changes.gateway !== undefined) next.gateway = Math.max(0, Math.min(9, Math.floor(Number(changes.gateway) || 0)));
+  if (changes.guests !== undefined) next.guests = changes.guests === true;
   return applyEdit(draft, { op: 'add', relay: next });
 }
 

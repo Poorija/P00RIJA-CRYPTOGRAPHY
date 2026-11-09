@@ -1680,9 +1680,13 @@ function transitRouteFor(peerRecord) {
    it is lifted out of the page and driven standalone, which the transit
    suite does to test the routing decisions against a real relay. */
 if (typeof chatState !== 'undefined' && chatState?.profile?.crossRelayComm === false) return null;
+const mine = relayPinFor(chatServerOrigin())?.id || '';
+/* Someone staying on a guest relay for now (62-guest-mode.js): that relay, or
+   this one's own delivery when they are a guest right here. */
+const guest = typeof liveGuestRoute === 'function' ? liveGuestRoute(peerRecord?.fingerprint) : null;
+if (guest) return mine && guest.id === mine ? null : guest;
 const home = typeof routableHomeRelay === 'function' ? routableHomeRelay(peerRecord) : null;
 if (!home) return null;
-const mine = relayPinFor(chatServerOrigin())?.id || '';
 /* Without a pinned id for the relay in hand there is nothing to compare, and
    guessing wrong sends a message the long way round for no reason. */
 if (!mine || home.id === mine) return null;
@@ -3187,6 +3191,11 @@ deviceId: typeof getDeviceId === 'function' ? getDeviceId() : '',
    below is signed with it too, so the relay knows which device is speaking
    and can keep out one the account's primary revoked. */
 deviceKey: typeof deviceHelloKey === 'function' ? deviceHelloKey() : '',
+/* A guest stay (62-guest-mode.js): the home relay, the signed notice, and the
+   newest roster this device holds. */
+...(typeof guestHelloFields === 'function' ? guestHelloFields() : {}),
+/* A move straight to a better relay (63-relay-choice.js). */
+...(typeof relayChoiceHelloFields === 'function' ? relayChoiceHelloFields() : {}),
 }));
 /* Push is NOT armed from here any more. Subscribing on every hello meant the
    relay was handed a device record before the user had been told that a push
@@ -3202,6 +3211,8 @@ if (typeof healGroupsWithMemberCards === 'function') healGroupsWithMemberCards()
 if (typeof startDeviceBeacon === 'function') window.setTimeout(startDeviceBeacon, 4000);
 /* The relay's other addresses, learnt while this one works (52-relay-mirrors.js). */
 if (typeof learnRelayMirrors === 'function') window.setTimeout(() => { learnRelayMirrors().catch(() => {}); }, 7000);
+/* The operator's relay list, checked against the key this app trusts (61-relay-directory.js). */
+if (typeof refreshRelayDirectory === 'function') window.setTimeout(() => { refreshRelayDirectory().catch(() => {}); }, 9000);
 }
 function ackRelayMessage(relayId) {
 if (!relayId || chatState.ws?.readyState !== WebSocket.OPEN) return;

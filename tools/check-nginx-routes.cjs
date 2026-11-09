@@ -38,7 +38,9 @@ const files = [
 const asked = new Map();
 for (const file of files) {
   const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
-  for (const match of source.matchAll(/new URL\('(\/[A-Za-z0-9_\/-]+)'/g)) {
+  /* Plain strings and template strings alike: `new URL(`/relay-speed?bytes=${n}`, origin)`
+     asks for /relay-speed as surely as a quoted path does. */
+  for (const match of source.matchAll(/new URL\(['`](\/[A-Za-z0-9_\/-]+)/g)) {
     if (!asked.has(match[1])) asked.set(match[1], file);
   }
 }

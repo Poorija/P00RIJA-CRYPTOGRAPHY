@@ -27356,6 +27356,25 @@ html body #mainApp #content-chat .chat-space-member-avatar.is-tappable { cursor:
   background: rgb(127 29 29 / 0.25);
 }
 .chat-relay-identity.is-changed .chat-relay-identity-value { color: rgb(252 165 165); }
+/* The relay family (js/chat/61-relay-directory.js). */
+.chat-relay-family-list { list-style: none; margin: 0.2rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; }
+.chat-relay-family-list li { padding: 0.3rem 0.5rem; border-radius: 0.45rem; background: rgb(30 41 59 / 0.45); }
+.chat-relay-family-list li.is-home { outline: 1px solid rgb(56 189 248 / 0.55); }
+.chat-relay-family-list code { font-size: 0.7rem; unicode-bidi: isolate; opacity: 0.85; }
+.chat-relay-family-home { color: rgb(125 211 252); font-weight: 700; }
+/* Guest mode (js/chat/62-guest-mode.js). */
+.chat-relay-family-list li.is-guest { outline: 1px dashed rgb(251 191 36 / 0.6); }
+.chat-relay-family-guest { color: rgb(252 211 77); font-weight: 700; }
+.chat-guest-badge { margin: 0.35rem 0.5rem; padding: 0.35rem 0.6rem; border-radius: 0.55rem; font-size: 0.78rem; line-height: 1.35;
+  background: rgb(251 191 36 / 0.12); color: rgb(253 230 138); border: 1px solid rgb(251 191 36 / 0.35); }
+.chat-guest-badge::before { content: '\f0c1'; font-family: 'Font Awesome 6 Free', 'Font Awesome 5 Free'; font-weight: 900; margin-inline-end: 0.4rem; }
+.chat-guest-badge.hidden { display: none; }
+/* Smart relay choice (js/chat/63-relay-choice.js). */
+.chat-relay-choice-modes { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.35rem 0; font-size: 0.82rem; }
+.chat-relay-choice-mode { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.chat-relay-choice [data-relay-move] { margin-inline-start: 0.4rem; padding: 0.1rem 0.5rem; font-size: 0.72rem; }
+.chat-relay-family-warn { color: rgb(252 165 165); }
+.chat-relay-family .chat-soft-btn { align-self: flex-start; }
 
 /* The carrier sheet: one screen, in the order somebody would do it. It is the
    flow that was missing, not the cryptography — so nothing here offers a

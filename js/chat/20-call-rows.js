@@ -924,6 +924,8 @@ document.getElementById('chatAutoConnect').checked = Boolean(chatState.profile.a
 document.getElementById('chatAllowVideo').checked = Boolean(chatState.profile.allowVideo);
 document.getElementById('chatAutoDiscovery').checked = Boolean(chatState.profile.autoDiscovery);
 document.getElementById('chatCrossRelayComm').checked = chatState.profile.crossRelayComm !== false;
+const guestToggle = document.getElementById('chatUseGuestRelays');
+if (guestToggle) guestToggle.checked = chatState.profile.useGuestRelays !== false;
 /* The master switch mirrors the profile, and everything connection-shaped on
  * this panel dims while it is off. */
 const enabledToggle = document.getElementById('chatEnabledToggle');
@@ -957,6 +959,7 @@ input.checked = typeof callNoiseSuppressionEnabled === 'function' ? callNoiseSup
 });
 syncChatToggleStates();
 renderRelayIdentityRow();
+if (typeof renderRelayFamily === 'function') renderRelayFamily();
 if (!isBeingEdited('chatTurnUrl')) document.getElementById('chatTurnUrl').value = chatState.profile.turnUrl || '';
 if (!isBeingEdited('chatTurnUsername')) document.getElementById('chatTurnUsername').value = chatState.profile.turnUsername || '';
 if (!isBeingEdited('chatTurnCredential')) document.getElementById('chatTurnCredential').value = chatState.profile.turnCredential || '';

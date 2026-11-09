@@ -850,6 +850,12 @@ return normalizeRelayOrigin(configured, fallbackOrigin);
    applies. */
 function chatServerOrigin() {
 const configured = configuredRelayOrigin();
+/* On the way to a better home (63-relay-choice.js): until it says yes. */
+if (chatState.pendingDirectMove?.origin) return chatState.pendingDirectMove.origin;
+/* A guest stay on another relay of the family (62-guest-mode.js) comes first:
+   home and all its addresses are unreachable, which is why it began. */
+const guest = chatState.profile.activeGuest;
+if (guest && guest.homeOrigin === configured && typeof guest.origin === 'string' && guest.origin) return guest.origin;
 const mirror = chatState.profile.activeMirror;
 if (mirror && mirror.primary === configured && typeof mirror.origin === 'string' && mirror.origin) return mirror.origin;
 return configured;
@@ -2427,7 +2433,10 @@ accept.textContent = t('پذیرفتن هویت جدید', 'Accept the new ident
    old to have one yields an origin with no id, and step five will decline to
    route to it rather than seal to a name it cannot check. */
 function myHomeRelay() {
-const origin = chatServerOrigin();
+/* During a guest stay this is still home: a card naming the guest relay would
+   move every contact's route there, at the strongest rank there is. */
+const guestStay = chatState.profile.activeGuest && chatState.profile.activeGuest.homeOrigin === configuredRelayOrigin();
+const origin = guestStay ? configuredRelayOrigin() : chatServerOrigin();
 if (!isUsableRelayOrigin(origin)) return null;
 const pinned = relayPinFor(origin);
 return {
@@ -2643,7 +2652,9 @@ console.log(`[Discovery] Applying results from ${result.origin}`);
 /* A mirror in use is a detour (52-relay-mirrors.js), not the address the
    person configured: what it says about itself is applied, the configured
    address is not replaced by it. */
-const onMirror = Boolean(chatState.profile.activeMirror && result.origin === chatState.profile.activeMirror.origin);
+const onMirror = Boolean(chatState.profile.activeMirror && result.origin === chatState.profile.activeMirror.origin)
+  || Boolean(chatState.profile.activeGuest && result.origin === chatState.profile.activeGuest.origin)
+  || Boolean(chatState.pendingDirectMove && result.origin === chatState.pendingDirectMove.origin);
 if (!onMirror) chatState.profile.serverUrl = result.origin;
 chatState.profile.presenceUrl = String(result.health?.presenceUrl || chatState.profile.presenceUrl || '');
 chatState.profile.peerOrigin = String(result.health?.peerOrigin || chatState.profile.peerOrigin || result.origin);
@@ -2660,6 +2671,23 @@ applyRelayIdentity(result.origin, result.relayIdentity);
 saveEncrypted(CHAT_PROFILE_STORAGE_KEY, chatState.profile);
 renderStaticUi();
 return Boolean(chatState.profile.presenceUrl || chatState.profile.peerOrigin);
+}
+/* Dialling a known relay again while it does not answer: 5, 10, 20, 40, then
+   every 60 seconds, for as long as chat is on and the person has not chosen to
+   be offline. A connection that comes up resets the pace. */
+let relayRedialTimer = null;
+let relayRedialStep = 0;
+function scheduleRelayRedial() {
+if (relayRedialTimer) return;
+const delay = Math.min(60000, 5000 * (2 ** Math.min(relayRedialStep, 4)));
+relayRedialStep += 1;
+relayRedialTimer = setTimeout(() => {
+relayRedialTimer = null;
+if (!chatState.shouldReconnect || chatState.manualOffline || chatState.profile.chatEnabled === false) return;
+if (typeof isUnlocked === 'function' && !isUnlocked()) return;
+if (chatState.connected && chatState.ws?.readyState === WebSocket.OPEN) { relayRedialStep = 0; return; }
+connectChatTransport().catch(() => {});
+}, delay);
 }
 async function ensureRelayTransportReady() {
 if (hasActiveServerRestriction()) {
@@ -2679,14 +2707,14 @@ return new URL(chatState.profile.presenceUrl).origin === new URL(chatServerOrigi
 return false;
 }
 })();
-if (cachedEndpointsUsable) return true;
+if (cachedEndpointsUsable) { relayRedialStep = 0; return true; }
 if (!isStaticDevAppOrigin() || window.__POORIJA_DESKTOP__) {
 const result = await probeRelayOrigin(chatServerOrigin());
-if (applyRelayDiscoveryResult(result)) return true;
+if (applyRelayDiscoveryResult(result)) { relayRedialStep = 0; return true; }
 }
 // If configured server fails, try automatic discovery
 const discoveryResult = await discoverLocalRelayServer({ fullScan: false, silent: true });
-if (discoveryResult) return true;
+if (discoveryResult) { relayRedialStep = 0; return true; }
 
 /* Auto-retry: the configured relay is valid (the user's settings say so) —
    a momentary network hiccup or a relay restart must not surface as
@@ -2701,6 +2729,17 @@ if (!ensureChatTransportRetried) {
   }
 }
 ensureChatTransportRetried = 0;
+/* An address this device has already pinned is a relay that worked: down for
+   a while — restarting, cut off, overloaded — not a wrong setting. It is
+   dialled again, further apart each time, until it answers, and the person is
+   told it is being retried rather than that the address is invalid. Only an
+   address that never answered gets the message below. */
+if (relayPinFor(chatServerOrigin()) || relayPinFor(configuredRelayOrigin())) {
+setConnectionState(false, ['سرور رله در دسترس نیست؛ دوباره امتحان می‌شود', 'The relay is unreachable; trying again']);
+renderStaticUi();
+scheduleRelayRedial();
+return false;
+}
 chatState.shouldReconnect = false;
 setConnectionState(false, ['سرور رله تنظیم نشده', 'Relay server is not configured']);
 notify(
@@ -2959,6 +2998,9 @@ autoConnect: Boolean(document.getElementById('chatAutoConnect')?.checked),
    Off means everything goes through the relay they are connected to, which
    can then see who they talk to (never the contents). */
 crossRelayComm: document.getElementById('chatCrossRelayComm')?.checked ?? chatState.profile.crossRelayComm ?? true,
+/* Guest mode (62-guest-mode.js): on by default, idle until a relay of the
+   family takes guests. */
+useGuestRelays: document.getElementById('chatUseGuestRelays')?.checked ?? chatState.profile.useGuestRelays ?? true,
 allowVideo: Boolean(document.getElementById('chatAllowVideo')?.checked),
 autoDiscovery: Boolean(document.getElementById('chatAutoDiscovery')?.checked),
 showSuspensionCountdown: Boolean(document.getElementById('chatShowSuspensionCountdown')?.checked),
@@ -3013,6 +3055,7 @@ chatPublicStun: ['STUN عمومی روشن است — آی‌پی شما به گ
    two switches worked but their rows sat in the off-colour permanently,
    which read as "these two are different from the rest" on every device. */
 chatEnabledToggle: ['چت امن روشن است', 'Secure chat is on', 'چت امن خاموش است', 'Secure chat is off'],
+chatUseGuestRelays: ['اگر رلهٔ خانه در دسترس نباشد، موقتاً از رلهٔ دیگری از همین خانواده استفاده می‌شود', 'If your home relay is unreachable, another relay of the family is used for a while', 'رلهٔ مهمان استفاده نمی‌شود؛ اگر رلهٔ خانه در دسترس نباشد، برنامه منتظر می‌ماند', 'No guest relay; if your home relay is unreachable, the app waits'],
 chatCrossRelayComm: ['ارتباط بین رله‌ها روشن است؛ پیام و تماس از مسیر رمزنگاری‌شدهٔ میان دو رله می‌رود', 'Cross-relay transit is on; messages and calls ride the encrypted link between the relays', 'ارتباط بین رله‌ها خاموش است؛ همه‌چیز از رلهٔ خودتان می‌رود', 'Cross-relay transit is off; everything goes through your own relay'],
 /* Added with their features and forgotten here, so their rows never took the
    on-colour — only the knob moved, which read as a different kind of switch. */

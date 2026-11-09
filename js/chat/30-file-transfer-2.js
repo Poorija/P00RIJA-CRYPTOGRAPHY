@@ -607,9 +607,11 @@ if (typeof requestBeacons === 'function') window.setTimeout(requestBeacons, 1500
 return;
 }
 if (message.type === 'beacon-stored' || message.type === 'beacon-dropped') return;
+/* Guest mode (62-guest-mode.js). */
+if (typeof handleGuestFrame === 'function' && /^(guest-|home-move)/.test(String(message.type || '')) && handleGuestFrame(message)) return;
 /* The account's device roster (58-device-roster.js). */
 if (message.type === 'roster') {
-if (typeof handleRelayRoster === 'function') handleRelayRoster(message.roster || null).catch((error) => console.warn('[Devices] roster unreadable:', error?.message || error));
+if (typeof handleRelayRoster === 'function') handleRelayRoster(message.roster || null, { guest: message.guest === true }).catch((error) => console.warn('[Devices] roster unreadable:', error?.message || error));
 return;
 }
 if (message.type === 'roster-refused') {

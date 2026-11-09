@@ -83,9 +83,10 @@ export async function loadUpdates() {
 
 const whenText = (policy) => {
   if (!policy) return '—';
-  if (policy.mode === 'now') return t('updNow');
-  if (policy.mode === 'schedule') return `${t('updAt')} ${fmtTime(policy.at)}`;
-  return t('updWatch');
+  const canary = policy.canary ? ` · ${t('updCanary')} (${policy.holdMin || 30}′)` : '';
+  if (policy.mode === 'now') return `${t('updNow')}${canary}`;
+  if (policy.mode === 'schedule') return `${t('updAt')} ${fmtTime(policy.at)}${canary}`;
+  return `${t('updWatch')}${canary}`;
 };
 const phaseText = (phase) => t(`updPhase_${phase || 'idle'}`);
 
@@ -116,7 +117,11 @@ export function renderUpdates() {
     <tbody>${rows || `<tr><td colspan="5" class="mut">${esc(t('updNoPackages'))}</td></tr>`}</tbody></table></div>`;
   const servers = (cache.servers || []).map((row) => {
     const status = row.status || {};
-    const last = status.lastResult ? (status.lastResult.ok ? tag(`${t('updDone')} ${status.lastResult.version}`, 'good') : tag(`${t('updFailed')} ${status.lastResult.version || ''}`, 'bad')) : '';
+    /* Put back by the server's own watch: the server is fine, the version is not. */
+    const lastTag = (result) => (result.ok ? tag(`${t('updDone')} ${result.version}`, 'good')
+      : result.reverted ? tag(`${t('updReverted')} ${result.version || ''}`, 'warn') : tag(`${t('updFailed')} ${result.version || ''}`, 'bad'));
+    const why = status.lastResult && !status.lastResult.ok && status.lastResult.reason ? `<br><span class="mut small">${esc(String(status.lastResult.reason).slice(0, 160))}</span>` : '';
+    const last = status.lastResult ? `${lastTag(status.lastResult)}${why}` : '';
     const updater = row.updater ? tag(t('updHasUpdater'), 'good') : row.reason === 'unreachable' ? tag(t('unreachable'), 'bad') : tag(t('updNoUpdater'), 'warn');
     const actions = row.updater && status.staged ? `<button data-upd-when="${esc(row.name)}" data-upd-staged="${esc(status.staged.version)}">${esc(t('updWhen'))}</button><button class="bad" data-upd-cancel="${esc(row.name)}">${esc(t('updCancel'))}</button>` : '';
     return `<tr><td><strong>${esc(row.name)}</strong></td><td class="mono">${esc(status.current || '—')}</td><td>${updater}</td><td class="mono">${esc(status.staged?.version || '—')}</td>
@@ -128,14 +133,21 @@ export function renderUpdates() {
 }
 
 function whenFields(prefix) {
+  /* A canary: one server first, the rest once it has stayed healthy. */
+  const names = (state.cache.updates?.servers || []).map((row) => row.name);
   return `<label class="wide"><span>${esc(t('updWhen'))}</span><select id="${prefix}Mode">
       <option value="watch" selected>${esc(t('updWatch'))}</option><option value="schedule">${esc(t('updSchedule'))}</option><option value="now">${esc(t('updNow'))}</option></select></label>
-    <label id="${prefix}AtRow" hidden><span>${esc(t('updAt'))}</span><input id="${prefix}At" type="datetime-local"></label>`;
+    <label id="${prefix}AtRow" hidden><span>${esc(t('updAt'))}</span><input id="${prefix}At" type="datetime-local"></label>
+    <label><span>${esc(t('updCanary'))}</span><select id="${prefix}Canary"><option value="">${esc(t('updCanaryNone'))}</option>${names.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label>
+    <label><span>${esc(t('updHold'))}</span><input id="${prefix}Hold" type="number" min="5" max="1440" step="5" value="30" inputmode="numeric"></label>
+    <p class="mut wide">${esc(t('updCanaryHelp'))}</p>`;
 }
 const whenValue = (prefix) => {
   const mode = value(`${prefix}Mode`) || 'watch';
   const at = value(`${prefix}At`);
-  return mode === 'schedule' ? { mode, at: at ? new Date(at).toISOString() : '' } : { mode };
+  const canary = value(`${prefix}Canary`);
+  const staged = canary ? { canary, holdMin: Number(value(`${prefix}Hold`)) || 30 } : {};
+  return mode === 'schedule' ? { mode, at: at ? new Date(at).toISOString() : '', ...staged } : { mode, ...staged };
 };
 const codeField = (id) => `<label><span>${esc(t('code'))}</span><input id="${id}" class="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="${esc(t('codePh'))}"></label>`;
 
@@ -203,6 +215,7 @@ export async function updatesClick(target) {
     const policy = whenValue('upd');
     if (!chosen.length) { $('updSendError').textContent = t('updNoneChosen'); return true; }
     if (policy.mode === 'schedule' && !policy.at) { $('updSendError').textContent = t('updNoTime'); return true; }
+    if (policy.canary && !chosen.includes(policy.canary)) { $('updSendError').textContent = t('updCanaryNotChosen'); return true; }
     const answer = await api('/api/updates/send', { version, servers: chosen, policy, code: value('updCode') });
     if (!answer.ok) { $('updSendError').textContent = answer.reason || t('jobFailed'); return true; }
     await watchJob(answer.job, `${t('updSend')} ${version}`);

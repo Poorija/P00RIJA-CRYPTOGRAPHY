@@ -24,8 +24,22 @@
 #   2. a snapshot of the install (scripts/server-backup.sh), the way back
 #   3. the images are loaded
 #   4. the new tree replaces the old one, folder by folder, as a deploy copies
-#      it (what the new tree no longer has goes); .env and data/ stay as they are
+#      it (what the new tree no longer has goes); .env and data/ stay as they
+#      are. The old tree is copied aside first, for the way back.
 #   5. the NEW tree's scripts/sync-to-server.sh --prebuilt restarts the stack
+#   6. the relay is watched for UPDATE_HEALTH_WATCH_S seconds (120): through
+#      nginx it must answer /chat-health, serve the new version, not restart,
+#      and, if it was linked to its family before, be linked again
+#
+# When 4, 5 or 6 fails, the old tree goes back and the OLD tree's own
+# sync-to-server.sh brings the previous version up again (its images are still
+# here: every deploy keeps the version before). .env and data/ were never
+# touched, so nothing that arrived in between is lost. Nothing is retried.
+#
+# Exit: 0 updated; 1 refused or failed before anything changed; 3 failed and
+# put back, the previous version serving; 4 failed, and putting it back failed
+# too. UPDATE_AUTO_REVERT=0 leaves a failure as it is (exit 1), for an
+# operator working on the server.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 {
@@ -85,30 +99,130 @@ tree_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$WORK/src/package.j
 [ -f "$WORK/src/scripts/sync-to-server.sh" ] || die "the tree in the package has no scripts/sync-to-server.sh; nothing was changed"
 say "▶ Updating to $version"
 
+DIRS="js css assets fonts vendor scripts config tests"
+FILES="index.html sw.js manifest.webmanifest monitor-client.html package.json"
+WATCH_S="${UPDATE_HEALTH_WATCH_S:-120}"
+POLL_S="${UPDATE_HEALTH_POLL_S:-10}"
+RELAY_CONTAINER="Poorija-Cryptography_ChatSignal"
+port="$(sed -n 's/^APP_PORT=//p' "$ROOT/.env" 2>/dev/null | tail -1 | tr -d "\"' ")"
+HEALTH_URL="https://127.0.0.1:${port:-8585}/chat-health"
+
+# The relay as its users reach it: through nginx, from the host.
+health_body() {
+  curl -sk --max-time 10 "$HEALTH_URL" 2>/dev/null \
+    || wget -qO- --no-check-certificate -T 10 "$HEALTH_URL" 2>/dev/null || true
+}
+# One line of JSON in, one value out (no early-closing pipe for pipefail to trip on).
+links_up() { printf '%s\n' "$1" | sed -n 's/.*"transit":{[^}]*"up":\([0-9][0-9]*\).*/\1/p'; }
+served_version() { printf '%s\n' "$1" | sed -n 's/.*"version":"\([0-9][0-9.]*\)".*/\1/p'; }
+container_mark() { docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$RELAY_CONTAINER" 2>/dev/null || true; }
+
+# Healthy at the end of the watch: answering, the version wanted, the same
+# container all along since it first answered, and linked again if it was.
+# WHY says what was not.
+WHY=""
+watch_health() {
+  local want="$1" need_links="$2" deadline=$((SECONDS + WATCH_S)) body seen mark baseline="" good=0 linked=0
+  [ "$need_links" -ge 1 ] 2>/dev/null || linked=1
+  while :; do
+    body="$(health_body)"
+    seen="$(served_version "$body")"
+    if case "$body" in *'"ok":true'*) true ;; *) false ;; esac && [ "$seen" = "$want" ]; then
+      mark="$(container_mark)"
+      [ -n "$baseline" ] || baseline="$mark"
+      if [ "$mark" != "$baseline" ]; then WHY="the relay restarted during the watch ($baseline, then $mark)"; return 1; fi
+      [ "$(links_up "$body")" -ge 1 ] 2>/dev/null && linked=1
+      good=1
+    elif [ -z "$body" ]; then
+      good=0; WHY="the relay did not answer $HEALTH_URL"
+    else
+      good=0; WHY="the relay serves version ${seen:-unknown}, not $want"
+    fi
+    [ "$SECONDS" -ge "$deadline" ] && break
+    sleep "$POLL_S"
+  done
+  [ "$good" -eq 1 ] || return 1
+  [ "$linked" -eq 1 ] || { WHY="the relay had $need_links family link(s) before and none came back"; return 1; }
+  return 0
+}
+
+# The old tree, back where it was, and the stack up again by its own script.
+KEEP="$WORK/previous"
+put_back() {
+  local dir file
+  say "↩ Putting ${installed:-the previous version} back"
+  for dir in $DIRS; do
+    if [ -d "$KEEP/$dir" ]; then
+      rm -rf "${ROOT:?}/$dir" && cp -a "$KEEP/$dir" "$ROOT/$dir" || return 1
+    else
+      rm -rf "${ROOT:?}/$dir"
+    fi
+  done
+  for file in $FILES; do
+    if [ -f "$KEEP/$file" ]; then cp -p "$KEEP/$file" "$ROOT/$file" || return 1; else rm -f "$ROOT/$file"; fi
+  done
+  bash scripts/sync-to-server.sh --skip-bump --prebuilt || return 1
+  [ -z "$installed" ] || watch_health "$installed" 0 || return 1
+  return 0
+}
+
+# From here on the tree may be changing: a failure goes back.
+failed() {
+  printf '✗ %s\n' "$*" >&2
+  if [ "${UPDATE_AUTO_REVERT:-1}" = "0" ]; then
+    printf '✗ UPDATE_AUTO_REVERT=0: left as it is\n' >&2
+    exit 1
+  fi
+  if put_back; then
+    say "↩ Back on ${installed:-the previous version}; $version was not kept"
+    exit 3
+  fi
+  printf '✗ putting the previous version back failed too%s; the server needs a hand (bash scripts/server-backup.sh --list)\n' "${WHY:+: $WHY}" >&2
+  exit 4
+}
+
+# What the relay was before: how many family links it had.
+links_before="$(links_up "$(health_body)")"
+
 # ---- 2. the way back -----------------------------------------------------------
-bash scripts/server-backup.sh "before updating to $version" || die "the snapshot failed, so nothing was changed"
+# Of this install, wherever it is (the script's default is ~/work/pkg).
+POORIJA_SOURCE_DIR="$ROOT" bash scripts/server-backup.sh "before updating to $version" || die "the snapshot failed, so nothing was changed"
 
 # ---- 3. the images -----------------------------------------------------------------
 docker load -i "$WORK/images.tar.gz" || die "the images would not load; the tree was not changed"
 
 # ---- 4. the tree, as a deploy copies it -----------------------------------------------
-for dir in js css assets fonts vendor scripts config tests; do
+# The old one first, a real copy (what rsync or a script might rewrite in
+# place must not change it): a few tens of megabytes, gone with the work.
+mkdir -p "$KEEP"
+for dir in $DIRS; do
+  [ -d "$ROOT/$dir" ] && { cp -a "$ROOT/$dir" "$KEEP/$dir" || die "could not keep a copy of $dir; the tree was not changed"; }
+done
+for file in $FILES; do
+  [ -f "$ROOT/$file" ] && { cp -p "$ROOT/$file" "$KEEP/$file" || die "could not keep a copy of $file; the tree was not changed"; }
+done
+set +e
+for dir in $DIRS; do
   [ -d "$WORK/src/$dir" ] || continue
-  mkdir -p "$ROOT/$dir"
+  mkdir -p "$ROOT/$dir" || failed "could not create $dir"
   if command -v rsync >/dev/null 2>&1; then
     # By content: a file of the same size and time as the old one (tar keeps
     # the package's times) was skipped by rsync's quick check, old bytes and all.
-    rsync -a --delete --checksum "$WORK/src/$dir/" "$ROOT/$dir/"
+    rsync -a --delete --checksum "$WORK/src/$dir/" "$ROOT/$dir/" || failed "copying $dir failed"
   else
-    rm -rf "${ROOT:?}/$dir" && cp -a "$WORK/src/$dir" "$ROOT/$dir"
+    { rm -rf "${ROOT:?}/$dir" && cp -a "$WORK/src/$dir" "$ROOT/$dir"; } || failed "copying $dir failed"
   fi
 done
-for file in index.html sw.js manifest.webmanifest monitor-client.html package.json; do
-  [ -f "$WORK/src/$file" ] && cp "$WORK/src/$file" "$ROOT/$file"
+for file in $FILES; do
+  if [ -f "$WORK/src/$file" ]; then cp "$WORK/src/$file" "$ROOT/$file" || failed "copying $file failed"; fi
 done
 
 # ---- 5. the stack, by the new tree's own script -------------------------------------
-bash scripts/sync-to-server.sh --skip-bump --prebuilt
+bash scripts/sync-to-server.sh --skip-bump --prebuilt || failed "the new tree's sync-to-server.sh failed"
+
+# ---- 6. the watch -------------------------------------------------------------------
+say "▶ Watching the relay for ${WATCH_S}s"
+watch_health "$version" "${links_before:-0}" || failed "$WHY"
 say "✓ Updated to $version"
-exit
+exit 0
 }

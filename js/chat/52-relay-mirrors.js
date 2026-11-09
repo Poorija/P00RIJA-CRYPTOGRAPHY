@@ -153,6 +153,11 @@ async function proveRelayAt(origin, pin) {
    configured address. */
 function switchRelayOrigin(origin, pin) {
   const configured = configuredRelayOrigin();
+  /* Home (or a backup address of it) answers: a guest stay is over. */
+  if (chatState.profile.activeGuest) {
+    if (typeof leaveGuestStay === 'function') leaveGuestStay({ sendEnd: true, reason: 'mirror' });
+    else chatState.profile.activeGuest = null;
+  }
   const previous = chatServerOrigin();
   if (origin === previous) return false;
   chatState.profile.activeMirror = origin === configured ? null : { primary: configured, origin, relayId: pin.id, at: Date.now() };
@@ -309,6 +314,10 @@ async function checkPrimaryWhileOnMirror() {
 function renderMirrorNote() {
   const note = document.getElementById('chatMirrorNote');
   if (!note) return;
+  /* A guest stay, or nobody in the family would take this device
+     (62-guest-mode.js), comes before anything about backup addresses. */
+  const guestLine = typeof guestNoteLine === 'function' ? guestNoteLine() : '';
+  if (guestLine) { note.classList.remove('hidden'); note.textContent = guestLine; return; }
   const pin = relayPinFor(configuredRelayOrigin()) || relayPinFor(chatServerOrigin());
   const known = pin?.id ? knownMirrorsFor(pin.id).length : 0;
   const mirror = chatState.profile.activeMirror;
@@ -331,6 +340,8 @@ window.setInterval(() => {
   renderMirrorNote();
   if (typeof isUnlocked === 'function' && !isUnlocked()) return;
   if (chatState.manualOffline || chatState.profile?.chatEnabled === false) return;
+  /* During a guest stay, 62-guest-mode.js decides when to try home again. */
+  if (typeof guestStayActive === 'function' && guestStayActive()) { relayLastUpAt = Date.now(); return; }
   const now = Date.now();
   if (relayTransportUp()) {
     relayLastUpAt = now;

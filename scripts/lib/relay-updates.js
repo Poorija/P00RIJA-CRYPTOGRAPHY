@@ -30,10 +30,26 @@
  * week, or nobody. Whoever is on is told a couple of minutes before; the
  * page shows that the server is updating until it is back.
  *
+ * THE CANARY. The operator's time may name one relay as the canary and a
+ * hold in minutes. The canary goes at its time; every other relay waits until
+ * the canary has run the version healthily for the hold, and holds for the
+ * operator if the canary put it back. What the canary is doing travels in
+ * every offer: the canary says it of itself, every other relay passes on the
+ * freshest it heard, so a relay cut off from the canary still learns it. A
+ * member that lies about it can only rush or delay the others' apply of a
+ * version the operator signed. A time with a canary is signed as v2; one
+ * without is signed exactly as before, so older relays keep taking it (and
+ * take a v2 time as no time at all: they watch). 
+ *
  * APPLYING is the deployment's to do (launchApply): the relay hands over the
- * checked file and is restarted by what it started. After the restart it
- * reads how it went (result.json). A failure is reported and never retried
- * by itself: the operator decides. */
+ * checked file and is restarted by what it started. The apply step
+ * (scripts/apply-update.sh) watches the new relay for a while and, if it is
+ * not healthy, puts the old version back; only then does it write how it
+ * went (result.json: 0 updated, 3 put back, anything else failed). So the
+ * relay that comes up waits for that word rather than taking its own version
+ * as proof. A failure is reported and never retried by itself: the operator
+ * decides. A version put back here is never taken again from a peer — the
+ * chain would otherwise hand it straight back — only from the panel. */
 
 'use strict';
 
@@ -48,6 +64,9 @@ const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 const AUTH_WINDOW_MS = 5 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const APPLY_TIMEOUT_MS = 40 * 60 * 1000;
+/* Word of the canary older than this (three peer checks) is no word. */
+const CANARY_FRESH_MS = 30 * 60 * 1000;
+const RELAY_ID = /^[0-9a-f]{64}$/;
 
 /* ---- the family check ------------------------------------------------------ */
 
@@ -95,17 +114,19 @@ function verifyUpdateAuth(header, { self, isMember, path: pathname, now = Date.n
    it for that relay; for it to travel along the family it must carry the
    operator key's signature over the version it is for, or one member could
    tell every other one to restart now. */
-const policyText = ({ version, mode, at }) => canonicalJson({ v: 1, version, mode, at: at || null });
+const policyText = ({ version, mode, at, canary, holdMin }) => (canary
+  ? canonicalJson({ v: 2, version, mode, at: at || null, canary, holdMin })
+  : canonicalJson({ v: 1, version, mode, at: at || null }));
 
-function signPolicy({ version, mode, at }, privateKeyPem) {
-  return crypto.sign('sha256', Buffer.from(policyText({ version, mode, at }), 'utf8'), privateKeyPem).toString('base64');
+function signPolicy({ version, mode, at, canary, holdMin }, privateKeyPem) {
+  return crypto.sign('sha256', Buffer.from(policyText({ version, mode, at, canary, holdMin }), 'utf8'), privateKeyPem).toString('base64');
 }
 
 function policySigned(policy, version, operatorKey) {
   if (!policy?.sig || !VERSION.test(String(version || ''))) return false;
   try {
     const key = crypto.createPublicKey({ key: Buffer.from(String(operatorKey || ''), 'base64'), format: 'der', type: 'spki' });
-    return crypto.verify('sha256', Buffer.from(policyText({ version, mode: policy.mode, at: policy.at }), 'utf8'), key, Buffer.from(String(policy.sig), 'base64'));
+    return crypto.verify('sha256', Buffer.from(policyText({ version, mode: policy.mode, at: policy.at, canary: policy.canary, holdMin: policy.holdMin }), 'utf8'), key, Buffer.from(String(policy.sig), 'base64'));
   } catch (_error) {
     return false;
   }
@@ -114,10 +135,24 @@ function policySigned(policy, version, operatorKey) {
 function cleanPolicy(policy) {
   const mode = ['watch', 'schedule', 'now'].includes(policy?.mode) ? policy.mode : 'watch';
   const sig = typeof policy?.sig === 'string' && /^[A-Za-z0-9+/=]{40,200}$/.test(policy.sig) ? policy.sig : undefined;
-  if (mode !== 'schedule') return { mode, at: null, ...(sig ? { sig } : {}) };
+  /* A canary is a relay id; its hold, whole minutes from 5 to a day. */
+  const canary = RELAY_ID.test(String(policy?.canary || '')) ? policy.canary : undefined;
+  const hold = Math.round(Number(policy?.holdMin));
+  const staged = canary ? { canary, holdMin: Number.isFinite(hold) && hold > 0 ? Math.min(1440, Math.max(5, hold)) : 30 } : {};
+  if (mode !== 'schedule') return { mode, at: null, ...staged, ...(sig ? { sig } : {}) };
   /* The time as it was given, if it is a time: the signature is over it. */
   const at = Number.isFinite(Date.parse(String(policy?.at || ''))) ? String(policy.at) : null;
-  return at ? { mode, at, ...(sig ? { sig } : {}) } : { mode: 'watch', at: null };
+  return at ? { mode, at, ...staged, ...(sig ? { sig } : {}) } : { mode: 'watch', at: null };
+}
+
+/* What one relay says of the canary, cleaned: never more than it can mean. */
+function cleanCanary(word, now) {
+  if (!word || !RELAY_ID.test(String(word.id || '')) || !VERSION.test(String(word.version || ''))) return null;
+  const time = (value) => (Number.isFinite(Date.parse(String(value || ''))) ? new Date(Math.min(now, Date.parse(value))).toISOString() : null);
+  return {
+    id: word.id, version: word.version, healthyAt: time(word.healthyAt),
+    reverted: VERSION.test(String(word.reverted || '')) ? word.reverted : null, seenAt: time(word.seenAt),
+  };
 }
 
 function percentile(values, share) {
@@ -156,35 +191,74 @@ function createRelayUpdates({
   const read = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_error) { return fallback; } };
   let state = {
     staged: null, available: null, policy: { mode: 'watch', at: null }, phase: 'idle',
-    notifiedAt: null, applyingSince: null, lastResult: null, checkedPeersAt: null, ...read(stateFile, {}),
+    notifiedAt: null, applyingSince: null, lastResult: null, checkedPeersAt: null, refused: [], canary: null, ...read(stateFile, {}),
   };
+  if (!Array.isArray(state.refused)) state.refused = [];
+  const refusedHere = (version) => state.refused.includes(version);
   let activity = read(activityFile, []);
   let busy = false;
+  /* A temporary name of this process's own: two relays on one folder (a test
+     harness) each renamed the other's file away and died on the rename. */
   const save = () => {
-    fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(state, null, 2));
-    fs.renameSync(`${stateFile}.tmp`, stateFile);
+    const tmp = `${stateFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, stateFile);
   };
   const fileFor = (version) => path.join(dir, `p00rija-update-${version}.tar`);
 
-  /* What came of an apply, read once after the restart. */
+  /* Why the apply step gave up, in its own words: the last line it marked
+     as a failure. */
+  function applyWhy() {
+    try {
+      const lines = fs.readFileSync(path.join(dir, 'apply.log'), 'utf8').split('\n').filter((line) => line.startsWith('✗'));
+      return lines.length ? lines[lines.length - 1].replace(/^✗\s*/, '').slice(0, 160) : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  /* What came of an apply, from the apply step's word (result.json), which
+     it writes only after watching the new relay — so the relay that comes up
+     waits for it. Read once. */
   function settle() {
     const result = read(resultFile, null);
     const running = currentVersion();
-    if (state.staged && compareVersions(state.staged.version, running) <= 0) {
-      state.lastResult = { ok: true, version: state.staged.version, at: result?.at || new Date(now()).toISOString() };
-      tell({ kind: 'done', version: state.staged.version });
+    const staged = state.staged;
+    const word = result && staged && result.version === staged.version ? result : null;
+    const at = () => word?.at || new Date(now()).toISOString();
+    const done = () => {
+      state.lastResult = { ok: true, version: staged.version, at: at() };
+      tell({ kind: 'done', version: staged.version });
       state.staged = null;
       state.phase = 'idle';
       state.notifiedAt = null;
       state.applyingSince = null;
-    } else if (state.phase === 'applying' && result && Number(result.code) !== 0 && result.version === state.staged?.version) {
-      state.lastResult = { ok: false, version: result.version, code: Number(result.code), at: result.at };
+    };
+    const failed = (reason, extra = {}) => {
+      state.lastResult = { ok: false, version: staged.version, reason, at: at(), ...extra };
       state.phase = 'failed';
-      tell({ kind: 'failed', version: result.version, reason: `exit ${Number(result.code)}` });
-    } else if (state.phase === 'applying' && now() - Date.parse(state.applyingSince || 0) > APPLY_TIMEOUT_MS) {
-      state.lastResult = { ok: false, version: state.staged?.version, reason: 'timeout', at: new Date(now()).toISOString() };
-      state.phase = 'failed';
-      tell({ kind: 'failed', version: state.staged?.version, reason: 'timeout' });
+      tell({ kind: 'failed', version: staged.version, reason, ...(extra.detail ? { detail: extra.detail } : {}) });
+    };
+    if (staged && state.phase === 'applying') {
+      if (word) {
+        const code = Number(word.code);
+        if (code === 0 && compareVersions(staged.version, running) <= 0) done();
+        else if (code === 3) {
+          const why = applyWhy();
+          state.lastResult = { ok: false, reverted: true, version: staged.version, code, reason: why || 'unhealthy', at: at() };
+          state.phase = 'reverted';
+          state.refused = [...state.refused.filter((version) => version !== staged.version), staged.version].slice(-10);
+          tell({ kind: 'reverted', version: staged.version, reason: why });
+        } else if (code === 4) failed('revert-failed', { code, detail: applyWhy() });
+        else if (code === 0) failed('still-old', { code });
+        else failed(applyWhy() || `exit ${code}`, { code });
+      } else if (now() - Date.parse(state.applyingSince || 0) > APPLY_TIMEOUT_MS) {
+        if (compareVersions(staged.version, running) <= 0) done();
+        else failed('timeout');
+      }
+    } else if (staged && compareVersions(staged.version, running) <= 0) {
+      /* Brought by other means (a deploy): done all the same. */
+      done();
     }
     if (result) { try { fs.renameSync(resultFile, `${resultFile}.seen`); } catch (_error) { /* gone */ } }
   }
@@ -208,6 +282,11 @@ function createRelayUpdates({
     const newest = state.staged && compareVersions(state.staged.version, currentVersion()) > 0 ? state.staged.version : currentVersion();
     const drop = () => { try { fs.unlinkSync(file); } catch (_error) { /* gone */ } };
     if (compareVersions(version, currentVersion()) <= 0) { drop(); return { ok: false, reason: 'not-newer', version }; }
+    if (refusedHere(version)) {
+      if (!trusted) { drop(); return { ok: false, reason: 'put-back-here', version }; }
+      /* The operator hands it over again, on purpose. */
+      state.refused = state.refused.filter((refused) => refused !== version);
+    }
     if (state.staged && compareVersions(version, newest) < 0) { drop(); return { ok: false, reason: 'older-than-staged', version }; }
     const target = fileFor(version);
     if (path.resolve(file) !== target) fs.renameSync(file, target);
@@ -242,33 +321,83 @@ function createRelayUpdates({
     return { ok: true, version };
   }
 
+  /* What this relay says of the canary: of itself when it is the canary of
+     its time, otherwise the freshest it heard. */
+  function canaryWord() {
+    if (state.policy?.canary && state.policy.canary === self.id) {
+      const last = state.lastResult;
+      return {
+        id: self.id, version: currentVersion(),
+        healthyAt: last?.ok && last.version === currentVersion() ? last.at : null,
+        reverted: state.refused.length ? state.refused[state.refused.length - 1] : null,
+        seenAt: new Date(now()).toISOString(),
+      };
+    }
+    return state.canary;
+  }
+
+  /* The freshest word of the canary among the offers; a put back stands. */
+  function learnCanary(offers) {
+    const id = state.policy?.canary;
+    if (!id || id === self.id) return;
+    for (const { offer: theirs } of offers) {
+      const word = cleanCanary(theirs?.canary, now());
+      if (!word || word.id !== id || !word.seenAt) continue;
+      const known = state.canary?.id === id ? state.canary : null;
+      if (!known || Date.parse(word.seenAt) > Date.parse(known.seenAt || 0)) state.canary = { ...word, reverted: word.reverted || (known?.reverted === word.version ? null : known?.reverted) || null };
+      else if (word.reverted && !known.reverted) state.canary = { ...known, reverted: word.reverted };
+    }
+  }
+
+  /* Whether the canary lets this relay go: go, wait, or held. */
+  function canaryGate(at) {
+    const policy = state.policy || {};
+    if (!policy.canary || policy.canary === self.id || !state.staged) return 'go';
+    const word = state.canary?.id === policy.canary ? state.canary : null;
+    if (!word) return 'wait';
+    if (word.reverted === state.staged.version) return 'held';
+    const fresh = word.seenAt && at - Date.parse(word.seenAt) <= CANARY_FRESH_MS;
+    const held = word.healthyAt && at - Date.parse(word.healthyAt) >= (policy.holdMin || 30) * 60000;
+    return word.version === state.staged.version && fresh && held ? 'go' : 'wait';
+  }
+
   function status() {
     return {
       current: currentVersion(), phase: state.phase, staged: state.staged && { ...state.staged, file: path.basename(state.staged.file) },
       available: state.available && { version: state.available.version, size: state.available.size, sha256: state.available.sha256 },
       policy: state.policy, notifiedAt: state.notifiedAt, applyingSince: state.applyingSince, lastResult: state.lastResult,
-      online: onlineCount(), quietLevel: quietLevel(), checkedPeersAt: state.checkedPeersAt,
+      online: onlineCount(), quietLevel: quietLevel(), checkedPeersAt: state.checkedPeersAt, refused: state.refused, canary: canaryWord(),
     };
   }
 
   function offer() {
     return {
       id: self.id, publicKey: self.publicKey, version: currentVersion(),
-      available: state.available && fs.existsSync(state.available.file) ? { version: state.available.version, size: state.available.size, sha256: state.available.sha256 } : null,
-      /* Only a time the operator signed travels. */
-      policy: state.staged && state.policy?.sig && policySigned(state.policy, state.staged.version, operatorKey()) ? state.policy : null,
+      /* Not a version this relay put back: it would hand on what failed here. */
+      available: state.available && !refusedHere(state.available.version) && fs.existsSync(state.available.file) ? { version: state.available.version, size: state.available.size, sha256: state.available.sha256 } : null,
+      ...(state.refused.length ? { reverted: state.refused[state.refused.length - 1] } : {}),
+      ...(canaryWord() ? { canary: canaryWord() } : {}),
+      /* Only a time the operator signed travels, and only with the package
+         it was signed for — after this relay applied it too, or a relay that
+         takes the package from here (from the canary, say) would not wait. */
+      policy: state.available && state.policy?.sig && policySigned(state.policy, state.available.version, operatorKey()) ? state.policy : null,
     };
   }
 
   function packageFile(version) {
-    if (!VERSION.test(String(version || '')) || state.available?.version !== version) return null;
+    if (!VERSION.test(String(version || '')) || state.available?.version !== version || refusedHere(version)) return null;
     return fs.existsSync(state.available.file) ? state.available.file : null;
   }
 
   async function setPolicy(policy) {
     state.policy = cleanPolicy(policy);
     if (state.policy.sig && !policySigned(state.policy, state.staged?.version, operatorKey())) delete state.policy.sig;
-    if (state.phase === 'failed' && state.staged) state.phase = 'staged';
+    /* The operator's word to try again. */
+    if (['waiting', 'held'].includes(state.phase) && state.staged) state.phase = 'staged';
+    if (['failed', 'reverted'].includes(state.phase) && state.staged) {
+      state.phase = 'staged';
+      state.refused = state.refused.filter((version) => version !== state.staged.version);
+    }
     state.notifiedAt = null;
     save();
     return { ok: true, policy: state.policy };
@@ -295,13 +424,16 @@ function createRelayUpdates({
           try {
             const answer = await fetchJson(`${origin.replace(/\/+$/, '')}/p00rija-update/offer`);
             const theirs = answer?.json;
-            if (!answer?.ok || !theirs || theirs.id !== peer.id || !VERSION.test(String(theirs.available?.version || ''))) continue;
+            if (!answer?.ok || !theirs || theirs.id !== peer.id) continue;
             offers.push({ peer, origin, offer: theirs });
             break;
           } catch (_error) { /* the next origin */ }
         }
       }
-      const newer = offers.filter(({ offer: theirs }) => compareVersions(theirs.available.version, best.version) > 0)
+      learnCanary(offers);
+      save();
+      const newer = offers.filter(({ offer: theirs }) => VERSION.test(String(theirs.available?.version || ''))
+        && compareVersions(theirs.available.version, best.version) > 0 && !refusedHere(theirs.available.version))
         .sort((x, y) => compareVersions(y.offer.available.version, x.offer.available.version));
       for (const { peer, origin, offer: theirs } of newer) {
         const version = theirs.available.version;
@@ -361,9 +493,21 @@ function createRelayUpdates({
   async function tick() {
     settle();
     const at = now();
-    if (!state.staged || !['staged', 'notifying'].includes(state.phase)) { save(); return status(); }
+    if (!state.staged || !['staged', 'notifying', 'waiting', 'held'].includes(state.phase)) { save(); return status(); }
     if (compareVersions(state.staged.version, currentVersion()) <= 0) { settle(); save(); return status(); }
-    if (state.phase === 'staged') {
+    if (['staged', 'waiting', 'held'].includes(state.phase)) {
+      const gate = canaryGate(at);
+      if (gate !== 'go') {
+        const phase = gate === 'held' ? 'held' : 'waiting';
+        if (state.phase !== phase) {
+          state.phase = phase;
+          save();
+          log(`update: ${state.staged.version} ${phase === 'held' ? 'held: the canary put it back' : 'waits for the canary'}`);
+          if (phase === 'held') tell({ kind: 'held', version: state.staged.version });
+        }
+        return status();
+      }
+      if (state.phase !== 'staged') { state.phase = 'staged'; save(); }
       if (!due(at)) return status();
       if (onlineCount() > 0) {
         state.phase = 'notifying';

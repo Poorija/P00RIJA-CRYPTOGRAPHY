@@ -29,7 +29,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { startPanel, sleep, ROOT } from './_panel-run.mjs';
+import { startPanel, sleep, ROOT, PASSWORD } from './_panel-run.mjs';
 
 const require = createRequire(import.meta.url);
 const pkg = require(path.join(ROOT, 'scripts/lib/update-package.js'));
@@ -155,11 +155,64 @@ exit 0
   const held = signer({ mode: 'now' }, VERSION);
   const foreign = signer({ mode: 'now' }, '9.99.99');
   check('a time is signed only for a version this panel holds the package of', policySigned(held, VERSION, operatorSpki) && !foreign.sig, JSON.stringify(foreign));
+  /* A canary is picked by server name and signed in as that server's verified relay id, with its hold. */
+  const signer2 = updatesLib.policySignerFor({ packageExists: (version) => version === VERSION, operatorKey: () => ({ privateKey: operatorPem, publicKey: operatorSpki }), relayIdOf: (name) => ({ a: 'a'.repeat(64), b: '' }[name] || '') });
+  const canaried = signer2({ mode: 'now', canary: 'a', holdMin: 45 }, VERSION);
+  check('a canary picked by name is signed into the time as its relay id, with its hold', canaried.canary === 'a'.repeat(64) && canaried.holdMin === 45 && policySigned(canaried, VERSION, operatorSpki), JSON.stringify(canaried));
+  let refusedCanary = '';
+  try { signer2({ mode: 'now', canary: 'b' }, VERSION); } catch (error) { refusedCanary = error.message; }
+  check('a canary that has not shown a verified relay identity is refused', /identity/.test(refusedCanary), refusedCanary);
+  const outside = await panel.request('/api/updates/send', { method: 'POST', body: { version: VERSION, servers: ['a'], policy: { mode: 'now', canary: 'zz' }, code: panel.code() }, cookie });
+  check('and the canary must be one of the servers it is sent to', outside.status === 400 && outside.json?.reason === 'canary-not-chosen', `${outside.status} ${JSON.stringify(outside.json)}`);
   /* And only for servers this panel sent that version to itself. */
   const notSent = await panel.request('/api/updates/policy', { method: 'POST', body: { servers: ['a'], version: '9.98.6', policy: { mode: 'now' }, code: panel.code() }, cookie });
   const sentRecord = JSON.parse(fs.readFileSync(path.join(panel.dirs.state, 'updates', 'sent.json'), 'utf8'));
   check('the panel remembers which version it sent to which server', sentRecord[VERSION]?.includes('a') && !sentRecord['9.98.6'], JSON.stringify(sentRecord));
   check('and a time for a version it did not send there is not signed', notSent.status === 200, String(notSent.status));
+  /* The send form in a browser: the canary and its hold are there to pick. */
+  {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${panel.port}/`);
+      await page.fill('#loginUser', 'op');
+      await page.fill('#loginPassword', PASSWORD);
+      await page.fill('#loginCode', panel.code());
+      await page.click('#loginButton');
+      await page.waitForSelector('#appView:not([hidden])', { timeout: 10000 });
+      await page.click('[data-tab="ops"]');
+      await page.click('[data-subtab="ops"][data-subtab-key="updates"]');
+      await page.waitForSelector(`[data-upd-send="${VERSION}"]`, { timeout: 15000 });
+      await page.click(`[data-upd-send="${VERSION}"]`);
+      await page.waitForSelector('#updCanary', { timeout: 5000 });
+      const form = await page.evaluate(() => ({
+        canaries: [...document.querySelectorAll('#updCanary option')].map((option) => option.value),
+        hold: document.querySelector('#updHold')?.value,
+        help: document.querySelector('#dialog')?.textContent || '',
+      }));
+      check('the send form offers no canary or any server as the canary, with a 30-minute hold', JSON.stringify(form.canaries) === JSON.stringify(['', 'a']) && form.hold === '30', JSON.stringify(form).slice(0, 200));
+      await page.selectOption('#updCanary', 'a');
+      await page.uncheck('[data-upd-target="a"]');
+      await page.click('#updSendRun');
+      const said = await page.textContent('#updSendError');
+      check('and says so when nothing is chosen to send to', said.trim().length > 0, said);
+      /* Beside every server, the connect QR the app scans. */
+      await page.click('#dialogClose').catch(() => page.keyboard.press('Escape'));
+      await page.evaluate(() => { document.getElementById('dialog').hidden = true; });
+      await page.click('[data-tab="servers"]');
+      await page.waitForSelector('[data-qr-server="a"]', { timeout: 15000 });
+      await page.click('[data-qr-server="a"]');
+      await page.waitForSelector('.qr-box svg', { timeout: 10000 });
+      const qrText = await page.textContent('#qrCodeText');
+      check('a server’s QR button shows the connect code it draws', qrText.startsWith('P0R1|https://a.example:8585') && Boolean(await page.$('.qr-box svg')), qrText);
+      check('the page ran without a script error', errors.length === 0, errors.join(' | '));
+    } finally {
+      await browser.close();
+    }
+  }
   check('every change is in the audit log', /built an update package 9\.98\.5/.test(panel.audit()) && /send update 9\.98\.5 to a/.test(panel.audit()), panel.audit().split('\n').slice(-4).join(' | '));
 } catch (error) {
   check('the suite ran to the end', false, error?.stack?.split('\n').slice(0, 4).join(' ') || String(error));

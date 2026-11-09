@@ -9,7 +9,7 @@
  */
 
 const APP_VERSION = '2.26';
-const APP_VERSION_SEMVER = '2.98.90';
+const APP_VERSION_SEMVER = '2.98.92';
 /* Same-number patch rounds are invisible to the user otherwise — the About
    page prints the build tag so any device can say which round it is on.
  *
@@ -28,7 +28,7 @@ const APP_BUILD_TAG = (() => {
     const found = /[?&]v=\d+\.\d+\.\d+-([A-Za-z0-9._-]+)/.exec(src);
     if (found) return found[1];
   } catch (_error) { /* no document, or no currentScript */ }
-  return 'chat-v183';
+  return 'chat-v185';
 })();
 /* The About page prints the version. Reading it from here rather than from a
    literal in the markup is what keeps the two from drifting apart again —
@@ -1079,6 +1079,8 @@ linuxCallsNotice: 'به دلیل محدودیت لینوکس و پشتیبانی
 openPwaForCalls: 'باز کردن نسخهٔ PWA در مرورگر (برای تماس)',
 autoConnect: 'اتصال خودکار',
 crossRelayComm: 'ارتباط بین رله‌ها',
+useGuestRelays: 'رلهٔ مهمان از همین خانواده',
+useGuestRelaysHint: 'وقتی رلهٔ خانه در دسترس نیست، موقتاً از رلهٔ دیگری از همین خانواده استفاده شود. هویت و گفتگوها همان می‌ماند و برنامه خودش به خانه برمی‌گردد. تا اپراتور رله‌ای را میزبان مهمان نکرده، کاری نمی‌کند.',
 crossRelayCommHint: 'روشن: پیام، فایل و تماس (شخصی و گروهی) به مخاطبانی که روی رلهٔ دیگری هستند از مسیر رمزنگاری‌شدهٔ بین دو رله می‌رود و رلهٔ شما نمی‌بیند با چه کسی حرف می‌زنید. خاموش: همه‌چیز از رلهٔ خودتان می‌رود و رله می‌بیند با چه کسی ارتباط دارید (محتوا همیشه رمزنگاری‌شده می‌ماند).',
 videoCall: 'تماس تصویری',
 linkThisDevice: 'اتصال این دستگاه به حساب (با کد QR)',
@@ -2152,6 +2154,8 @@ linuxCallsNotice: 'Due to a Linux limitation — WebKitGTK\'s unstable WebRTC su
 openPwaForCalls: 'Open the PWA in your browser (for calls)',
 autoConnect: 'Auto Connect',
 crossRelayComm: 'Cross-relay communication',
+useGuestRelays: 'Guest relay of the same family',
+useGuestRelaysHint: 'Use another relay of the family temporarily when my home relay is unreachable. Your identity and conversations stay the same, and the app goes home by itself. Does nothing until the operator lets a relay take guests.',
 crossRelayCommHint: 'On: messages, files and calls (1:1 and group) to contacts on another relay go through the encrypted route between the two relays, and your relay cannot see who you are talking to. Off: everything goes through your own relay, which can then see who you communicate with (contents are always encrypted).',
 videoCall: 'Video Call',
 linkThisDevice: 'Link this device to an account (QR code)',
@@ -6651,7 +6655,7 @@ document.addEventListener('visibilitychange', () => {
 if (!document.hidden) checkForUpdate();
 });
 navigator.serviceWorker.addEventListener('controllerchange', () => {
-const reloadKey = 'poorija-sw-reload-2.98.90-chat-v183';
+const reloadKey = 'poorija-sw-reload-2.98.92-chat-v185';
 if (pwaReloadedForUpdate || sessionStorage.getItem(reloadKey) === '1') return;
 pwaReloadedForUpdate = true;
 sessionStorage.setItem(reloadKey, '1');
@@ -6664,7 +6668,7 @@ window.addEventListener('load', () => {
    URL had stopped changing, and tools/check-versions.cjs could not see it
    because it only asked whether this file mentions the tag anywhere, which
    the reload key above already satisfied. It is checked by itself now. */
-navigator.serviceWorker.register('./sw.js?v=2.98.90-chat-v183', { scope: './' }).then((registration) => {
+navigator.serviceWorker.register('./sw.js?v=2.98.92-chat-v185', { scope: './' }).then((registration) => {
 state.pwa.swReady = true;
 registration.update?.();
 setInstallButtonsVisibility();

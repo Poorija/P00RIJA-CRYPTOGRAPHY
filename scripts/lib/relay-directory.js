@@ -56,7 +56,10 @@ function wellFormed(doc) {
   /* A cluster is a name; inside addresses are where cluster mates reach a
      relay when the wider network does not. */
   if (!body.relays.every((relay) => (relay.cluster === undefined || (typeof relay.cluster === 'string' && relay.cluster.length <= 40))
-    && (relay.inside === undefined || (Array.isArray(relay.inside) && relay.inside.length <= 4 && relay.inside.every(webOrigin))))) return false;
+    && (relay.inside === undefined || (Array.isArray(relay.inside) && relay.inside.length <= 4 && relay.inside.every(webOrigin)))
+    /* Guest mode: whether this relay takes in people whose home is another
+       relay of the family. Present only when true. */
+    && (relay.guests === undefined || typeof relay.guests === 'boolean'))) return false;
   /* Admin keys, when listed: each id is the hash of its key. */
   if (body.admins !== undefined && !(Array.isArray(body.admins) && body.admins.length <= 32 && body.admins.every((admin) => (
     admin && typeof admin.key === 'string' && typeof admin.name === 'string' && admin.name.length <= 64 && relayIdFor(admin.key) === admin.id
@@ -134,4 +137,50 @@ function verifyTlsFor({ origin, familyMember, verifyTls = true }) {
   return !(familyMember && net.isIP(host));
 }
 
-module.exports = { canonicalJson, operatorIdFor, signDirectory, verifyDirectory, planChanges, verifyTlsFor };
+/* ---- a new operator key -------------------------------------------------
+ *
+ * When the operator replaces the key, the old key signs a handover naming the
+ * new one: { v: 1, from: { id, key }, to: { id, key }, at }, the same
+ * canonical form as a directory. An app that trusts the old key follows it to
+ * the new one without asking anybody; without it, a directory signed by
+ * another key is a different operator until the person says otherwise. */
+function handoverText({ from, to, at }) {
+  return canonicalJson({ v: 1, from: { id: from.id, key: from.key }, to: { id: to.id, key: to.key }, at });
+}
+
+function signHandover({ from, to, at = new Date().toISOString() }, privateKey) {
+  const sig = crypto.sign('sha256', Buffer.from(handoverText({ from, to, at }), 'utf8'), privateKey).toString('base64');
+  return { v: 1, from: { id: from.id, key: from.key }, to: { id: to.id, key: to.key }, at, sig };
+}
+
+function verifyHandover(handover) {
+  const party = (value) => value && typeof value.key === 'string' && value.key.length <= 400 && HEX64.test(String(value.id || ''));
+  if (!handover || handover.v !== 1 || !party(handover.from) || !party(handover.to) || typeof handover.at !== 'string'
+    || handover.at.length > 40 || typeof handover.sig !== 'string' || handover.sig.length > 200) return { ok: false, reason: 'malformed' };
+  try {
+    if (operatorIdFor(handover.from.key) !== handover.from.id || operatorIdFor(handover.to.key) !== handover.to.id) return { ok: false, reason: 'key-not-id' };
+    const publicKey = crypto.createPublicKey({ key: Buffer.from(handover.from.key, 'base64'), format: 'der', type: 'spki' });
+    const holds = crypto.verify('sha256', Buffer.from(handoverText(handover), 'utf8'), publicKey, Buffer.from(handover.sig, 'base64'));
+    return holds ? { ok: true } : { ok: false, reason: 'bad-signature' };
+  } catch (_error) {
+    return { ok: false, reason: 'bad-signature' };
+  }
+}
+
+/* From one key, as far as valid handovers lead: the key at the end, or null
+   when none leaves it. A loop ends where it would come round again. */
+function followHandovers(handovers, fromId) {
+  const valid = (Array.isArray(handovers) ? handovers : []).filter((handover) => verifyHandover(handover).ok);
+  const seen = new Set([fromId]);
+  let end = null;
+  let at = fromId;
+  for (;;) {
+    const next = valid.find((handover) => handover.from.id === at && !seen.has(handover.to.id));
+    if (!next) return end;
+    end = { id: next.to.id, key: next.to.key };
+    seen.add(next.to.id);
+    at = next.to.id;
+  }
+}
+
+module.exports = { canonicalJson, operatorIdFor, signDirectory, verifyDirectory, planChanges, verifyTlsFor, signHandover, verifyHandover, followHandovers };

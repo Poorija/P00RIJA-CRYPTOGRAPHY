@@ -137,6 +137,9 @@ export async function startTwoStacks({ turnSecret = 'b'.repeat(64), front = fals
       CHAT_SIBLING_DIR: path.join(side.dir, 'siblings'),
       CHAT_ROSTER_DIR: path.join(side.dir, 'rosters'),
       CHAT_DIRECTORY_PATH: path.join(side.dir, 'relay-directory.json'),
+      /* Each relay its own updates folder: two starting at once wrote one
+         state file and one of them died on the rename. */
+      CHAT_UPDATES_DIR: path.join(side.dir, 'updates'),
       CHAT_TRANSIT_PEERS_STORE: path.join(side.dir, 'transit-peers.json'),
       CHAT_PUSH_STORE_PATH: path.join(side.dir, 'push.json'),
       CHAT_VAPID_STORE_PATH: path.join(side.dir, 'vapid.json'),

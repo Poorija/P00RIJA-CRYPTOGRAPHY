@@ -23,7 +23,7 @@ const webpush = require('web-push');
 const { pushKindFor, pushBodyFor, pushTagFor, normalizePushLang, pushSendOptions } = require('./lib/push-wording.js');
 const { loadOrCreateRelayIdentity, publicRelayIdentity, formatRelayId, relayPqPrivateKey, relayIdFor } = require('./lib/relay-identity.js');
 const { createRelayPeers, parseTransitPeers, makeIdentityFetcher } = require('./lib/relay-peers.js');
-const { openTransit, transitFacts } = require('./lib/relay-transit.js');
+const { openTransit, transitFacts, sealTransit } = require('./lib/relay-transit.js');
 /* The 3.34 dashboard sheet the relay serves at /Monitor_Server — HTML lives
    in its own module so the server file stays about the server. */
 const { monitorDashboardHtml } = require('./lib/monitor-dashboard.js');
@@ -31,7 +31,7 @@ const { linkPreview } = require('./lib/link-preview.js');
 const telegramStickers = require('./lib/telegram-stickers.js');
 const { createFrontDoor, parseFronts, parseDoors } = require('./lib/relay-front.js');
 const { relayPrivateKey } = require('./lib/relay-identity.js');
-const { verifyDirectory, planChanges, verifyTlsFor } = require('./lib/relay-directory.js');
+const { verifyDirectory, planChanges, verifyTlsFor, operatorIdFor, verifyHandover, followHandovers } = require('./lib/relay-directory.js');
 const partnerRules = require('./lib/relay-partners.js');
 const signatureRules = require('./lib/operator-signature.js');
 const {
@@ -40,6 +40,7 @@ const {
 const relayReport = require('./lib/relay-report.js');
 const telegramConfig = require('./lib/telegram-settings.js');
 const { textFor } = require('./lib/telegram-text.js');
+const guestRules = require('./lib/relay-guests.js');
 const { WebSocketServer, WebSocket } = require('ws');
 
 // Simple .env loader for native runs. CHAT_ENV_FILE names another file, or
@@ -215,9 +216,9 @@ const relayPeers = createRelayPeers({
     if (frontDoor?.onFrame(payload, link)) return;
     handleTransitFrame(payload, link);
   },
-  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); partnersLinkUp(link); shareFamilyLinks(); },
+  onLinkUp: (link) => { frontDoor?.linkUp(link); offerDirectoryTo(link); partnersLinkUp(link); shareFamilyLinks(); sendRosterCopiesTo(link); guestHomeLinkChanged(link, true); },
   /* Function declarations below are hoisted, so this resolves at call time. */
-  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); partnersLinkDown(link); familyLinksFrom.delete(link?.peerId); shareFamilyLinks(); },
+  onLinkDown: (link) => { frontDoor?.linkDown(link); failTransitWaitsFor(link?.peerId); partnersLinkDown(link); familyLinksFrom.delete(link?.peerId); shareFamilyLinks(); guestHomeLinkChanged(link, false); },
 });
 /* CHAT_FRONTS on the relay people can reach: `<relay id>@<public origin>` for
    each relay it answers for (nginx hands that origin's connections to
@@ -919,7 +920,9 @@ app.use((req, res, next) => {
   };
   const allowedLocal = isPrivateIp(origin);
   const allowedTauri = /^https?:\/\/tauri\.localhost(?::\d+)?$/i.test(origin || '') || /^tauri:\/\//i.test(origin || '');
-  const allowedConfigured = origin && ALLOWED_ORIGINS.includes(origin);
+  /* Every relay of the signed family is allowed too: an app opened from one
+     of them may be a guest on another (guest mode). */
+  const allowedConfigured = origin && (ALLOWED_ORIGINS.includes(origin) || familyOrigins().includes(origin));
   if (sameOrigin || allowedLocal || allowedTauri || allowedConfigured) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Vary', 'Origin');
@@ -4231,6 +4234,41 @@ app.get('/Monitor_Server', (req, res) => {
   `);
 });
 
+/* A test-only stand-in for how full this relay is, so the suites can show the
+   apps a busy relay; ignored unless test hooks are on. */
+const TEST_SATURATION = (() => {
+  if (process.env.CHAT_TEST_HOOKS !== '1') return null;
+  const value = Number(process.env.CHAT_TEST_SATURATION);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+})();
+
+/* A block of bytes to time, for an app choosing the fastest relay of its family
+   (js/chat/63-relay-choice.js). Public, uncached, says nothing, and limited to a
+   few a minute per address so it cannot be used to make this relay send much. */
+const RELAY_SPEED_DEFAULT = 262144;
+const RELAY_SPEED_MAX = 524288;
+const RELAY_SPEED_PER_MINUTE = 6;
+const relaySpeedAsks = new Map();
+const relaySpeedBlock = crypto.randomBytes(RELAY_SPEED_MAX);
+app.get('/relay-speed', (req, res) => {
+  const ip = requestIp(req) || 'unknown';
+  const now = Date.now();
+  const seen = relaySpeedAsks.get(ip);
+  if (!seen || now - seen.since > 60000) relaySpeedAsks.set(ip, { since: now, count: 1 });
+  else seen.count += 1;
+  if (relaySpeedAsks.size > 20000) relaySpeedAsks.delete(relaySpeedAsks.keys().next().value);
+  if ((relaySpeedAsks.get(ip)?.count || 0) > RELAY_SPEED_PER_MINUTE) {
+    res.status(429).json({ ok: false, reason: 'slow-down' });
+    return;
+  }
+  const asked = Math.floor(Number(req.query?.bytes) || RELAY_SPEED_DEFAULT);
+  const bytes = Math.max(1, Math.min(RELAY_SPEED_MAX, asked));
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Length', String(bytes));
+  res.end(relaySpeedBlock.subarray(0, bytes));
+});
+
 app.get('/chat-health', (req, res) => {
   if (sendRestrictionResponse(req, res)) return;
   const publicUrls = publicRelayUrls(req);
@@ -4270,7 +4308,8 @@ app.get('/chat-health', (req, res) => {
       cpus: CAPACITY.cpuCount,
       memoryMb: CAPACITY.totalMemMb,
       sockets: { inUse: wsTotal, max: WS_MAX_TOTAL, maxPerAddress: WS_MAX_PER_IP },
-      saturation: WS_MAX_TOTAL > 0 ? Number((wsTotal / WS_MAX_TOTAL).toFixed(3)) : 0,
+      /* What the apps' choice of relay reads (js/chat/63-relay-choice.js). */
+      saturation: TEST_SATURATION !== null ? TEST_SATURATION : (WS_MAX_TOTAL > 0 ? Number((wsTotal / WS_MAX_TOTAL).toFixed(3)) : 0),
     },
     instance: INSTANCE_ID,
     uptimeSeconds: Math.round(process.uptime()),
@@ -5121,8 +5160,19 @@ const DIRECTORY_MIN_SERIAL = Math.max(
    manualIds: what CHAT_TRANSIT_PEERS or the dashboard named. */
 const directoryState = { doc: null, addedIds: new Set(), manualIds: new Set(TRANSIT_PEERS.map((peer) => peer.id)) };
 const directoryMembers = () => (directoryState.doc?.body.relays || []).map((relay) => relay.id).filter((id) => id !== relayIdentity.id);
+/* The web origins every relay of the family is reached at, public and inside. */
+function familyOrigins() {
+  const out = [];
+  for (const relay of directoryState.doc?.body?.relays || []) {
+    for (const value of [...(relay.origins || []), ...(relay.inside || [])]) {
+      try { const origin = new URL(String(value)).origin; if (!out.includes(origin)) out.push(origin); } catch (_error) { /* not an address */ }
+    }
+  }
+  return out;
+}
 
 function applyDirectory(doc) {
+  const takersBefore = new Set((directoryState.doc?.body?.relays || []).filter((relay) => relay.guests === true).map((relay) => relay.id));
   const plan = planChanges(doc.body, relayIdentity.id, directoryState.addedIds);
   const revoked = new Set(doc.body.revoked);
   for (const id of plan.drop) {
@@ -5136,6 +5186,10 @@ function applyDirectory(doc) {
     if (!directoryState.manualIds.has(id)) directoryState.addedIds.add(id);
   }
   directoryState.doc = doc;
+  /* A relay the list now says takes guests gets the rosters this one holds. */
+  for (const relay of doc.body.relays) {
+    if (relay.guests === true && !takersBefore.has(relay.id) && relay.id !== relayIdentity.id) sendRosterCopiesTo(relayPeers.linkFor(relay.id));
+  }
 }
 
 function offerDirectoryTo(link) {
@@ -5231,6 +5285,47 @@ app.get('/relay-directory', (req, res) => {
 app.post('/Monitor_Server/directory', authMiddleware, (req, res) => {
   const result = acceptDirectory(req.body, 'dashboard');
   res.status(result.ok ? 200 : 400).json(result);
+});
+
+/* ---- operator-key handovers (scripts/lib/relay-directory.js) --------------
+   The old key's word for the new one, kept for the apps: one that trusts the
+   old key follows it here instead of asking its user whether this is a
+   different operator. Only a handover that leads to this relay's own
+   operator key is kept, the last five. */
+/* Beside the directory: wherever a relay keeps its family, it keeps these. */
+const HANDOVER_PATH = process.env.CHAT_HANDOVER_PATH || path.join(path.dirname(DIRECTORY_PATH), 'operator-handovers.json');
+const HANDOVER_KEEP = 5;
+function readHandovers() {
+  try {
+    const list = JSON.parse(fs.readFileSync(HANDOVER_PATH, 'utf8'));
+    return Array.isArray(list) ? list.filter((handover) => verifyHandover(handover).ok).slice(-HANDOVER_KEEP) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+app.get('/operator-handover', (req, res) => {
+  setNoStoreHeaders(res);
+  res.json({ ok: true, handovers: readHandovers() });
+});
+app.post('/Monitor_Server/operator-handover', authMiddleware, (req, res) => {
+  const handover = req.body;
+  const verdict = verifyHandover(handover);
+  if (!verdict.ok) return res.status(400).json(verdict);
+  if (!OPERATOR_KEY) return res.status(400).json({ ok: false, reason: 'no-operator-key' });
+  const ownId = operatorIdFor(OPERATOR_KEY);
+  const held = readHandovers();
+  const leads = handover.to.id === ownId || followHandovers(held, handover.to.id)?.id === ownId;
+  if (!leads) return res.status(400).json({ ok: false, reason: 'not-this-operator' });
+  const kept = [...held.filter((entry) => entry.sig !== handover.sig), handover].slice(-HANDOVER_KEEP);
+  try {
+    fs.mkdirSync(path.dirname(HANDOVER_PATH), { recursive: true });
+    fs.writeFileSync(`${HANDOVER_PATH}.tmp`, JSON.stringify(kept, null, 2));
+    fs.renameSync(`${HANDOVER_PATH}.tmp`, HANDOVER_PATH);
+  } catch (error) {
+    return res.status(500).json({ ok: false, reason: 'not-saved', detail: error.message });
+  }
+  monitorLog(`operator handover ${handover.from.id.slice(0, 12)} → ${handover.to.id.slice(0, 12)} kept`);
+  return res.json({ ok: true, kept: kept.length });
 });
 
 /* ---- partners: other operators' families (scripts/lib/relay-partners.js) ----
@@ -6532,7 +6627,7 @@ const ANNOUNCE_ATTACHMENT_MAX_RECIPIENTS = 100;
  * is the whole point of the announce centre. So every fingerprint the relay
  * ever meets — connected, mailed-to, allowlisted, announced-at — is kept in
  * a small persistent file and reloaded at boot. */
-const KNOWN_IDENTITIES_PATH = path.join(defaultDataDir, 'known-identities.json');
+const KNOWN_IDENTITIES_PATH = process.env.CHAT_KNOWN_IDENTITIES_PATH || path.join(defaultDataDir, 'known-identities.json');
 const knownIdentities = new Set();
 function loadKnownIdentities() {
   try {
@@ -6603,6 +6698,643 @@ function noteKnownIdentity(fingerprint, { force = false } = {}) {
 }
 loadKnownIdentities();
 loadProvenIdentities();
+
+/* ---- guest mode (scripts/lib/relay-guests.js) ---------------------------------
+ *
+ * Someone whose home relay is another relay of this family, and unreachable
+ * from where they are, may stay here for a while as a guest: their mail
+ * reaches them here, but they are never a resident — this relay never claims
+ * them in a route answer, and never writes them down as living here. Only a
+ * relay whose own entry in the signed family list says `guests: true` takes
+ * guests at all, and never more than a share of its sockets. */
+const GUEST_SHARE = (() => {
+  const raw = process.env.CHAT_GUEST_SHARE;
+  const value = raw === undefined || raw === '' ? 0.3 : Number(raw);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.3;
+})();
+const GUEST_TTL_MS = Number(process.env.CHAT_GUEST_TTL_MS || 24 * 60 * 60 * 1000);
+const GUEST_FORWARD_MS = Number(process.env.CHAT_GUEST_FORWARD_MS || 7 * 24 * 60 * 60 * 1000);
+const guestBook = guestRules.createGuestBook({
+  file: process.env.CHAT_GUEST_BOOK_PATH || path.join(path.dirname(OFFLINE_STORE_PATH), 'guests.json'),
+  ttlMs: GUEST_TTL_MS,
+  forwardMs: GUEST_FORWARD_MS,
+  saveDelayMs: 2000,
+});
+/* A device without an id (an old build) is told apart by its socket. */
+const guestDeviceOf = (record) => String(record.deviceId || record.clientId || '').slice(0, 128);
+function liveGuestSockets() {
+  let count = 0;
+  for (const record of presence.values()) if (record.guest && record.ws?.readyState === WebSocket.OPEN) count += 1;
+  return count;
+}
+/* Whether someone is connected here as a resident: a guest's socket is up,
+   but that is not somebody living here. */
+function residentSocketUp(fingerprint) {
+  const best = findOpenPresenceByFingerprint(fingerprint);
+  if (!best) return false;
+  if (!best.guest) return true;
+  return Array.from(verifiedByFingerprint.get(fingerprint) || []).some((record) => !record.guest && record.ws?.readyState === WebSocket.OPEN);
+}
+function familyRelayName(id) {
+  return String(directoryState.doc?.body?.relays?.find((relay) => relay.id === id)?.name || String(id || '').slice(0, 12));
+}
+/* One word to the operator per outage: the first guest from a home after six
+   quiet hours. */
+const guestAlertAt = new Map();
+function noteGuestAlert(homeId) {
+  const last = guestAlertAt.get(homeId) || 0;
+  guestAlertAt.set(homeId, Date.now());
+  if (Date.now() - last < 6 * 60 * 60 * 1000) return;
+  const T = botText();
+  queueReport({ level: 'info', category: 'peer', title: T.guests.title, body: T.guests.started(familyRelayName(relayIdentity.id), familyRelayName(homeId)) });
+  flushAlerts().catch(() => {});
+}
+/* New guest identities one address may add in ten minutes: a household or a
+   carrier's shared address is many people, an endless stream of fresh keys
+   is not. */
+const GUEST_NEW_PER_IP = Math.max(1, Number(process.env.CHAT_GUEST_NEW_PER_IP_10M || 20));
+/* A guest with no socket here for this long may make room in a full book. */
+const GUEST_IDLE_MS = Number(process.env.CHAT_GUEST_IDLE_MS || 10 * 60 * 1000);
+const guestNewcomers = new Map();
+function guestNewcomerLimited(ip) {
+  const now = Date.now();
+  const seen = guestNewcomers.get(ip);
+  if (!seen || now - seen.since > 10 * 60 * 1000) return false;
+  return seen.count >= GUEST_NEW_PER_IP;
+}
+function noteGuestNewcomer(ip) {
+  const now = Date.now();
+  const seen = guestNewcomers.get(ip);
+  if (!seen || now - seen.since > 10 * 60 * 1000) guestNewcomers.set(ip, { since: now, count: 1 });
+  else seen.count += 1;
+  if (guestNewcomers.size > 50000) guestNewcomers.delete(guestNewcomers.keys().next().value);
+}
+function guestSocketLive(fingerprint, deviceId) {
+  return Array.from(verifiedByFingerprint.get(fingerprint) || []).some((record) => record.guest && guestDeviceOf(record) === deviceId && record.ws?.readyState === WebSocket.OPEN);
+}
+/* Said once, then the socket goes: staying on as an ordinary user would make
+   this relay claim them as a resident for ninety days. */
+function refuseGuest(record, reason) {
+  record.identityVerified = false;
+  record.guest = false;
+  safeSend(record.ws, { type: 'guest-refused', reason });
+  console.log(`[Guests] refused ${String(record.fingerprint || '').slice(0, 12)} from ${String(record.guestOf || '').slice(0, 12)}: ${reason}`);
+  setTimeout(() => {
+    try { if (record.ws?.readyState === WebSocket.OPEN) record.ws.close(4409, 'guest-refused'); } catch (_error) { /* gone */ }
+  }, 300).unref?.();
+  setTimeout(() => {
+    try { if (record.ws && record.ws.readyState !== WebSocket.CLOSED) record.ws.terminate(); } catch (_error) { /* gone */ }
+    presence.delete(record.clientId);
+    broadcastPeers();
+  }, 1500).unref?.();
+}
+/* A proven identity that asked to be a guest: taken in, or refused. Every
+   other reason is weighed first; only when the book being full is the one
+   thing in the way do idle guests make room. Every newcomer's attempt counts
+   against its address. */
+function admitGuest(record, view) {
+  const known = guestBook.devices(record.fingerprint).includes(guestDeviceOf(record));
+  const newcomerLimited = !known && guestNewcomerLimited(record.ip);
+  if (!known) noteGuestNewcomer(record.ip);
+  const facts = {
+    directory: directoryState.doc?.body || null,
+    selfId: relayIdentity.id,
+    guestOf: record.guestOf,
+    guestSockets: liveGuestSockets(),
+    wsMax: WS_MAX_TOTAL,
+    share: GUEST_SHARE,
+    deviceRevoked: guestViewRevokes(view, record.deviceId, provenDeviceKey(record)),
+    known,
+    newcomerLimited,
+  };
+  let reason = guestRules.guestRefusal({ ...facts, bookEntries: 0 });
+  if (!reason && !known) {
+    const room = guestRules.bookRoomFor(WS_MAX_TOTAL, GUEST_SHARE);
+    const held = guestBook.liveGuests().length;
+    if (room > 0 && held >= room) {
+      for (const ended of guestBook.evictStale({ olderThanMs: GUEST_IDLE_MS, connected: guestSocketLive, max: held - room + 1 })) {
+        onGuestStayEnded(ended.fp, ended.home);
+      }
+    }
+    reason = guestRules.guestRefusal({ ...facts, bookEntries: guestBook.liveGuests().length });
+  }
+  if (reason) {
+    refuseGuest(record, reason);
+    return false;
+  }
+  record.guest = true;
+  const entry = guestBook.admit({ fp: record.fingerprint, deviceId: guestDeviceOf(record), home: record.guestOf });
+  console.log(`[Guests] ${record.fingerprint.slice(0, 12)} is a guest from ${record.guestOf.slice(0, 12)}`);
+  safeSend(record.ws, { type: 'guest-ok', home: record.guestOf, until: entry.until });
+  noteGuestAlert(record.guestOf);
+  passGuestNotice(record);
+  sendGuestStatus(record);
+  announceGuestSibling(record.fingerprint);
+  return true;
+}
+/* The newest signed route statement each guest gave — fp, this relay, until,
+   nothing more — handed to whoever asks where they are: a sender believes a
+   guest route only on the person's own word that names this relay
+   (js/chat/40-route-finder.js). */
+const guestNotices = new Map();
+function guestNoticeFor(fingerprint) {
+  const notice = guestNotices.get(fingerprint);
+  if (!notice) return null;
+  if (!guestBook.isGuest(fingerprint) || Number(notice.statement?.until) <= Date.now()) { guestNotices.delete(fingerprint); return null; }
+  return notice;
+}
+/* What a guest is told about its home as this relay sees it: up when the
+   link to it stands, unknown otherwise — never "down", which this relay
+   cannot tell from "unreachable from here". */
+function sendGuestStatus(record) {
+  safeSend(record.ws, { type: 'guest-status', homeUp: relayPeers.linkFor(record.guestOf) ? true : null });
+}
+/* The guest's own signed notice, checked here and handed to its home: home
+   then treats this relay as where one of its people's devices is. Only a
+   notice about this socket, this home, and this relay counts. */
+function passGuestNotice(record) {
+  /* The smaller statement, for senders asking where this person is. */
+  const route = record.guestRoute;
+  if (route && route.statement.fp === record.fingerprint && route.statement.guest === relayIdentity.id
+    && guestRules.verifyIdentityStatement({ ...route, publicKeyData: record.publicKeyData }, { type: 'guest-route' }).ok) {
+    guestNotices.set(record.fingerprint, route);
+    if (guestNotices.size > 20000) guestNotices.delete(guestNotices.keys().next().value);
+    record.guestRouteSigned = route;
+  }
+  const notice = record.guestNotice;
+  if (!notice) return;
+  const verdict = guestRules.verifyIdentityStatement({ ...notice, publicKeyData: record.publicKeyData }, { type: 'guest-at' });
+  const s = notice.statement;
+  if (!verdict.ok || s.fp !== record.fingerprint || s.deviceId !== guestDeviceOf(record) || s.home !== record.guestOf || s.guest !== relayIdentity.id) {
+    console.log(`[Guests] notice from ${String(record.fingerprint).slice(0, 12)} not passed on: ${verdict.reason || 'not about this stay'}`);
+    return;
+  }
+  record.guestNoticeSigned = notice;
+  const link = relayPeers.linkFor(record.guestOf);
+  if (link) {
+    try { link.send({ kind: 'guest-notice', statement: notice.statement, sig: notice.sig, publicKeyData: record.publicKeyData }); } catch (_error) { /* the link went */ }
+  }
+}
+function liveGuestRecordsFrom(homeId) {
+  return Array.from(presence.values()).filter((record) => record.guest && record.guestOf === homeId && record.ws?.readyState === WebSocket.OPEN);
+}
+/* A link to some guests' home came up or went down. */
+function guestHomeLinkChanged(link, up) {
+  const homeId = link?.peerId;
+  if (!homeId) return;
+  if (up) retryPendingMoves(homeId);
+  for (const record of liveGuestRecordsFrom(homeId)) {
+    sendGuestStatus(record);
+    if (up && record.guestNoticeSigned) {
+      try { link.send({ kind: 'guest-notice', statement: record.guestNoticeSigned.statement, sig: record.guestNoticeSigned.sig, publicKeyData: record.publicKeyData }); } catch (_error) { /* the link went */ }
+    }
+  }
+}
+
+/* ---- home's side of a guest stay elsewhere ------------------------------------
+ *
+ * A home relay filtered for one person is up for everyone else, so senders
+ * keep sending to it. On that person's signed notice, handed on by the guest
+ * relay they reached, home sends a copy of their mail there — what waits, and
+ * what arrives — and keeps its own. It stops when the notice runs out, when
+ * the guest relay says the stay ended, or when the device proves itself here
+ * again; a notice signed before that moment is a replay and counts for
+ * nothing. */
+/* ---- one account on two guest relays -----------------------------------------
+ *
+ * Each device becomes a guest on its own, so two devices of one account can
+ * end up on two relays. A relay taking a guest tells the family a blinded
+ * index of the account; only a relay hosting that same account recognises
+ * it, and the two then copy new mail for it to each other — once: the copy
+ * carries where it came from and how far it has been forwarded. */
+const guestSiblingIndexes = new Map();
+function guestSiblingIndex(fingerprint) {
+  let index = guestSiblingIndexes.get(fingerprint);
+  if (!index) {
+    index = crypto.createHash('sha256').update(`poorija-guest-sibling|${fingerprint}`, 'utf8').digest('hex');
+    guestSiblingIndexes.set(fingerprint, index);
+    if (guestSiblingIndexes.size > 20000) guestSiblingIndexes.delete(guestSiblingIndexes.keys().next().value);
+  }
+  return index;
+}
+const guestSiblings = new Map();
+function noteGuestSibling(fingerprint, relayId, until) {
+  const held = guestSiblings.get(fingerprint) || new Map();
+  held.set(relayId, until);
+  guestSiblings.set(fingerprint, held);
+  if (guestSiblings.size > 20000) guestSiblings.delete(guestSiblings.keys().next().value);
+}
+function announceGuestSibling(fingerprint) {
+  const frame = { kind: 'guest-sibling', i: guestSiblingIndex(fingerprint), until: Date.now() + GUEST_TTL_MS };
+  for (const link of familyLinks()) {
+    try { link.send(frame); } catch (_error) { /* the link went */ }
+  }
+}
+/* A live guest socket of this account here that gave its own signed route
+   statement (fp, this relay, until — nothing else). */
+function guestNoticeHereFor(fingerprint) {
+  const record = Array.from(verifiedByFingerprint.get(fingerprint) || []).find((candidate) => candidate.guest && candidate.guestRouteSigned && candidate.ws?.readyState === WebSocket.OPEN);
+  return record ? { ...record.guestRouteSigned, publicKeyData: record.publicKeyData } : null;
+}
+/* The account's own word that it is a guest at that relay: the only thing
+   that makes that relay a sibling. A relay merely claiming to host the
+   account gets nothing, and a statement no newer than the stay there that
+   already ended counts for nothing. */
+const siblingFloorKey = (relayId) => `sibling:${relayId}`;
+function guestSiblingProofHolds(fingerprint, proof, relayId) {
+  const s = proof?.statement;
+  if (!s || s.fp !== fingerprint || s.guest !== relayId) return false;
+  if (!guestRules.verifyIdentityStatement({ statement: s, sig: proof.sig, publicKeyData: proof.publicKeyData }, { type: 'guest-route' }).ok) return false;
+  return Number(s.until) > guestBook.floorOf(fingerprint, siblingFloorKey(relayId));
+}
+/* Three steps over the family links: an index; from a relay that matches it,
+   its device's signed notice; back, this relay's device's notice. Each side
+   adds the other only on a notice that holds. */
+function receiveGuestSibling(payload, link) {
+  if (!directoryMembers().includes(link?.peerId)) return;
+  const index = String(payload?.i || '');
+  if (!/^[a-f0-9]{64}$/.test(index)) return;
+  const fingerprint = guestBook.liveGuests().map((entry) => entry.fp).find((fp) => guestSiblingIndex(fp) === index);
+  if (!fingerprint) return;
+  const mine = guestNoticeHereFor(fingerprint);
+  if (!mine) return;
+  if (payload.proof) {
+    if (!guestSiblingProofHolds(fingerprint, payload.proof, link.peerId)) return;
+    noteGuestSibling(fingerprint, link.peerId, Number(payload.proof.statement.until) || 0);
+    if (payload.step === 2) {
+      try { link.send({ kind: 'guest-sibling', i: index, step: 3, proof: mine }); } catch (_error) { /* the link went */ }
+    }
+    return;
+  }
+  try { link.send({ kind: 'guest-sibling', i: index, step: 2, proof: mine }); } catch (_error) { /* the link went */ }
+}
+/* This relay's stay for the account ended: its siblings stop copying here. */
+function endGuestSiblings(fingerprint) {
+  const held = guestSiblings.get(fingerprint);
+  if (!held) return;
+  for (const relayId of held.keys()) {
+    const link = relayPeers.linkFor(relayId);
+    if (link) { try { link.send({ kind: 'guest-sibling-end', i: guestSiblingIndex(fingerprint) }); } catch (_error) { /* the link went */ } }
+    guestSiblingCopied.delete(`${fingerprint}|${relayId}`);
+  }
+  guestSiblings.delete(fingerprint);
+}
+function receiveGuestSiblingEnd(payload, link) {
+  const index = String(payload?.i || '');
+  for (const [fingerprint, held] of guestSiblings) {
+    if (guestSiblingIndex(fingerprint) !== index || !held.has(link?.peerId)) continue;
+    guestBook.noteFloor(fingerprint, siblingFloorKey(link.peerId), held.get(link.peerId));
+    held.delete(link.peerId);
+    guestSiblingCopied.delete(`${fingerprint}|${link.peerId}`);
+  }
+}
+const guestSiblingCopied = new Map();
+function copyToGuestSiblings(fingerprint, items) {
+  const held = guestSiblings.get(fingerprint);
+  if (!held || !guestBook.isGuest(fingerprint)) return;
+  for (const [relayId, until] of held) {
+    if (until <= Date.now()) {
+      held.delete(relayId);
+      guestSiblingCopied.delete(`${fingerprint}|${relayId}`);
+      continue;
+    }
+    const key = `${fingerprint}|${relayId}`;
+    const copied = guestSiblingCopied.get(key) || new Set();
+    const fresh = items.filter((item) => item.via !== relayId && (Number(item.hops) || 0) < GUEST_FORWARD_HOPS && !copied.has(item.relayId));
+    if (!fresh.length) continue;
+    if (forwardMail(relayId, fingerprint, fresh, { remove: false })) {
+      for (const item of fresh) copied.add(item.relayId);
+      if (copied.size > 5000) copied.delete(copied.values().next().value);
+      guestSiblingCopied.set(key, copied);
+    }
+  }
+}
+
+const remoteGuestCopied = new Map();
+/* What was copied to a guest relay for one account is forgotten once no
+   device of that account is a guest there any more: the set only ever
+   exists to stop the same item going twice during one stay. */
+function forgetRemoteCopies(fingerprint) {
+  const still = new Set(guestBook.remoteFor(fingerprint).map((entry) => entry.guest));
+  for (const key of Array.from(remoteGuestCopied.keys())) {
+    const [fp, relayId] = key.split('|');
+    if (fp === fingerprint && !still.has(relayId)) remoteGuestCopied.delete(key);
+  }
+}
+/* The sweep: every copied set whose stay is over, here or on a sibling. */
+function pruneGuestCopies() {
+  for (const key of Array.from(remoteGuestCopied.keys())) {
+    const [fp, relayId] = key.split('|');
+    if (!guestBook.remoteFor(fp).some((entry) => entry.guest === relayId)) remoteGuestCopied.delete(key);
+  }
+  for (const [fp, held] of Array.from(guestSiblings)) {
+    for (const [relayId, until] of Array.from(held)) {
+      if (until <= Date.now() || !guestBook.isGuest(fp)) { held.delete(relayId); guestSiblingCopied.delete(`${fp}|${relayId}`); }
+    }
+    if (!held.size) guestSiblings.delete(fp);
+  }
+  for (const key of Array.from(guestSiblingCopied.keys())) {
+    const [fp, relayId] = key.split('|');
+    if (!guestSiblings.get(fp)?.has(relayId)) guestSiblingCopied.delete(key);
+  }
+}
+function copyToRemoteGuests(fingerprint, items) {
+  const remotes = guestBook.remoteFor(fingerprint);
+  if (!remotes.length) return;
+  for (const guestRelay of new Set(remotes.map((entry) => entry.guest))) {
+    const key = `${fingerprint}|${guestRelay}`;
+    const copied = remoteGuestCopied.get(key) || new Set();
+    const fresh = items.filter((item) => item.via !== guestRelay && (Number(item.hops) || 0) < GUEST_FORWARD_HOPS && !copied.has(item.relayId));
+    if (!fresh.length) continue;
+    if (forwardMail(guestRelay, fingerprint, fresh, { remove: false })) {
+      for (const item of fresh) copied.add(item.relayId);
+      if (copied.size > 5000) copied.delete(copied.values().next().value);
+      remoteGuestCopied.set(key, copied);
+    }
+  }
+}
+function receiveGuestNotice(payload, link) {
+  if (!directoryMembers().includes(link?.peerId)) return;
+  const statement = payload?.statement;
+  const verdict = guestRules.verifyIdentityStatement({ statement, sig: payload?.sig, publicKeyData: payload?.publicKeyData }, { type: 'guest-at' });
+  if (!verdict.ok || statement.home !== relayIdentity.id || statement.guest !== link.peerId) return;
+  if (statement.at <= guestBook.floorOf(statement.fp, statement.deviceId)) return;
+  if (rosterRevokes(loadRoster(statement.fp), statement.deviceId, '')) return;
+  guestBook.noteRemote({ fp: statement.fp, deviceId: statement.deviceId, guest: link.peerId, until: statement.until });
+  console.log(`[Guests] ${statement.fp.slice(0, 12)} is a guest at ${link.peerId.slice(0, 12)}; its mail is copied there`);
+  copyToRemoteGuests(statement.fp, offlineBoxes.get(statement.fp) || []);
+}
+/* ---- a home filtered for one person: the move --------------------------------
+ *
+ * A guest whose home works for everyone else but has been unreachable from
+ * their own internet for days may move it here (js/chat/62-guest-mode.js asks
+ * them). The move is the person's own statement, signed with their identity
+ * key: { v: 1, type: 'home-move', fp, from, to, at }. This relay takes it for
+ * itself as `to`, makes the person a resident, and hands it to `from`; the
+ * old home checks it again, hands over its mailbox, forwards for thirty days,
+ * and tells the account's other devices. Each relay takes only a statement
+ * signed after the newest one it took, so an old move cannot be replayed. */
+const MOVE_FORWARD_MS = Number(process.env.CHAT_MOVE_FORWARD_MS || 30 * 24 * 60 * 60 * 1000);
+const MOVE_PENDING_MS = 7 * 24 * 60 * 60 * 1000;
+function sendMoveHome(fingerprint, home, signed) {
+  const link = relayPeers.linkFor(home);
+  if (link) {
+    try {
+      link.send({ kind: 'home-move', statement: signed.statement, sig: signed.sig, publicKeyData: signed.publicKeyData });
+      return;
+    } catch (_error) { /* kept below */ }
+  }
+  guestBook.notePendingMove(fingerprint, home, signed, MOVE_PENDING_MS);
+}
+function retryPendingMoves(onlyHome = '') {
+  for (const entry of guestBook.pendingMoves()) {
+    if (onlyHome && entry.home !== onlyHome) continue;
+    const link = relayPeers.linkFor(entry.home);
+    if (!link) continue;
+    try { link.send({ kind: 'home-move', statement: entry.signed.statement, sig: entry.signed.sig, publicKeyData: entry.signed.publicKeyData }); } catch (_error) { /* next time */ }
+  }
+}
+function moveRefusal(signed, { fingerprint, to, from }) {
+  const verdict = guestRules.verifyIdentityStatement(signed, { type: 'home-move' });
+  if (!verdict.ok) return verdict.reason;
+  const s = signed.statement;
+  if (s.fp !== fingerprint) return 'not-yours';
+  if (s.to !== to) return 'not-here';
+  if (s.from !== from) return 'not-your-home';
+  if (s.at <= guestBook.moveAtOf(fingerprint)) return 'replay';
+  return '';
+}
+/* The guest's own request, on its socket here. */
+function acceptHomeMoveHere(record, message) {
+  const signed = { statement: message.statement, sig: message.sig, publicKeyData: record.publicKeyData };
+  const reason = !record.guest ? 'not-a-guest' : moveRefusal(signed, { fingerprint: record.fingerprint, to: relayIdentity.id, from: record.guestOf });
+  if (reason) {
+    safeSend(record.ws, { type: 'home-move-refused', reason });
+    return;
+  }
+  const fingerprint = record.fingerprint;
+  guestBook.noteMoveAt(fingerprint, signed.statement.at);
+  guestBook.dropGuests(fingerprint);
+  guestNotices.delete(fingerprint);
+  endGuestSiblings(fingerprint);
+  for (const candidate of verifiedByFingerprint.get(fingerprint) || []) candidate.guest = false;
+  noteProvenIdentity(fingerprint);
+  console.log(`[Guests] ${fingerprint.slice(0, 12)} moved home here from ${signed.statement.from.slice(0, 12)}`);
+  sendMoveHome(fingerprint, signed.statement.from, signed);
+  safeSend(record.ws, { type: 'home-move-ok', to: relayIdentity.id });
+}
+/* A move straight from a resident of another family relay, carried in the
+   hello (js/chat/63-relay-choice.js): checked once the identity is proven, the
+   same way as a guest's, without needing this relay to take guests. */
+function acceptDirectMove(record) {
+  const signed = { ...record.homeMoveRequest, publicKeyData: record.publicKeyData };
+  record.homeMoveRequest = null;
+  const from = String(signed.statement?.from || '');
+  const reason = !directoryMembers().includes(from) ? 'not-family'
+    : moveRefusal(signed, { fingerprint: record.fingerprint, to: relayIdentity.id, from });
+  if (reason) {
+    /* Not moved, so not living here either: said once, then the socket goes
+       — staying on would make this relay claim the person for ninety days. */
+    record.identityVerified = false;
+    unindexVerified(record);
+    safeSend(record.ws, { type: 'home-move-refused', reason });
+    setTimeout(() => {
+      try { if (record.ws?.readyState === WebSocket.OPEN) record.ws.close(4409, 'home-move-refused'); } catch (_error) { /* gone */ }
+    }, 300).unref?.();
+    setTimeout(() => {
+      try { if (record.ws && record.ws.readyState !== WebSocket.CLOSED) record.ws.terminate(); } catch (_error) { /* gone */ }
+      presence.delete(record.clientId);
+      broadcastPeers();
+    }, 1500).unref?.();
+    return false;
+  }
+  const fingerprint = record.fingerprint;
+  guestBook.noteMoveAt(fingerprint, signed.statement.at);
+  guestBook.dropGuests(fingerprint);
+  guestNotices.delete(fingerprint);
+  endGuestSiblings(fingerprint);
+  console.log(`[Guests] ${fingerprint.slice(0, 12)} moved home here directly from ${from.slice(0, 12)}`);
+  sendMoveHome(fingerprint, from, signed);
+  safeSend(record.ws, { type: 'home-move-ok', to: relayIdentity.id });
+  return true;
+}
+
+/* The old home's side, off the new home's link. */
+function receiveHomeMove(payload, link) {
+  if (!directoryMembers().includes(link?.peerId)) return;
+  const signed = { statement: payload?.statement, sig: payload?.sig, publicKeyData: payload?.publicKeyData };
+  const fingerprint = String(signed.statement?.fp || '');
+  const reason = moveRefusal(signed, { fingerprint, to: link.peerId, from: relayIdentity.id });
+  if (reason) {
+    /* Already taken (the new home sent it again): said so, so it stops. */
+    if (reason === 'replay' && guestBook.movedTo(fingerprint) === link.peerId) {
+      try { link.send({ kind: 'home-move-ack', fp: fingerprint }); } catch (_error) { /* the link went */ }
+    }
+    return;
+  }
+  guestBook.noteMoveAt(fingerprint, signed.statement.at);
+  provenIdentities.delete(fingerprint);
+  noteKnownIdentity(fingerprint, { force: true });
+  guestBook.noteMoved(fingerprint, link.peerId, MOVE_FORWARD_MS, signed);
+  guestBook.dropRemote(fingerprint);
+  forgetRemoteCopies(fingerprint);
+  console.log(`[Guests] ${fingerprint.slice(0, 12)} moved home to ${link.peerId.slice(0, 12)}; its mail follows for ${Math.round(MOVE_FORWARD_MS / 86400000)} days`);
+  forwardMovedMail(fingerprint);
+  for (const candidate of verifiedByFingerprint.get(fingerprint) || []) {
+    if (candidate.ws?.readyState === WebSocket.OPEN) safeSend(candidate.ws, { type: 'home-move', statement: signed.statement, sig: signed.sig });
+  }
+  try { link.send({ kind: 'home-move-ack', fp: fingerprint }); } catch (_error) { /* the link went */ }
+}
+/* Everything waiting here for someone who moved, to their new home. */
+function forwardMovedMail(fingerprint) {
+  const to = guestBook.movedTo(fingerprint);
+  if (!to) return;
+  const items = (offlineBoxes.get(fingerprint) || []).filter((item) => item.via !== to && (Number(item.hops) || 0) < GUEST_FORWARD_HOPS);
+  if (items.length) forwardMail(to, fingerprint, items, { remove: true });
+}
+
+function receiveGuestEndFrame(payload, link) {
+  const fp = String(payload?.fp || '');
+  const deviceId = String(payload?.deviceId || '');
+  if (!/^[a-f0-9]{64}$/.test(fp)) return;
+  for (const entry of guestBook.remoteFor(fp)) {
+    if (entry.guest !== link?.peerId || (deviceId && entry.deviceId !== deviceId)) continue;
+    guestBook.dropRemote(fp, entry.deviceId);
+    guestBook.noteFloor(fp, entry.deviceId, Date.now());
+  }
+  forgetRemoteCopies(fp);
+}
+/* One device's stay ends (it said guest-end, or its record ran out). */
+function endGuestStay(fingerprint, deviceId) {
+  const home = guestBook.homeOf(fingerprint);
+  const result = guestBook.end(fingerprint, deviceId);
+  const homeLink = home ? relayPeers.linkFor(home) : null;
+  if (homeLink) {
+    try { homeLink.send({ kind: 'guest-end', fp: fingerprint, deviceId }); } catch (_error) { /* the link went */ }
+  }
+  console.log(`[Guests] ${String(fingerprint).slice(0, 12)} stay ended for one device${result.last ? ', the last' : ''}`);
+  if (result.last) onGuestStayEnded(fingerprint, result.home);
+  /* The sibling relays were let in on a signed notice of a device here; with
+     none left, they stop copying here. */
+  else if (!guestNoticeHereFor(fingerprint)) endGuestSiblings(fingerprint);
+  return result;
+}
+/* The account's last guest device has gone: what waits here for it goes home. */
+function onGuestStayEnded(fingerprint, home) {
+  endGuestSiblings(fingerprint);
+  const homeLink = home ? relayPeers.linkFor(home) : null;
+  if (homeLink) {
+    try { homeLink.send({ kind: 'guest-end', fp: fingerprint, deviceId: '' }); } catch (_error) { /* the link went */ }
+  }
+  forwardLeftovers(fingerprint, home);
+}
+
+/* ---- guest mail ---------------------------------------------------------------
+ *
+ * Mail moves between relays as what it already is to the relay link: a
+ * transit envelope, sealed to the receiving relay's key, delivered there by
+ * the same code as any other (deliverRelayMessage). Marked `fwd` with the
+ * number of relays it has been forwarded by, so the receiving relay never
+ * sends it back where it came from, and nothing is forwarded more than twice
+ * — a ring of relays each named as the next one's home cannot spin it. */
+const GUEST_FORWARD_HOPS = 2;
+const GUEST_RETENTION_MS = Number(process.env.CHAT_GUEST_RETENTION_MS || 3 * 24 * 60 * 60 * 1000);
+const GUEST_SWEEP_MS = Number(process.env.CHAT_GUEST_SWEEP_MS || 10 * 60 * 1000);
+const guestForwardInFlight = new Set();
+const guestHeldBoxes = new Set();
+/* Mail for someone who is a guest here, and not also living here. */
+const guestHeldFor = (fingerprint) => guestBook.isGuest(fingerprint) && !identityLivesHere(fingerprint);
+function dropMailItem(fingerprint, relayId) {
+  const items = offlineBoxes.get(fingerprint) || [];
+  const kept = items.filter((item) => item.relayId !== relayId);
+  if (kept.length === items.length) return;
+  if (kept.length) offlineBoxes.set(fingerprint, kept); else offlineBoxes.delete(fingerprint);
+  saveOfflineBox(fingerprint);
+}
+/* Items to another relay of the family over its link; with `remove`, each
+   leaves this mailbox once the far relay has queued it. Nothing goes without
+   a link: the sweep tries again while the items are kept. */
+function forwardMail(toRelay, fingerprint, items, { remove = false } = {}) {
+  const link = relayPeers.linkFor(toRelay);
+  if (!link || !link.peerKey || !items.length) return false;
+  for (const item of items) {
+    if (remove && guestForwardInFlight.has(item.relayId)) continue;
+    let envelope;
+    try {
+      envelope = sealTransit(toRelay, link.peerKey, { type: 'relay', toFingerprint: fingerprint, payload: item.payload, persist: true, fwd: (Number(item.hops) || 0) + 1 });
+    } catch (_error) { continue; }
+    const ref = crypto.randomUUID();
+    if (remove) guestForwardInFlight.add(item.relayId);
+    rememberTransitWait(ref, {
+      clientId: 'relay:guest-mail', tag: '', toRelay, via: link.peerId, expiresAt: Date.now() + TRANSIT_WAIT_MS,
+      reply: (answer) => {
+        guestForwardInFlight.delete(item.relayId);
+        if (remove && answer?.type === 'queued') dropMailItem(fingerprint, item.relayId);
+      },
+    });
+    if (!link.send({ kind: 'transit', ref, envelope })) {
+      forgetTransitWait(ref);
+      guestForwardInFlight.delete(item.relayId);
+    }
+  }
+  return true;
+}
+/* What waits here for someone whose stay has ended, home — except anything
+   that came from home in the first place. */
+function forwardLeftovers(fingerprint, home) {
+  if (!home || identityLivesHere(fingerprint) || guestBook.isGuest(fingerprint)) return;
+  const items = (offlineBoxes.get(fingerprint) || []).filter((item) => item.via !== home && (Number(item.hops) || 0) < GUEST_FORWARD_HOPS);
+  if (items.length) forwardMail(home, fingerprint, items, { remove: true });
+}
+/* Just queued here: for someone whose stay has ended, it goes on to their
+   home for as long as the forwarding lasts. */
+function forwardIfGuestLeft(fingerprint) {
+  const forward = guestBook.forwarding(fingerprint);
+  if (forward) forwardLeftovers(fingerprint, forward.relay);
+  /* Moved home elsewhere: everything follows for thirty days. */
+  if (guestBook.movedTo(fingerprint)) forwardMovedMail(fingerprint);
+}
+function guestSweep() {
+  for (const ended of guestBook.sweep().ended) onGuestStayEnded(ended.fp, ended.home);
+  retryPendingMoves();
+  for (const { fp, relay } of guestBook.forwardingAll()) {
+    if ((offlineBoxes.get(fp) || []).length) forwardLeftovers(fp, relay);
+  }
+  /* A guest's mail is kept for less time than a resident's. */
+  if (!guestSweep.scanned) {
+    guestSweep.scanned = true;
+    for (const [fp, items] of offlineBoxes) if (items.some((item) => item.guestHeld)) guestHeldBoxes.add(fp);
+  }
+  const cutoff = Date.now() - GUEST_RETENTION_MS;
+  for (const fp of Array.from(guestHeldBoxes)) {
+    const items = offlineBoxes.get(fp) || [];
+    const kept = items.filter((item) => !(item.guestHeld && Date.parse(item.queuedAt || 0) < cutoff));
+    if (!kept.some((item) => item.guestHeld)) guestHeldBoxes.delete(fp);
+    if (kept.length === items.length) continue;
+    if (kept.length) offlineBoxes.set(fp, kept); else offlineBoxes.delete(fp);
+    saveOfflineBox(fp);
+  }
+  pruneGuestCopies();
+  guestSweep.rounds = (guestSweep.rounds || 0) + 1;
+  if (guestSweep.rounds % 6 === 1) rosterCopyStore.sweep();
+}
+setInterval(() => { try { guestSweep(); } catch (error) { console.warn('[Guests] sweep failed:', error.message); } }, GUEST_SWEEP_MS).unref?.();
+
+/* Guest mode at a glance, for the operator: who stays here as a guest, who of
+   this relay's people is a guest elsewhere, and what is held for them. Counts
+   only — no fingerprints. */
+app.post('/Monitor_Server/guests', authMiddleware, (_req, res) => {
+  const ids = (map) => Array.from(map.values()).reduce((sum, set) => sum + set.size, 0);
+  res.json({
+    ok: true,
+    ...guestBook.stats(),
+    guestSockets: liveGuestSockets(),
+    takesGuests: Boolean(directoryState.doc?.body?.relays?.find((relay) => relay.id === relayIdentity.id)?.guests),
+    siblings: Array.from(guestSiblings.values()).reduce((sum, held) => sum + held.size, 0),
+    remoteCopied: ids(remoteGuestCopied),
+    siblingCopied: ids(guestSiblingCopied),
+  });
+});
 
 app.post('/Monitor_Server/identities', authMiddleware, (req, res) => {
   const rows = Array.from(knownIdentities).map((fp) => ({
@@ -8640,10 +9372,16 @@ function reportUpdateEvent(event) {
   const version = String(event?.version || '');
   const say = {
     staged: () => T.update.staged(version), notifying: () => T.update.notifying(version, event.seconds), applying: () => T.update.applying(version),
-    done: () => T.update.done(version), failed: () => T.update.failed(version, String(event.reason || '').slice(0, 80)),
+    done: () => T.update.done(version),
+    failed: () => (event.reason === 'revert-failed' ? T.update.revertFailed(version, String(event.detail || '').slice(0, 160)) : T.update.failed(version, String(event.reason || '').slice(0, 160))),
+    /* Put back by the apply step's watch: the server is fine, the version is not. */
+    reverted: () => T.update.reverted(version, String(event.reason || '').slice(0, 160)),
+    /* The canary put it back: this server waits for the operator. */
+    held: () => T.update.held(version),
   }[event?.kind];
   if (!say || !version) return;
-  queueReport({ level: event.kind === 'failed' ? 'critical' : 'update', category: 'update', title: T.update.titles[event.kind], body: say() });
+  const level = { failed: 'critical', reverted: 'warn', held: 'warn' }[event.kind] || 'update';
+  queueReport({ level, category: 'update', title: T.update.titles[event.kind], body: say() });
   flushAlerts().catch(() => {});
 }
 
@@ -9015,6 +9753,34 @@ function handleTransitFrame(payload, link) {
     acceptDirectory(payload.doc, 'push');
     return;
   }
+  if (payload?.kind === 'roster-copy') {
+    receiveRosterCopy(payload, link);
+    return;
+  }
+  if (payload?.kind === 'guest-notice') {
+    receiveGuestNotice(payload, link);
+    return;
+  }
+  if (payload?.kind === 'guest-end') {
+    receiveGuestEndFrame(payload, link);
+    return;
+  }
+  if (payload?.kind === 'guest-sibling') {
+    receiveGuestSibling(payload, link);
+    return;
+  }
+  if (payload?.kind === 'guest-sibling-end') {
+    receiveGuestSiblingEnd(payload, link);
+    return;
+  }
+  if (payload?.kind === 'home-move') {
+    receiveHomeMove(payload, link);
+    return;
+  }
+  if (payload?.kind === 'home-move-ack') {
+    if (guestBook.pendingMoves().some((entry) => entry.fp === payload.fp && entry.home === link?.peerId)) guestBook.clearPendingMove(String(payload.fp));
+    return;
+  }
   if (payload?.kind === 'alert') {
     receiveRelayAlert(payload, link);
     return;
@@ -9082,11 +9848,18 @@ function handleTransitFrame(payload, link) {
            relay in the last ninety days. The origin goes with a yes so the
            asking client can file the route; the relay's id and key it
            already had, because it sealed this question to them. */
-        const home = up || identityLivesHere(asked);
+        /* A guest's socket is up, but they do not live here: they are named
+           a guest instead, and the asking client keeps that route in memory
+           only, never as the person's address. */
+        const home = (residentSocketUp(asked) || identityLivesHere(asked)) && !guestBook.movedTo(asked);
+        const guestHere = !home && guestBook.isGuest(asked);
         link.send({
           kind: 'transit-result',
           ref: payload.ref,
-          answer: { type: 'route', toFingerprint: asked, home, up, origin: home ? publicOriginForPeers() : '' },
+          answer: {
+            type: 'route', toFingerprint: asked, home, up, origin: home || guestHere ? publicOriginForPeers() : '',
+            ...(guestHere ? { guest: true, ...(guestNoticeFor(asked) ? { notice: guestNoticeFor(asked) } : {}) } : {}),
+          },
         });
         return;
       }
@@ -9106,6 +9879,10 @@ function handleTransitFrame(payload, link) {
       return;
     }
     deliverRelayMessage(inner, {
+      /* Forwarded by a relay of the family (guest mode), not carried for a
+         client: marked so it is never sent back there. */
+      viaRelay: Number.isSafeInteger(inner?.fwd) && inner.fwd >= 1 && directoryMembers().includes(link.peerId) ? link.peerId : '',
+      viaHops: Number.isSafeInteger(inner?.fwd) ? Math.min(Math.max(inner.fwd, 1), 9) : 0,
       clientId: '',
       /* Deliberately blank. For a local client this field is the fingerprint
          the relay CHALLENGED and the client proved; nothing was proved here,
@@ -9160,6 +9937,7 @@ function transitAnswerForClient(answer) {
       home: answer.home === true,
       up: answer.up === true,
       origin: /^https?:\/\/[^/\s]{1,200}$/i.test(origin) ? origin : '',
+      ...(answer.guest === true && answer.home !== true ? { guest: true, ...guestNoticeForClient(answer.notice) } : {}),
     };
   }
   if (type === 'turn') {
@@ -9191,7 +9969,16 @@ function transitAnswerForClient(answer) {
   return { type: 'error', reason: 'transit-rejected' };
 }
 
-function deliverRelayMessage(message, { clientId = '', fromFingerprint = '', reply = () => {} } = {}) {
+/* A guest notice another relay passed on, rebuilt field by field: the client
+   checks its signature, and nothing else may ride along. */
+function guestNoticeForClient(notice) {
+  const s = notice?.statement;
+  if (!s || typeof s !== 'object' || typeof notice.sig !== 'string' || notice.sig.length > 1100) return {};
+  const statement = { v: s.v, type: 'guest-route', fp: String(s.fp || '').slice(0, 64), guest: String(s.guest || '').slice(0, 64), until: Number(s.until) || 0 };
+  return { notice: { statement, sig: notice.sig } };
+}
+
+function deliverRelayMessage(message, { clientId = '', fromFingerprint = '', reply = () => {}, viaRelay = '', viaHops = 0 } = {}) {
 totalRelays++;
   const toFingerprint = String(message.toFingerprint || '').slice(0, 128);
   /* Queued mail is keyed by this value and lands in a file named after it,
@@ -9260,7 +10047,7 @@ totalRelays++;
     if (message.persist && toFingerprint) {
       console.log(`[Relay] Target offline, queuing ${payloadType} for ${toFingerprint}`);
       const queued = offlineBoxes.get(toFingerprint) || [];
-      queued.push({
+      const offlineItem = {
         type: 'relay',
         relayId: crypto.randomUUID(),
         /* A sealed-sender envelope is filed without a sender: who wrote it
@@ -9269,7 +10056,17 @@ totalRelays++;
         fromFingerprint: sealedSender ? '' : fromFingerprint,
         payload: message.payload || null,
         queuedAt: new Date().toISOString(),
-      });
+        /* Guest mode: which family relay forwarded it here, and whether it is
+           held for a guest (kept for less time). */
+        ...(viaRelay ? { via: viaRelay, hops: viaHops } : {}),
+        ...(guestHeldFor(toFingerprint) ? { guestHeld: true } : {}),
+      };
+      queued.push(offlineItem);
+      if (guestHeldFor(toFingerprint)) guestHeldBoxes.add(toFingerprint);
+      /* One of this relay's people is a guest elsewhere on their own signed
+         word: a copy goes to them there. */
+      copyToRemoteGuests(toFingerprint, [offlineItem]);
+      copyToGuestSiblings(toFingerprint, [offlineItem]);
       /* The old cap was a flat 200 items per mailbox, which a single
          chunked file would blow through on its own — evicting other
          people's messages to make room for pieces of itself. Retention is
@@ -9292,7 +10089,9 @@ totalRelays++;
          key here. False means the message may be waiting at a relay its
          recipient never visits, and the client goes looking for the right one
          instead of showing a reassuring tick. */
-      reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag, known: identityLivesHere(toFingerprint) });
+      reply({ type: 'queued', toFingerprint, count: remaining ? remaining.length : 0, tag, known: identityLivesHere(toFingerprint) || guestBook.isGuest(toFingerprint) });
+      /* Someone whose guest stay here ended: it goes on to their home. */
+      forwardIfGuestLeft(toFingerprint);
       /* A real chat message travels as a sealed 'offline-chat' envelope, so
          the type the relay can see is the envelope's, not the message's —
          gating on the inner names meant no queued message ever rang a
@@ -9342,7 +10141,13 @@ totalRelays++;
       fromFingerprint: sealedSender ? '' : fromFingerprint,
       payload: message.payload || null,
       queuedAt: new Date().toISOString(),
+      ...(viaRelay ? { via: viaRelay, hops: viaHops } : {}),
+      ...(guestHeldFor(toFingerprint) ? { guestHeld: true } : {}),
     };
+    if (queuedItem.guestHeld) guestHeldBoxes.add(toFingerprint);
+    copyToRemoteGuests(toFingerprint, [queuedItem]);
+    if (guestBook.movedTo(toFingerprint)) forwardMovedMail(toFingerprint);
+    copyToGuestSiblings(toFingerprint, [queuedItem]);
     queuedLive.push(queuedItem);
     liveRelayId = queuedItem.relayId;
     offlineBoxes.set(toFingerprint, queuedLive);
@@ -9618,6 +10423,7 @@ function loadRoster(fingerprint) {
 }
 function saveRoster(fingerprint, roster) {
   rosterCache.set(fingerprint, roster);
+  noteRosterHeld(fingerprint);
   try {
     fs.mkdirSync(ROSTER_DIR, { recursive: true });
     writeJsonAtomic(rosterPath(fingerprint), roster);
@@ -9724,6 +10530,158 @@ function enforceRoster(fingerprint, roster) {
   for (const candidate of [...(verifiedByFingerprint.get(fingerprint) || [])]) {
     if (rosterRevokes(roster, candidate.deviceId, provenDeviceKey(candidate))) shutOutRevokedDevice(candidate, roster);
   }
+}
+
+/* ---- rosters across the family (guest mode) ---------------------------------
+ *
+ * A guest relay never had the account's roster, and without one it cannot
+ * tell a revoked device from a live one. So a relay that stores a new roster
+ * hands a copy to the family's other relays, sealed under a key made from the
+ * account's fingerprint (scripts/lib/relay-guests.js): a relay, even a seized
+ * one, can open a copy only for an account whose fingerprint it already
+ * holds — when that account visits as a guest, or when the roster is one of
+ * its own residents'. The identity key a roster's certificate is checked with
+ * is kept beside the roster for the same reason. */
+const ROSTER_COPY_DIR = path.join(ROSTER_DIR, 'copies');
+const ROSTER_COPY_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const ROSTER_BACKFILL_MAX = 5000;
+const rosterIdentityPath = (fingerprint) => path.join(ROSTER_DIR, `${fingerprint}.identity`);
+function saveRosterIdentity(fingerprint, publicKeyData) {
+  try {
+    const key = String(publicKeyData || '');
+    if (crypto.createHash('sha256').update(Buffer.from(key, 'base64')).digest('hex') !== fingerprint) return false;
+    if (fs.existsSync(rosterIdentityPath(fingerprint))) return true;
+    fs.mkdirSync(ROSTER_DIR, { recursive: true });
+    fs.writeFileSync(rosterIdentityPath(fingerprint), key, { mode: 0o600 });
+    return true;
+  } catch (_error) { return false; }
+}
+function loadRosterIdentity(fingerprint) {
+  try { return fs.readFileSync(rosterIdentityPath(fingerprint), 'utf8').trim(); } catch (_error) { return ''; }
+}
+/* Index → fingerprint for the rosters this relay holds, so a copy that is an
+   update of one of them is recognised. */
+let rosterCopyIndexes = null;
+function rosterFingerprintForIndex(index) {
+  if (!rosterCopyIndexes) {
+    rosterCopyIndexes = new Map();
+    try {
+      for (const name of fs.readdirSync(ROSTER_DIR)) {
+        const match = /^([a-f0-9]{64})\.json$/.exec(name);
+        if (match) rosterCopyIndexes.set(guestRules.rosterCopyIndex(match[1]), match[1]);
+      }
+    } catch (_error) { /* no rosters yet */ }
+  }
+  return rosterCopyIndexes.get(index) || '';
+}
+function noteRosterHeld(fingerprint) {
+  if (rosterCopyIndexes) rosterCopyIndexes.set(guestRules.rosterCopyIndex(fingerprint), fingerprint);
+}
+const rosterCopyStore = guestRules.createRosterCopyStore({ dir: ROSTER_COPY_DIR, ttlMs: ROSTER_COPY_TTL_MS });
+function familyLinks({ guestTakersOnly = false } = {}) {
+  const takers = new Set((directoryState.doc?.body?.relays || []).filter((relay) => relay.guests === true).map((relay) => relay.id));
+  return directoryMembers().filter((id) => !guestTakersOnly || takers.has(id)).map((id) => relayPeers.linkFor(id)).filter(Boolean);
+}
+function shareRosterCopy(fingerprint, roster, publicKeyData) {
+  let copy;
+  try { copy = guestRules.sealRosterCopy(fingerprint, roster, publicKeyData); } catch (_error) { return; }
+  for (const link of familyLinks()) {
+    try { link.send({ kind: 'roster-copy', copy }); } catch (_error) { /* the link went */ }
+  }
+}
+/* Everything held, to one relay that takes guests: when its link comes up,
+   and when the family list first says it takes guests. */
+function sendRosterCopiesTo(link) {
+  if (!link?.isOpen?.()) return;
+  const taker = (directoryState.doc?.body?.relays || []).some((relay) => relay.id === link.peerId && relay.guests === true);
+  if (!taker || !directoryMembers().includes(link.peerId)) return;
+  rosterFingerprintForIndex('');
+  const fingerprints = Array.from(rosterCopyIndexes.values()).slice(0, ROSTER_BACKFILL_MAX);
+  let at = 0;
+  const step = () => {
+    for (let n = 0; n < 20 && at < fingerprints.length; n += 1, at += 1) {
+      const fp = fingerprints[at];
+      const roster = loadRoster(fp);
+      const key = loadRosterIdentity(fp);
+      if (!roster || !key) continue;
+      try { link.send({ kind: 'roster-copy', copy: guestRules.sealRosterCopy(fp, roster, key) }); } catch (_error) { return; }
+    }
+    if (at < fingerprints.length && link.isOpen?.()) setImmediate(step);
+  };
+  step();
+}
+/* A copy off a family link: kept if newer than the one held; and if it is an
+   update of a roster this relay holds, taken on under the usual rule — signed
+   by the primary the held roster names, with a higher sequence number. */
+function receiveRosterCopy(payload, link) {
+  const copy = payload?.copy;
+  if (!directoryMembers().includes(link?.peerId)) return;
+  if (!copy || typeof copy !== 'object' || !/^[a-f0-9]{64}$/.test(String(copy.i || '')) || !Number.isSafeInteger(copy.seq)
+    || typeof copy.iv !== 'string' || typeof copy.ct !== 'string' || copy.ct.length > 64 * 1024 || copy.iv.length > 24) return;
+  rosterCopyStore.keep(copy, link.peerId);
+  const fp = rosterFingerprintForIndex(copy.i);
+  if (!fp) return;
+  const opened = guestRules.openRosterCopy(fp, copy);
+  if (!opened) return;
+  const current = loadRoster(fp);
+  if (rosterRefusal(opened.roster, current, opened.publicKeyData, fp)) return;
+  saveRoster(fp, opened.roster);
+  saveRosterIdentity(fp, opened.publicKeyData);
+  console.log(`[Roster] ${fp.slice(0, 12)} now at ${opened.roster.seq}, from a family relay`);
+  enforceRoster(fp, opened.roster);
+  for (const candidate of verifiedByFingerprint.get(fp) || []) {
+    if (candidate.ws?.readyState === WebSocket.OPEN) safeSend(candidate.ws, { type: 'roster', roster: opened.roster, ...(candidate.guest ? { guest: true } : {}) });
+  }
+}
+/* What a guest is judged by: every roster this relay can stand behind for the
+ * account. Its own, if it holds one, and every self-consistent roster among
+ * the family's copies, each followed as far as valid successors lead, and the
+ * one the device carries on top of each, again only as a successor. The
+ * device is refused if ANY of them revokes it: a revocation is the account's
+ * primary speaking, and this relay cannot tell which relay is the account's
+ * real home — the device names one, and a revoked device would name the
+ * wrong one. Nothing founded elsewhere is kept here; only a valid successor of
+ * this relay's own roster is. The roster handed to the device is its own
+ * one's, else its home relay's, else the newest. */
+function guestRosterView(fingerprint, publicKeyData, helloRoster, homeId = '') {
+  const own = loadRoster(fingerprint);
+  const held = rosterCopyStore.copies(guestRules.rosterCopyIndex(fingerprint))
+    .map((entry) => ({ from: entry.from, opened: guestRules.openRosterCopy(fingerprint, entry.copy) }))
+    .filter((entry) => entry.opened);
+  const extend = (base) => {
+    let current = base;
+    for (let round = 0; round < 8; round += 1) {
+      const next = held.find((entry) => entry.opened.roster.seq > current.seq && !rosterRefusal(entry.opened.roster, current, entry.opened.publicKeyData, fingerprint));
+      if (!next) break;
+      current = next.opened.roster;
+    }
+    if (helloRoster && !rosterRefusal(helloRoster, current, publicKeyData, fingerprint)) current = helloRoster;
+    return current;
+  };
+  const chains = [];
+  if (own) chains.push({ from: 'own', roster: extend(own) });
+  for (const entry of held) {
+    if (!rosterRefusal(entry.opened.roster, null, entry.opened.publicKeyData, fingerprint)) chains.push({ from: entry.from, roster: extend(entry.opened.roster) });
+  }
+  if (!chains.length && helloRoster && !rosterRefusal(helloRoster, null, publicKeyData, fingerprint)) chains.push({ from: 'hello', roster: helloRoster });
+  const ownChain = chains.find((chain) => chain.from === 'own');
+  if (ownChain && ownChain.roster !== own) {
+    saveRoster(fingerprint, ownChain.roster);
+    saveRosterIdentity(fingerprint, publicKeyData);
+    if (ownChain.roster === helloRoster) shareRosterCopy(fingerprint, helloRoster, publicKeyData);
+  }
+  const pick = ownChain || chains.find((chain) => chain.from === homeId) || chains.slice().sort((a, b) => b.roster.seq - a.roster.seq)[0];
+  return { roster: pick?.roster || null, chains: chains.map((chain) => chain.roster) };
+}
+const guestViewRevokes = (view, deviceId, deviceKey) => view.chains.some((roster) => rosterRevokes(roster, deviceId, deviceKey));
+/* A roster written where this relay holds none of its own: taken only if it
+   follows from every roster the family holds for the account. Where rival
+   rosters exist, none follows from all of them, and nothing is written —
+   that is for the account's home to settle. '' when it may be written. */
+function familyWriteRefusal(next, view, publicKeyData, fingerprint) {
+  if (!view.chains.length) return '';
+  const refusals = view.chains.map((roster) => rosterRefusal(next, roster, publicKeyData, fingerprint));
+  return refusals.find((reason) => reason) || '';
 }
 
 /* ------------------------------------------------------------------
@@ -10864,11 +11822,20 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
   /* An expired record is not delivered to and not kept: the moment the user's
      own window runs out, the row goes. */
   const stored = pushSubscriptions.get(key) || [];
-  const subscriptions = stored.filter((item) => !item.expiresAt || Date.parse(item.expiresAt) > now);
-  if (subscriptions.length !== stored.length) {
-    if (subscriptions.length) pushSubscriptions.set(key, subscriptions);
+  const live = stored.filter((item) => !item.expiresAt || Date.parse(item.expiresAt) > now);
+  if (live.length !== stored.length) {
+    if (live.length) pushSubscriptions.set(key, live);
     else pushSubscriptions.delete(key);
     savePushSubscriptions();
+  }
+  /* A device that is a guest on another relay of the family, on its own
+     signed word, is woken there; woken here it would be pointed at mail it
+     cannot fetch from where it is (guest mode). */
+  const awayAsGuests = new Set(guestBook.remoteFor(fingerprint).map((entry) => entry.deviceId));
+  const subscriptions = awayAsGuests.size ? live.filter((item) => !item.deviceId || !awayAsGuests.has(item.deviceId)) : live;
+  if (!subscriptions.length && live.length) {
+    console.log(`[Push] ${key.slice(0, 12)}: every device is a guest elsewhere; woken there, not here.`);
+    return;
   }
   /* Nothing to notify. This used to return in silence, which is how a device
      that had quietly fallen off push came to look exactly like one that had
@@ -10966,8 +11933,11 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
     }
   }));
 
-  if (remaining.length) {
-    pushSubscriptions.set(key, remaining);
+  /* Rows left out because their device is a guest elsewhere are kept: it is
+     woken here again the moment its stay ends. */
+  const kept = [...live.filter((item) => !subscriptions.includes(item)), ...remaining];
+  if (kept.length) {
+    pushSubscriptions.set(key, kept);
   } else {
     pushSubscriptions.delete(key);
   }
@@ -10976,7 +11946,7 @@ async function sendPushNotification(toFingerprint, kind = 'chat') {
      endpoint the vendor had already told it was gone — forever, because the
      answer never changed and the lesson was never kept. Every other prune in
      this file persists; these two did not. */
-  if (pruned || !remaining.length) savePushSubscriptions();
+  if (pruned || !kept.length) savePushSubscriptions();
 }
 
 async function sendAdminPushNotification(toFingerprint, body, kind = 'admin-policy') {
@@ -11680,6 +12650,31 @@ wsServer.on('connection', (ws, req) => {
       record.publicKeyData = String(message.publicKeyData || '').slice(0, 4096);
       record.fingerprint = sanitizeFingerprint(message.fingerprint);
       noteKnownIdentity(record.fingerprint);
+      /* Guest mode: the home relay this identity is a guest from. Anything
+         that is not a plain string is kept as a refusal waiting to happen,
+         not dropped: dropping it would make this socket a resident. */
+      record.wantsGuest = message.guestOf !== undefined && message.guestOf !== null && message.guestOf !== '';
+      record.guestOf = record.wantsGuest ? (typeof message.guestOf === 'string' ? message.guestOf.slice(0, 64).toLowerCase() : 'invalid') : '';
+      record.guest = false;
+      /* The newest roster the device holds, for a guest relay that may hold
+         none: judged as a successor of what is known, never on its word. */
+      record.helloRoster = null;
+      record.guestNotice = null;
+      record.guestNoticeSigned = null;
+      record.guestRoute = null;
+      record.guestRouteSigned = null;
+      const signedPart = (value) => (value && typeof value === 'object' && value.statement && typeof value.statement === 'object'
+        && typeof value.sig === 'string' && value.sig.length <= 1100 ? { statement: value.statement, sig: value.sig } : null);
+      if (record.wantsGuest) {
+        record.guestNotice = signedPart(message.guestNotice);
+        record.guestRoute = signedPart(message.guestRoute);
+      }
+      /* Smart relay choice: a resident of another relay of the family moving
+         its home here directly, on its own signed statement. */
+      record.homeMoveRequest = record.wantsGuest ? null : signedPart(message.homeMove);
+      if (record.wantsGuest && message.roster && typeof message.roster === 'object' && !Array.isArray(message.roster)) {
+        try { if (JSON.stringify(message.roster).length <= ROSTER_MAX_CHARS) record.helloRoster = message.roster; } catch (_error) { /* not kept */ }
+      }
       /* Not kept. The relay has no use for a photograph — the presence table
          never carries one — and the copy it kept here was cut at 100,000
          characters and then handed to anybody who asked for the peer list:
@@ -11751,19 +12746,22 @@ wsServer.on('connection', (ws, req) => {
         record.identityVerified = true;
         /* A device the account's primary revoked stays out, escape hatch or
            not; with nothing proven, its id is what names it. */
-        const roster = loadRoster(record.fingerprint);
-        if (rosterRevokes(roster, record.deviceId, '')) {
+        const view = record.wantsGuest ? guestRosterView(record.fingerprint, record.publicKeyData, record.helloRoster, record.guestOf) : null;
+        const roster = view ? view.roster : loadRoster(record.fingerprint);
+        if (!view && rosterRevokes(roster, record.deviceId, '')) {
           shutOutRevokedDevice(record, roster);
           return;
         }
+        if (view && !admitGuest(record, view)) return;
       /* Mark the socket too: safeSendText reads this to decide whether the
          buffer limit is a hostile-socket kill or a slow-reader backoff. */
       ws.__poorijaVerifiedFingerprint = record.fingerprint || '';
         indexVerified(record);
-        noteProvenIdentity(record.fingerprint);
+        if (!record.guest && record.homeMoveRequest && !acceptDirectMove(record)) return;
+        if (!record.guest) noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         deliverHeldMail(record, ws);
-        safeSend(ws, { type: 'roster', roster: roster || null });
+        safeSend(ws, { type: 'roster', roster: roster || null, ...(record.guest ? { guest: true } : {}) });
         broadcastPeers();
         return;
       }
@@ -11822,21 +12820,59 @@ wsServer.on('connection', (ws, req) => {
             );
           } catch (_error) { record.deviceKeyProven = false; }
         }
-        const roster = loadRoster(record.fingerprint);
-        if (rosterRevokes(roster, record.deviceId, provenDeviceKey(record))) {
+        /* A guest is judged by the family's copy of its roster too, and told
+           "revoked" as a guest refusal; anyone else as before. */
+        const view = record.wantsGuest ? guestRosterView(record.fingerprint, record.publicKeyData, record.helloRoster, record.guestOf) : null;
+        const roster = view ? view.roster : loadRoster(record.fingerprint);
+        if (!view && rosterRevokes(roster, record.deviceId, provenDeviceKey(record))) {
           console.log(`[Presence] Revoked device shut out for ${record.fingerprint}`);
           shutOutRevokedDevice(record, roster);
           return;
         }
+        /* Without a roster of its own, this relay goes by the family's: a
+           device any of them revokes is out here too. A relay with its own
+           keeps to it — a rival roster planted elsewhere must not be able to
+           lock the account's real devices out of their home. */
+        if (!view && !roster) {
+          const family = guestRosterView(record.fingerprint, record.publicKeyData, null, '');
+          const revoking = family.chains.find((chain) => rosterRevokes(chain, record.deviceId, provenDeviceKey(record)));
+          if (revoking) {
+            console.log(`[Presence] Revoked device shut out for ${record.fingerprint}, by the family's roster`);
+            shutOutRevokedDevice(record, revoking);
+            return;
+          }
+        }
+        /* A guest is taken in or refused here, before anything is delivered;
+           taken in, it is never written down as living here. */
+        if (view && !admitGuest(record, view)) return;
+        /* Moved home elsewhere: a device of the account that still comes here
+           is told, with the signed statement, and follows. */
+        const movedStatement = !record.guest ? guestBook.movedStatement(record.fingerprint) : null;
+        if (movedStatement) safeSend(ws, { type: 'home-move', statement: movedStatement.statement, sig: movedStatement.sig });
+        /* Proven here again: home stops copying this device's mail to a
+           guest relay, and an older notice of it stops counting. */
+        if (!record.guest && guestBook.remoteFor(record.fingerprint).some((entry) => entry.deviceId === guestDeviceOf(record))) {
+          guestBook.dropRemote(record.fingerprint, guestDeviceOf(record));
+          guestBook.noteFloor(record.fingerprint, guestDeviceOf(record), Date.now());
+          forgetRemoteCopies(record.fingerprint);
+        }
+        /* A resident's roster without the identity key beside it (stored
+           before guest mode) gets it now, and goes to the family. */
+        if (!record.guest && roster && !loadRosterIdentity(record.fingerprint) && saveRosterIdentity(record.fingerprint, record.publicKeyData)) {
+          shareRosterCopy(record.fingerprint, roster, record.publicKeyData);
+        }
         indexVerified(record);
-        noteProvenIdentity(record.fingerprint);
+        /* A move here straight from another family relay (smart relay choice):
+           refused, the socket goes and nothing is delivered. */
+        if (!record.guest && record.homeMoveRequest && !acceptDirectMove(record)) return;
+        if (!record.guest) noteProvenIdentity(record.fingerprint);
         closeDuplicatePresenceRecords(record);
         console.log(`[Presence] Identity proven for ${record.fingerprint}`);
         deliverHeldMail(record, ws);
         /* Which devices the account has, as its primary last signed it — or
            that it has no roster yet, which is an answer too: the device that
            made the identity founds one on hearing it. */
-        safeSend(ws, { type: 'roster', roster: roster || null });
+        safeSend(ws, { type: 'roster', roster: roster || null, ...(record.guest ? { guest: true } : {}) });
         /* Proven now, so announced now: the table carries only proven
            identities (broadcastPeers). */
         broadcastPeers();
@@ -11847,6 +12883,45 @@ wsServer.on('connection', (ws, req) => {
         clearIdentityChallenge(record);
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
       }
+      return;
+    }
+
+    /* "Does this person live here, or stay here as a guest?" asked of this
+       relay by one of its own: the question a linked relay is asked over
+       transit, for one fingerprint the asker already holds. How two guests
+       of the same relay find each other. */
+    if (message.type === 'route-query') {
+      if (!record.identityVerified) return;
+      const now = Date.now();
+      if (!record.routeQueries || now - record.routeQueries.since > 60000) record.routeQueries = { since: now, count: 0 };
+      record.routeQueries.count += 1;
+      if (record.routeQueries.count > 120) return;
+      const asked = sanitizeFingerprint(String(message.toFingerprint || '').slice(0, 128));
+      const home = (residentSocketUp(asked) || identityLivesHere(asked)) && !guestBook.movedTo(asked);
+      const guestHere = !home && guestBook.isGuest(asked);
+      safeSend(ws, {
+        type: 'route', toFingerprint: asked, home, up: Boolean(findOpenPresenceByFingerprint(asked)),
+        ...(guestHere ? { guest: true, ...(guestNoticeFor(asked) ? { notice: guestNoticeFor(asked) } : {}) } : {}), tag: String(message.tag || '').slice(0, 96),
+      });
+      return;
+    }
+
+    /* A guest moving its home here, on its own signed statement. */
+    if (message.type === 'home-move') {
+      if (!record.identityVerified) return;
+      acceptHomeMoveHere(record, message);
+      return;
+    }
+
+    /* A guest going home says so first: its stay here ends, and whatever is
+       left for it follows it home. The socket stays a guest's — never a
+       resident's — until it closes. */
+    if (message.type === 'guest-end') {
+      if (!record.guest || !record.identityVerified) return;
+      record.guestNoticeSigned = null;
+      record.guestRouteSigned = null;
+      endGuestStay(record.fingerprint, guestDeviceOf(record));
+      safeSend(ws, { type: 'guest-ended' });
       return;
     }
 
@@ -11934,18 +13009,57 @@ wsServer.on('connection', (ws, req) => {
         safeSend(ws, { type: 'error', reason: 'identity-unverified' });
         return;
       }
-      const current = loadRoster(record.fingerprint);
+      const view = record.guest ? guestRosterView(record.fingerprint, record.publicKeyData, null, record.guestOf) : null;
+      const current = view ? view.roster : loadRoster(record.fingerprint);
       if (message.type === 'roster-get') {
-        safeSend(ws, { type: 'roster', roster: current });
+        safeSend(ws, { type: 'roster', roster: current, ...(record.guest ? { guest: true } : {}) });
         return;
       }
       const next = message.roster;
+      /* A guest writes only a successor of a roster this relay can stand
+         behind, and it is not kept here as this relay's own: it goes to the
+         family as a copy — home takes it if it follows from home's roster —
+         and into this relay's own copy slot. Founding a roster is its home's
+         business. */
+      if (view) {
+        if (!view.chains.length) {
+          safeSend(ws, { type: 'roster-refused', reason: 'no-anchor', roster: null });
+          return;
+        }
+        const refusal = familyWriteRefusal(next, view, record.publicKeyData, record.fingerprint);
+        if (refusal) {
+          safeSend(ws, { type: 'roster-refused', reason: refusal, roster: current });
+          return;
+        }
+        try { rosterCopyStore.keep(guestRules.sealRosterCopy(record.fingerprint, next, record.publicKeyData), relayIdentity.id); } catch (_error) { /* not kept */ }
+        shareRosterCopy(record.fingerprint, next, record.publicKeyData);
+        safeSend(ws, { type: 'roster-stored', seq: next.seq });
+        for (const candidate of verifiedByFingerprint.get(record.fingerprint) || []) {
+          if (candidate === record || candidate.ws?.readyState !== WebSocket.OPEN) continue;
+          safeSend(candidate.ws, { type: 'roster', roster: next, ...(candidate.guest ? { guest: true } : {}) });
+        }
+        return;
+      }
+      /* A first roster for someone the family already holds one for must
+         follow from it: otherwise any relay but the account's home would
+         take a rival founding from a revoked device that connects there. */
+      if (!current) {
+        const refusal = familyWriteRefusal(next, guestRosterView(record.fingerprint, record.publicKeyData, null, ''), record.publicKeyData, record.fingerprint);
+        if (refusal) {
+          safeSend(ws, { type: 'roster-refused', reason: refusal, roster: null });
+          return;
+        }
+      }
       const refusal = rosterRefusal(next, current, record.publicKeyData, record.fingerprint);
       if (refusal) {
         safeSend(ws, { type: 'roster-refused', reason: refusal, roster: current });
         return;
       }
       saveRoster(record.fingerprint, next);
+      saveRosterIdentity(record.fingerprint, record.publicKeyData);
+      /* The family keeps a sealed copy: a guest relay elsewhere, and home
+         after a guest stay, judge this account's devices by it. */
+      shareRosterCopy(record.fingerprint, next, record.publicKeyData);
       console.log(`[Roster] ${record.fingerprint.slice(0, 12)} now at ${next.seq}: ${next.members.length} device(s), ${next.revoked.length} gone`);
       safeSend(ws, { type: 'roster-stored', seq: next.seq });
       enforceRoster(record.fingerprint, next);
@@ -12286,6 +13400,8 @@ function beginShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[Shutdown] ${signal} received — draining ${presence.size} peer(s).`);
+  /* A guest admitted in the last two seconds is in the book's pending write. */
+  try { guestBook.save(); } catch (_error) { /* nothing to lose but the book */ }
 
   server.close();
   presenceServer.close();

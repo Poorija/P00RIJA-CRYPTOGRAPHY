@@ -58,15 +58,25 @@ const fileKind = (file) => {
 
 /* A time to apply, signed so it may travel along the family — only for a
    version whose package this panel holds (built or kept here): the version
-   is the operator's word, never a relay's, and the key signs nothing else. */
-export function policySignerFor({ packageExists, operatorKey }) {
+   is the operator's word, never a relay's, and the key signs nothing else.
+   A canary is picked by server name and signed in as that server's verified
+   relay id (scripts/lib/relay-updates.js waits the others for it), with the
+   minutes it must stay healthy. */
+export function policySignerFor({ packageExists, operatorKey, relayIdOf = () => '' }) {
   return (policy, version) => {
     const mode = ['watch', 'schedule', 'now'].includes(policy?.mode) ? policy.mode : 'watch';
     const at = mode === 'schedule' && Number.isFinite(Date.parse(String(policy?.at || ''))) ? new Date(Date.parse(policy.at)).toISOString() : null;
     if (mode === 'schedule' && !at) return { mode: 'watch', at: null };
+    let staged = {};
+    if (policy?.canary) {
+      const canary = String(relayIdOf(String(policy.canary)) || '');
+      if (!/^[0-9a-f]{64}$/.test(canary)) throw new Error(`${policy.canary} has not shown a verified relay identity, so it cannot be the canary`);
+      const hold = Math.round(Number(policy.holdMin));
+      staged = { canary, holdMin: Number.isFinite(hold) && hold > 0 ? Math.min(1440, Math.max(5, hold)) : 30 };
+    }
     const key = operatorKey();
-    if (!key || !VERSION.test(String(version || '')) || !packageExists(String(version))) return { mode, at };
-    return { mode, at, sig: signPolicy({ version, mode, at }, key.privateKey) };
+    if (!key || !VERSION.test(String(version || '')) || !packageExists(String(version))) return { mode, at, ...staged };
+    return { mode, at, ...staged, sig: signPolicy({ version, mode, at, ...staged }, key.privateKey) };
   };
 }
 
@@ -365,7 +375,10 @@ bash scripts/apply-update.sh "$pkg"
 `;
   }
 
-  const signedPolicy = policySignerFor({ packageExists: (version) => fs.existsSync(packageFile(version)), operatorKey });
+  const signedPolicy = policySignerFor({
+    packageExists: (version) => fs.existsSync(packageFile(version)), operatorKey,
+    relayIdOf: (name) => servers().find((server) => server.name === name)?.relayId || '',
+  });
 
   async function send({ version, servers: names, policy }, who, line) {
     if (!VERSION.test(String(version || ''))) throw new Error('no such package');
@@ -375,6 +388,10 @@ bash scripts/apply-update.sh "$pkg"
     const name = path.basename(file);
     const chosen = servers().filter((server) => (names || []).includes(server.name));
     if (!chosen.length) throw new Error('no server chosen');
+    /* Signed once, before anything is copied: a canary that cannot be named
+       stops the send here. The canary goes first. */
+    const signed = signedPolicy(policy, version);
+    if (policy?.canary) chosen.sort((x, y) => Number(y.name === policy.canary) - Number(x.name === policy.canary));
     let failed = 0;
     for (const server of chosen) {
       line(`▶ ${server.name}`);
@@ -387,8 +404,11 @@ bash scripts/apply-update.sh "$pkg"
       noteSent(version, server.name);
       const status = await serverRequest(server, '/Monitor_Server/updates').catch(() => ({ status: 0 }));
       if (status?.status === 200) {
-        const staged = await serverRequest(server, '/Monitor_Server/updates/stage', { method: 'POST', body: { file: name, policy: signedPolicy(policy, version) }, timeout: 10 * 60 * 1000 });
-        if (staged?.status === 200 && staged.json?.ok) line(`  ✓ kept by its relay; applied ${policy?.mode === 'schedule' ? `at ${policy.at}` : policy?.mode === 'now' ? 'now' : 'when the fewest people are on'}`);
+        const staged = await serverRequest(server, '/Monitor_Server/updates/stage', { method: 'POST', body: { file: name, policy: signed }, timeout: 10 * 60 * 1000 });
+        if (staged?.status === 200 && staged.json?.ok) {
+          const canaryNote = !policy?.canary ? '' : policy.canary === server.name ? ' (the canary)' : `, once the canary ${policy.canary} has been healthy for ${signed.holdMin} min`;
+          line(`  ✓ kept by its relay; applied ${policy?.mode === 'schedule' ? `at ${policy.at}` : policy?.mode === 'now' ? 'now' : 'when the fewest people are on'}${canaryNote}`);
+        }
         else { line(`  ✗ its relay refused it: ${staged?.json?.reason || staged?.status}`); failed += 1; }
         continue;
       }
@@ -448,6 +468,7 @@ bash scripts/apply-update.sh "$pkg"
       return sendJson(res, 200, { ok: true, job });
     }
     if (url.pathname === '/api/updates/send') {
+      if (body.policy?.canary && !(body.servers || []).includes(body.policy.canary)) return sendJson(res, 400, { ok: false, reason: 'canary-not-chosen' });
       const job = startTask(`send update ${String(body.version || '')}`, (line) => send(body, who, line));
       return sendJson(res, 200, { ok: true, job });
     }
@@ -457,7 +478,12 @@ bash scripts/apply-update.sh "$pkg"
       const version = String(body.version || '');
       const sentTo = sentRecord()[version] || [];
       const allSent = (body.servers || []).length > 0 && (body.servers || []).every((name) => sentTo.includes(name));
-      const policy = allSent ? signedPolicy(body.policy, version) : { ...signedPolicy(body.policy, ''), sig: undefined };
+      let policy;
+      try {
+        policy = allSent ? signedPolicy(body.policy, version) : { ...signedPolicy(body.policy, ''), sig: undefined };
+      } catch (error) {
+        return sendJson(res, 400, { ok: false, reason: error.message });
+      }
       const results = await relayCall(body.servers, '/Monitor_Server/updates/policy', policy, who, `update time ${body.policy?.mode || ''}${allSent ? ' (signed)' : ''}`);
       return sendJson(res, 200, { ok: true, results });
     }

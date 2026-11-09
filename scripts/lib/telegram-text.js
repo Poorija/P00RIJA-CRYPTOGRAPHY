@@ -40,6 +40,10 @@ const fa = {
     peer: (p) => `ارتباط با رلهٔ ${p.who} ${p.minutes} دقیقه است که قطع است. پیام‌ها و تماس‌های بین دو رله برقرار نمی‌شوند.`,
   },
   start: { title: 'رله راه‌اندازی شد', body: 'پایش دیسک، حافظه، TURN و لینک رله‌ها روشن است.' },
+  guests: {
+    title: 'میزبانی مهمان شروع شد',
+    started: (relay, home) => `رلهٔ ${relay} از رلهٔ ${home} مهمان می‌پذیرد: کاربرانی که رلهٔ خانه‌شان در دسترس نیست، موقتاً اینجا هستند.`,
+  },
   test: { title: 'پیام آزمایشی هشدار', body: 'از پنل مدیریت فرستاده شد؛ راه هشدارهای این سرور تا تلگرام برقرار است.' },
   security: { title: 'کار حساس با امضا انجام شد', body: (route, name) => `«${route}» با امضای «${name}».` },
   update: {
@@ -48,7 +52,10 @@ const fa = {
     applying: (v) => `به‌روزرسانی به ${v} شروع شد؛ سرور چند دقیقه در دسترس نیست.`,
     done: (v) => `به‌روزرسانی به ${v} انجام شد.`,
     failed: (v, why) => `به‌روزرسانی به ${v} انجام نشد (${why}). سرور نسخهٔ قبلی را نگه داشته و دوباره خودبه‌خود تلاش نمی‌کند.`,
-    titles: { staged: 'نسخهٔ تازه رسید', notifying: 'به‌روزرسانی به‌زودی', applying: 'به‌روزرسانی در حال انجام', done: 'به‌روزرسانی انجام شد', failed: 'به‌روزرسانی ناموفق' },
+    reverted: (v, why) => `نسخهٔ ${v} سالم بالا نیامد${why ? ` (${why})` : ''}؛ نسخهٔ قبلی خودکار برگردانده شد و سرور با آن کار می‌کند. این نسخه دیگر از سرورهای دیگر گرفته نمی‌شود؛ تصمیم با اپراتور است.`,
+    revertFailed: (v, why) => `به‌روزرسانی به ${v} انجام نشد و برگرداندن نسخهٔ قبلی هم ناموفق بود${why ? ` (${why})` : ''}. سرور به رسیدگی دستی نیاز دارد (scripts/server-backup.sh --list).`,
+    held: (v) => `سرور قناری نسخهٔ ${v} را برگرداند؛ این سرور آن را اعمال نمی‌کند تا اپراتور تصمیم بگیرد.`,
+    titles: { staged: 'نسخهٔ تازه رسید', notifying: 'به‌روزرسانی به‌زودی', applying: 'به‌روزرسانی در حال انجام', done: 'به‌روزرسانی انجام شد', failed: 'به‌روزرسانی ناموفق', reverted: 'به‌روزرسانی برگردانده شد', held: 'به‌روزرسانی متوقف شد' },
   },
   card: {
     titleLine: '📝', stateOfMoment: 'وضعیت همین لحظه', relay: 'رله', cluster: 'خوشهٔ', version: 'نسخهٔ',
@@ -102,6 +109,10 @@ const en = {
     peer: (p) => `The link to relay ${p.who} has been down for ${p.minutes} minutes. Messages and calls between the two relays do not get through.`,
   },
   start: { title: 'The relay started', body: 'Watching the disk, memory, TURN and the links to the other relays.' },
+  guests: {
+    title: 'Hosting guests',
+    started: (relay, home) => `Relay ${relay} started hosting guests from relay ${home}: people whose home relay is unreachable are here for now.`,
+  },
   test: { title: 'Alert test message', body: 'Sent from the panel; this server’s alerts reach Telegram.' },
   security: { title: 'A sensitive action was signed', body: (route, name) => `“${route}”, signed by “${name}”.` },
   update: {
@@ -110,7 +121,10 @@ const en = {
     applying: (v) => `The update to ${v} has started; the server is away for a few minutes.`,
     done: (v) => `The update to ${v} is done.`,
     failed: (v, why) => `The update to ${v} failed (${why}). The server keeps the previous version and does not retry by itself.`,
-    titles: { staged: 'A new version arrived', notifying: 'An update is about to start', applying: 'Updating', done: 'Update done', failed: 'Update failed' },
+    reverted: (v, why) => `Version ${v} did not come up healthy${why ? ` (${why})` : ''}; the previous version was put back by itself and the server runs it. This version is no longer taken from other servers; the operator decides.`,
+    revertFailed: (v, why) => `The update to ${v} failed, and putting the previous version back failed too${why ? ` (${why})` : ''}. The server needs a hand (scripts/server-backup.sh --list).`,
+    held: (v) => `The canary put version ${v} back; this server does not apply it until the operator decides.`,
+    titles: { staged: 'A new version arrived', notifying: 'An update is about to start', applying: 'Updating', done: 'Update done', failed: 'Update failed', reverted: 'Update put back', held: 'Update held' },
   },
   card: {
     titleLine: '📝', stateOfMoment: 'State at this moment', relay: 'relay', cluster: 'Cluster', version: 'Version',

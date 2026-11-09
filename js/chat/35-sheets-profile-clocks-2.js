@@ -447,7 +447,7 @@ document.getElementById(id)?.addEventListener('input', syncProfileDraftFromInput
  * each intermediate value used to fire a live probe of a half-typed URL —
  * dozens of dead DNS lookups per edit and visible stutter while typing. */
 document.getElementById('chatServerUrl')?.addEventListener('change', syncProfileDraftFromInputs);
-['chatAutoConnect', 'chatAllowVideo', 'chatAutoDiscovery', 'chatShowSuspensionCountdown', 'chatPublicStun', 'chatCrossRelayComm'].forEach((id) => {
+['chatAutoConnect', 'chatAllowVideo', 'chatAutoDiscovery', 'chatShowSuspensionCountdown', 'chatPublicStun', 'chatCrossRelayComm', 'chatUseGuestRelays'].forEach((id) => {
 document.getElementById(id)?.addEventListener('change', handleConnectionToggleChange);
 });
 /* The master switch is handled separately from the ordinary toggles: turning

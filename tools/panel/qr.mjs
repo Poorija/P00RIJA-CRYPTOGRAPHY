@@ -286,3 +286,15 @@ export function qrSvg(text, { scale = 6, quiet = 4 } = {}) {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${width}" width="${width}" height="${width}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${path}" fill="#000"/></svg>`;
 }
+
+/* The code the app reads to set its server (js/local-link.js, "P0R1|"): the
+   address, and after a # the operator key's fingerprint and the relay's id,
+   so a scanned server is checked from its very first connection. An older
+   app takes only the address out of it. */
+export function relayConnectCode({ origin, operatorId = '', relayId = '' }) {
+  const base = String(origin || '').trim().replace(/\/+$/, '');
+  const parts = [];
+  if (/^[a-f0-9]{64}$/.test(String(operatorId))) parts.push(`op=${operatorId}`);
+  if (/^[a-f0-9]{64}$/.test(String(relayId))) parts.push(`relay=${relayId}`);
+  return `P0R1|${base}${parts.length ? `/#${parts.join('&')}` : ''}`;
+}

@@ -14,7 +14,11 @@
  * members against the manifest before it touches anything, takes the
  * snapshot first, loads the images, puts the new tree in place (removing
  * what the new one no longer has) and leaves .env and data/ alone, then runs
- * the NEW tree's sync-to-server.sh --prebuilt.
+ * the NEW tree's sync-to-server.sh --prebuilt. Then it watches the relay
+ * (/chat-health through nginx: answering, serving the new version, not
+ * restarting, linked to its family again if it was before) and, when the
+ * update fails after the tree was touched, puts the old tree back and runs
+ * the OLD tree's sync-to-server.sh: exit 3, or 4 when that fails too.
  *
  *   node tests/e2e/applyupdate.mjs
  */
@@ -49,8 +53,16 @@ function install(name, { operatorKey = OPERATOR } = {}) {
   write(path.join(dir, 'js/old-only.js'), 'old');
   write(path.join(dir, 'js/app.js'), 'old app');
   write(path.join(dir, 'scripts/apply-update.sh'), fs.readFileSync(path.join(ROOT, 'scripts/apply-update.sh'), 'utf8'), 0o755);
-  write(path.join(dir, 'scripts/server-backup.sh'), `#!/bin/bash\necho "snapshot $1: $(cat js/app.js)" >> "${dir}/calls.log"\n`, 0o755);
+  write(path.join(dir, 'scripts/server-backup.sh'), `#!/bin/bash\necho "snapshot $1: $(cat js/app.js) of \${POORIJA_SOURCE_DIR:-unset}" >> "${dir}/calls.log"\n`, 0o755);
+  /* The old tree's own way of bringing the stack up, for the way back: the
+     relay it starts serves the old version. */
+  write(path.join(dir, 'scripts/sync-to-server.sh'), `#!/bin/bash\necho "sync-old $* app=$(cat js/app.js)" >> "$CALLS"\nprintf '%s' "$OLD_HEALTH" > "$HEALTH"\nexit \${OLD_SYNC_EXIT:-0}\n`, 0o755);
+  /* What the running relay answers before the update. */
+  write(path.join(dir, 'health.json'), health('2.98.87', 2));
   return dir;
+}
+function health(version, up = 1) {
+  return JSON.stringify({ ok: true, service: 'poorija-chat-signal', version, transit: { enabled: true, allowed: 3, up, hybrid: up } });
 }
 /* A package of a newer tree: its sync-to-server.sh says it ran. */
 function makePackage(name, { version = '2.98.88', tamper = false, sourceVersion = version } = {}) {
@@ -59,7 +71,7 @@ function makePackage(name, { version = '2.98.88', tamper = false, sourceVersion 
   write(path.join(tree, 'js/app.js'), 'new app');
   write(path.join(tree, 'js/new-only.js'), 'new');
   write(path.join(tree, 'index.html'), '<html>new</html>');
-  write(path.join(tree, 'scripts/sync-to-server.sh'), `#!/bin/bash\necho "sync $* in $(pwd) app=$(cat js/app.js)" >> "$CALLS"\n`, 0o755);
+  write(path.join(tree, 'scripts/sync-to-server.sh'), `#!/bin/bash\necho "sync $* in $(pwd) app=$(cat js/app.js)" >> "$CALLS"\nprintf '%s' "$NEW_HEALTH" > "$HEALTH"\nexit \${NEW_SYNC_EXIT:-0}\n`, 0o755);
   write(path.join(tree, 'scripts/apply-update.sh'), '#!/bin/bash\n# the new one\n', 0o755);
   const src = path.join(work, `${name}-source.tar.gz`);
   spawnSync('tar', ['czf', src, '-C', tree, '.']);
@@ -81,10 +93,29 @@ function makePackage(name, { version = '2.98.88', tamper = false, sourceVersion 
   return file;
 }
 const fakeDocker = path.join(work, 'bin');
-write(path.join(fakeDocker, 'docker'), `#!/bin/sh\necho "docker $*" >> "$CALLS"\nexit 0\n`, 0o755);
-const apply = (dir, pkg) => spawnSync('bash', [path.join(dir, 'scripts/apply-update.sh'), pkg], {
-  cwd: dir, encoding: 'utf8', timeout: 60000,
-  env: { ...process.env, PATH: `${fakeDocker}:${process.env.PATH}`, CALLS: path.join(dir, 'calls.log') },
+/* docker: `inspect` answers the relay container's restart count and start
+   time, one line of $MARKS per call (the last one stays); `load` may fail. */
+write(path.join(fakeDocker, 'docker'), `#!/bin/bash
+case "$1" in
+  inspect)
+    if [ -s "$MARKS" ]; then head -1 "$MARKS"; [ "$(wc -l < "$MARKS")" -gt 1 ] && sed -i.bak 1d "$MARKS"; else echo "0 2026-11-08T00:00:00Z"; fi
+    exit 0 ;;
+  load) echo "docker $*" >> "$CALLS"; exit \${DOCKER_LOAD_EXIT:-0} ;;
+esac
+echo "docker $*" >> "$CALLS"
+exit 0
+`, 0o755);
+/* curl: the relay's /chat-health through nginx is whatever $HEALTH holds;
+   no file, no answer. */
+write(path.join(fakeDocker, 'curl'), `#!/bin/bash\n[ -s "$HEALTH" ] && cat "$HEALTH" && exit 0\nexit 7\n`, 0o755);
+const apply = (dir, pkg, env = {}) => spawnSync('bash', [path.join(dir, 'scripts/apply-update.sh'), pkg], {
+  cwd: dir, encoding: 'utf8', timeout: 120000,
+  env: {
+    ...process.env, PATH: `${fakeDocker}:${process.env.PATH}`, CALLS: path.join(dir, 'calls.log'),
+    HEALTH: path.join(dir, 'health.json'), MARKS: path.join(dir, 'marks.txt'),
+    NEW_HEALTH: health('2.98.88', 1), OLD_HEALTH: health('2.98.87', 2),
+    UPDATE_HEALTH_WATCH_S: '2', UPDATE_HEALTH_POLL_S: '1', ...env,
+  },
 });
 const calls = (dir) => (fs.existsSync(path.join(dir, 'calls.log')) ? fs.readFileSync(path.join(dir, 'calls.log'), 'utf8') : '');
 
@@ -94,13 +125,56 @@ try {
   const run = apply(a, makePackage('good'));
   const log = calls(a);
   check('a sound package is applied', run.status === 0, (run.stdout + run.stderr).slice(-400));
-  check('the snapshot is taken first, of the old tree', /^snapshot .*: old app$/m.test(log) && log.indexOf('snapshot') < log.indexOf('docker load'), log.replace(/\n/g, ' | '));
+  check('the snapshot is taken first, of the old tree', /^snapshot .*: old app of /m.test(log) && log.indexOf('snapshot') < log.indexOf('docker load'), log.replace(/\n/g, ' | '));
   check('the images are loaded', /docker load -i \S+images\.tar\.gz/.test(log), log.replace(/\n/g, ' | '));
   check('the new tree is in place, and what it no longer has is gone', fs.readFileSync(path.join(a, 'js/app.js'), 'utf8') === 'new app'
     && fs.existsSync(path.join(a, 'js/new-only.js')) && !fs.existsSync(path.join(a, 'js/old-only.js')) && fs.readFileSync(path.join(a, 'index.html'), 'utf8').includes('new'));
   check('.env and data/ are left as they were', fs.readFileSync(path.join(a, '.env'), 'utf8').startsWith('MONITOR_PASSWORD=kept\n') && fs.existsSync(path.join(a, 'data/chat-signal/relay-identity.json')));
   check('then the new tree’s own sync-to-server.sh runs, with the images given', new RegExp(`^sync --skip-bump --prebuilt in ${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} app=new app$`, 'm').test(log), log.replace(/\n/g, ' | '));
   check('nothing of the work is left in the install', !fs.readdirSync(a).some((entry) => entry.startsWith('.update')));
+
+  check('the snapshot is of this install, wherever it is', new RegExp(`^snapshot .* of ${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm').test(log), log.replace(/\n/g, ' | '));
+  check('a healthy update is not undone', !/sync-old/.test(log) && /watch/i.test(run.stdout), run.stdout.slice(-300));
+
+  /* The way back. */
+  const oldTree = (dir) => fs.readFileSync(path.join(dir, 'js/app.js'), 'utf8') === 'old app'
+    && fs.existsSync(path.join(dir, 'js/old-only.js')) && !fs.existsSync(path.join(dir, 'js/new-only.js'))
+    && !fs.existsSync(path.join(dir, 'index.html')) && fs.readFileSync(path.join(dir, 'package.json'), 'utf8').includes('2.98.87');
+  const kept = (dir) => fs.readFileSync(path.join(dir, '.env'), 'utf8').startsWith('MONITOR_PASSWORD=kept\n') && fs.existsSync(path.join(dir, 'data/chat-signal/relay-identity.json'));
+  const r1 = install('r1');
+  const syncFails = apply(r1, makePackage('r1'), { NEW_SYNC_EXIT: '1' });
+  check('a new tree that will not come up is undone: exit 3', syncFails.status === 3, `${syncFails.status} ${(syncFails.stdout + syncFails.stderr).slice(-300)}`);
+  check('the old tree is back, all of it (what the new one added gone), .env and data/ untouched', oldTree(r1) && kept(r1));
+  check('and the OLD tree’s sync-to-server.sh brought the stack back up, after the new one', /^sync .*\n(.*\n)*sync-old --skip-bump --prebuilt app=old app$/m.test(calls(r1)), calls(r1).replace(/\n/g, ' | '));
+  check('nothing of the work is left after the way back either', !fs.readdirSync(r1).some((entry) => entry.startsWith('.update')));
+
+  const r2 = install('r2');
+  const wrongVersion = apply(r2, makePackage('r2'), { NEW_HEALTH: health('2.98.87', 1) });
+  check('a relay still serving the old version after the update is not healthy: undone', wrongVersion.status === 3 && oldTree(r2) && /version/i.test(wrongVersion.stdout + wrongVersion.stderr), `${wrongVersion.status} ${(wrongVersion.stdout + wrongVersion.stderr).slice(-300)}`);
+  const r3 = install('r3');
+  const silent = apply(r3, makePackage('r3'), { NEW_HEALTH: '' });
+  check('nor one that does not answer at all', silent.status === 3 && oldTree(r3), `${silent.status} ${(silent.stdout + silent.stderr).slice(-300)}`);
+  const r4 = install('r4');
+  fs.writeFileSync(path.join(r4, 'marks.txt'), '0 2026-11-08T10:00:00Z\n1 2026-11-08T10:00:40Z\n');
+  const restarted = apply(r4, makePackage('r4'));
+  check('nor one whose container restarts during the watch', restarted.status === 3 && oldTree(r4) && /restart/i.test(restarted.stdout + restarted.stderr), `${restarted.status} ${(restarted.stdout + restarted.stderr).slice(-300)}`);
+  const r5 = install('r5');
+  const unlinked = apply(r5, makePackage('r5'), { NEW_HEALTH: health('2.98.88', 0) });
+  check('nor one that was linked to its family before and is not after', unlinked.status === 3 && oldTree(r5) && /link/i.test(unlinked.stdout + unlinked.stderr), `${unlinked.status} ${(unlinked.stdout + unlinked.stderr).slice(-300)}`);
+  const r6 = install('r6');
+  fs.writeFileSync(path.join(r6, 'health.json'), health('2.98.87', 0));
+  const neverLinked = apply(r6, makePackage('r6'), { NEW_HEALTH: health('2.98.88', 0) });
+  check('but a relay with no family link before needs none after', neverLinked.status === 0, `${neverLinked.status} ${(neverLinked.stdout + neverLinked.stderr).slice(-300)}`);
+
+  const r7 = install('r7');
+  const bothFail = apply(r7, makePackage('r7'), { NEW_SYNC_EXIT: '1', OLD_SYNC_EXIT: '1' });
+  check('when the way back fails too: exit 4, and it says so', bothFail.status === 4 && /back/i.test(bothFail.stderr), `${bothFail.status} ${(bothFail.stdout + bothFail.stderr).slice(-300)}`);
+  const r8 = install('r8');
+  const noRevert = apply(r8, makePackage('r8'), { NEW_SYNC_EXIT: '1', UPDATE_AUTO_REVERT: '0' });
+  check('UPDATE_AUTO_REVERT=0: a failure is left as it is for the operator (exit 1, no way back run)', noRevert.status === 1 && !/sync-old/.test(calls(r8)), `${noRevert.status} ${calls(r8).replace(/\n/g, ' | ')}`);
+  const r9 = install('r9');
+  const noLoad = apply(r9, makePackage('r9'), { DOCKER_LOAD_EXIT: '1' });
+  check('images that will not load: exit 1, the tree never touched, nothing to undo', noLoad.status === 1 && fs.readFileSync(path.join(r9, 'js/app.js'), 'utf8') === 'old app' && !/sync/.test(calls(r9)), `${noLoad.status} ${calls(r9).replace(/\n/g, ' | ')}`);
 
   const b = install('b');
   const bad = apply(b, makePackage('tampered', { tamper: true }));

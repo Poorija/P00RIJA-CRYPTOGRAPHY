@@ -75,6 +75,17 @@ try {
     `${drawn.length} lines of ${[...drawn[0]].length}`);
   const svg = qr.qrSvg(texts[2]);
   check('the SVG drawing is an SVG with crisp edges', svg.startsWith('<svg') && svg.includes('crispEdges'));
+  /* The connect code: the app's own P0R1| form, with the operator key's
+     fingerprint and the relay's id after a #, which an older app ignores. */
+  const OP = 'ab'.repeat(32);
+  const RELAY = 'cd'.repeat(32);
+  const full = qr.relayConnectCode({ origin: 'https://a.example:8585/', operatorId: OP, relayId: RELAY });
+  check('a connect code names the address, the operator and the relay', full === `P0R1|https://a.example:8585/#op=${OP}&relay=${RELAY}`, full);
+  check('and reads back from its QR', decode(qr.encodeQr(full).modules) === full);
+  check('an older app still reads the address out of it', new URL(full.slice(5)).origin === 'https://a.example:8585');
+  check('without ids it is the plain address code', qr.relayConnectCode({ origin: 'https://a.example:8585' }) === 'P0R1|https://a.example:8585'
+    && qr.relayConnectCode({ origin: 'https://a.example:8585', operatorId: 'nonsense', relayId: '' }) === 'P0R1|https://a.example:8585');
+  check('only the relay is named when the operator is not known', qr.relayConnectCode({ origin: 'https://a.example:8585', relayId: RELAY }) === `P0R1|https://a.example:8585/#relay=${RELAY}`);
   let threw = false;
   try { qr.encodeQr('y'.repeat(2000)); } catch (_error) { threw = true; }
   check('a text too long for the versions it draws is refused, not drawn wrong', threw);
